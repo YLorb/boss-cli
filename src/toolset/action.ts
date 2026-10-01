@@ -20,6 +20,7 @@ import {
 } from '../common/c_resume_capture.js';
 import { ensureAppDataLayout, RESUME_SCREENSHOTS_DIR } from '../config.js';
 import { runGetCommunicationHistory } from './chat.js';
+import type { ConversationTarget } from './target_chat.js';
 
 type IncomingCardBtn = 'agree' | 'refuse';
 
@@ -430,22 +431,40 @@ async function updateCandidateRemark(page: Page, remarkText: string): Promise<st
  * 对方「附件简历」确认卡片上点击「同意」。
  * 对应按钮 disabled 时视为已处理。
  */
-async function runIncomingResumeCardAction(page: Page, which: IncomingCardBtn): Promise<string> {
+async function runIncomingResumeCardAction(page: Page, which: IncomingCardBtn, target?: ConversationTarget): Promise<string> {
   await ensureInCandidateChat(page, '附件简历处理');
   await sleepRandom(200, 550);
 
-  const result = (await page.evaluate((w: 'agree' | 'refuse') => {
-    function norm(v: string | null | undefined) {
+  const resumeCardsBefore = which === 'agree'
+    ? (await page.evaluate(`(() => Array.from(document.querySelectorAll('.chat-message-list .message-item .item-friend'))
+      .filter((el) => el.querySelector('.resume-icon') &&
+        el.querySelector('.message-card-top-title')?.textContent?.trim()).length)()`)) as number
+    : 0;
+
+  const result = (await page.evaluate(`(() => {
+    const w = ${JSON.stringify(which)};
+    const expected = ${JSON.stringify(target ?? null)};
+    function norm(v) {
       return (v ?? "").replace(/\\s+/g, " ").trim();
     }
-    function isDisabledBtn(el: Element) {
+    if (expected) {
+      const rows = Array.from(document.querySelectorAll('.geek-item.selected'));
+      const row = rows[0];
+      const selectedName = norm(row?.querySelector('.geek-name')?.textContent);
+      const detailName = norm(document.querySelector('.base-info-single-container .name-box')?.textContent);
+      if (rows.length !== 1 || row?.getAttribute('data-id') !== expected.dataId ||
+          selectedName !== expected.name || detailName !== expected.name) {
+        throw new Error('同意简历前会话身份校验失败：' + selectedName + ' / ' + (row?.getAttribute('data-id') ?? '空'));
+      }
+    }
+    function isDisabledBtn(el) {
       const cls = el.className ?? "";
       if (/disabled|forbid|ban/i.test(cls)) return true;
       if (el.getAttribute("disabled") !== null) return true;
       const st = window.getComputedStyle(el);
       return st.pointerEvents === "none" || Number(st.opacity) < 0.35;
     }
-    function matchesLabel(t: string, mode: string) {
+    function matchesLabel(t, mode) {
       if (mode === "agree") {
         return t === "同意" || t.indexOf("同意") === 0;
       }
@@ -465,13 +484,13 @@ async function runIncomingResumeCardAction(page: Page, which: IncomingCardBtn): 
         if (isDisabledBtn(btn)) {
           return { kind: "already_handled", which: w };
         }
-        (btn as HTMLElement).scrollIntoView({ block: "center", inline: "nearest" });
-        (btn as HTMLElement).click();
+        btn.scrollIntoView({ block: "center", inline: "nearest" });
+        btn.click();
         return { kind: "clicked", which: w };
       }
     }
     return { kind: "not_found", which: w };
-  }, which)) as
+  })()`)) as
     | { kind: 'clicked'; which: IncomingCardBtn }
     | { kind: 'already_handled'; which: IncomingCardBtn }
     | { kind: 'not_found'; which: IncomingCardBtn };
@@ -480,11 +499,17 @@ async function runIncomingResumeCardAction(page: Page, which: IncomingCardBtn): 
     throw new Error('未找到待处理的「对方发送附件简历」确认卡片（标题需含「附件简历」）。');
   }
   if (result.kind === 'already_handled') {
-    return result.which === 'agree'
-      ? '对方发来的附件简历请求已处理（同意按钮已禁用）。'
-      : '对方发来的附件简历请求已处理（拒绝按钮已禁用）。';
+    throw new Error('附件简历请求已经处理（按钮已禁用），本次未执行同意或拒绝。');
   }
   await sleepRandom(350, 900);
+  if (which === 'agree') {
+    await page.waitForFunction(`(() => {
+      const before = ${resumeCardsBefore};
+      const rows = Array.from(document.querySelectorAll('.chat-message-list .message-item .item-friend'));
+      return rows.filter((el) => el.querySelector('.resume-icon') &&
+        el.querySelector('.message-card-top-title')?.textContent?.trim()).length > before;
+    })()`, { timeout: 30_000 });
+  }
   return result.which === 'agree'
     ? '已点击「同意」，接受对方发送的附件简历。'
     : '已点击「拒绝」，拒绝接收对方附件简历。';
@@ -559,7 +584,7 @@ export type ChatPageAction =
 
 export async function runChatActionOnCurrentConversation(
   page: Page,
-  options: { action: ChatPageAction; remark?: string },
+  options: { action: ChatPageAction; remark?: string; target?: ConversationTarget },
 ): Promise<string> {
   const action = options.action;
   switch (action) {
@@ -577,7 +602,7 @@ export async function runChatActionOnCurrentConversation(
       return `在线简历操作成功，截图文件：${resumeShotPath}`;
     }
     case 'agree-resume':
-      return runIncomingResumeCardAction(page, 'agree');
+      return runIncomingResumeCardAction(page, 'agree', options.target);
     case 'request-attachment-resume':
       return runRequestAttachmentResume(page);
     case 'exchange-wechat':

@@ -15,6 +15,9 @@ import {
   implListPositionsWithOptions,
   implNormalSearch,
   implOpenChat,
+  implOpenTargetChat,
+  implAcceptTargetResume,
+  implDownloadTargetResume,
   implRecommend,
   implPreview,
   implRecommendGreet,
@@ -143,20 +146,26 @@ function printHelp(): void {
       使用 npm 安装最新版 boss-cli
   boss login
       打开登录页（需要用户在浏览器中自行完成登录，这个命令会直接返回）
-  boss list [--unread]
-      读取「全部」聊天列表候选人；--unread 仅显示未读（角标>0）
+  boss list [--unread] [--chatting] [--json]
+      --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
   boss chat <姓名> [--strict]
       打开指定联系人会话；默认包含匹配，--strict 为精确匹配
   boss chat [姓名] --index <序号> [--unread] [--strict]
       按 boss list 输出的 1-based 序号打开会话；--unread 表示序号对应 boss list --unread
       同时提供姓名时会校验该序号候选人姓名，--strict 表示精确校验
       仅用于已建立联系的候选人（即在 list 里可见的会话对象）
+  boss chat <姓名> --data-id <会话ID>
+      在顶部「全部」会话中按姓名 + data-id 精确定位并核对详情
+  boss accept-resume <姓名> --data-id <会话ID>
+      在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
+  boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]
+      下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
   boss action <操作> [--remark <备注>]
       仅在当前聊天页已打开候选人详情时执行操作，并只返回 action 执行结果
       操作: resume | not-fit | remark | agree-resume | request-attachment-resume | history | wechat
       request-attachment-resume：工具栏「求简历」，确认后向对方发送默认话术索要附件简历（需双方各至少发过一条消息）
       操作为 remark 时必须提供 --remark
-  boss send [--text <内容>] [-t <内容>] [--request-resume]
+  boss send [--text <内容>] [-t <内容>] [--name <姓名> --data-id <会话ID>] [--request-resume]
       仅发送文本消息（等价于在当前会话输入框发送后回车）
       --request-resume：发送后延迟片刻自动执行「求简历」操作
   boss positions
@@ -400,11 +409,14 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'list') {
-    const { flags } = parseOpts(tail);
-    if (flags.has('unread')) {
+    const { rest, flags, opts } = parseOpts(tail);
+    if (rest.length || Object.keys(opts).length || Array.from(flags).some((f) => !['unread', 'chatting', 'json'].includes(f))) {
+      die('❌ 用法: list [--unread] [--chatting] [--json]');
+    }
+    if (flags.has('unread') && !flags.has('chatting') && !flags.has('json')) {
       return implListUnreadCandidates();
     }
-    return implListCandidates();
+    return implListCandidates({ unreadOnly: flags.has('unread'), chattingOnly: flags.has('chatting'), json: flags.has('json') });
   }
 
   if (cmd === 'chat') {
@@ -413,7 +425,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if ((opts.action ?? '').trim().length > 0 || (opts.remark ?? '').trim().length > 0) {
       die('❌ chat 不再支持 --action/--remark。请改用: action <操作> [--remark <备注>]');
     }
-    const allowedOpts = new Set(['index', 'i', 'action', 'remark']);
+    const allowedOpts = new Set(['index', 'i', 'action', 'remark', 'data-id']);
     const unsupportedOpts = Object.keys(opts).filter((key) => !allowedOpts.has(key));
     if (unsupportedOpts.length > 0) {
       die(`❌ chat 不支持参数: --${unsupportedOpts.join(', --')}`);
@@ -421,6 +433,16 @@ export async function executeCommand(argv: string[]): Promise<string> {
     // 默认模糊匹配（包含）；仅在指定 --strict 时做精确匹配
     const exact = flags.has('strict');
     const indexRaw = (opts.index ?? opts.i ?? '').trim();
+    const dataId = (opts['data-id'] ?? '').trim();
+    if (flags.has('data-id')) {
+      die('❌ chat --data-id 必须提供会话 ID。');
+    }
+    if (dataId) {
+      if (indexRaw || flags.has('unread') || !nameArg || Array.from(flags).some((f) => f !== 'strict')) {
+        die('❌ 用法: chat <姓名> --data-id <会话ID>');
+      }
+      return implOpenTargetChat({ name: nameArg, dataId });
+    }
     if (indexRaw) {
       const index = Number(indexRaw);
       if (!Number.isInteger(index) || index < 1) {
@@ -471,6 +493,20 @@ export async function executeCommand(argv: string[]): Promise<string> {
     return implChatAction({ action, remark });
   }
 
+  if (cmd === 'accept-resume' || cmd === 'download-resume') {
+    const { rest, opts, flags } = parseOpts(tail);
+    const name = rest.join(' ').trim();
+    const dataId = (opts['data-id'] ?? '').trim();
+    const allowed = cmd === 'download-resume' ? ['data-id', 'output-dir'] : ['data-id'];
+    if (!name || !dataId || flags.size || Object.keys(opts).some((key) => !allowed.includes(key))) {
+      die(`❌ 用法: ${cmd} <姓名> --data-id <会话ID>${cmd === 'download-resume' ? ' [--output-dir <目录>]' : ''}`);
+    }
+    const target = { name, dataId };
+    return cmd === 'accept-resume'
+      ? implAcceptTargetResume(target)
+      : implDownloadTargetResume(target, opts['output-dir']?.trim() || undefined);
+  }
+
   if (cmd === 'send') {
     const { flags, opts } = parseOpts(tail);
     const text = opts.text?.trim() || opts.t?.trim() || '';
@@ -478,7 +514,16 @@ export async function executeCommand(argv: string[]): Promise<string> {
       die('❌ 用法: send [--text <消息>] [-t <消息>] [--request-resume]');
     }
     const requestResume = flags.has('request-resume');
-    return implSendMessage({ text, requestResume });
+    const name = (opts.name ?? '').trim();
+    const dataId = (opts['data-id'] ?? '').trim();
+    if (Boolean(name) !== Boolean(dataId)) {
+      die('❌ 指定收件人时必须同时提供 --name 和 --data-id。');
+    }
+    if (Object.keys(opts).some((key) => !['text', 't', 'name', 'data-id'].includes(key)) ||
+        Array.from(flags).some((flag) => flag !== 'request-resume')) {
+      die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume]');
+    }
+    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined });
   }
 
   if (cmd === 'positions') {

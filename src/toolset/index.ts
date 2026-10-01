@@ -1,6 +1,6 @@
 /** 业务实现聚合出口：impl* 供 CLI 与其它模块调用 */
 import { runLogin } from './login.js';
-import { runGetCandidateList } from './list.js';
+import { runGetCandidateList, type CandidateListOptions } from './list.js';
 import { runListOpenPositions } from './jd.js';
 import { runOpenCandidateChat, runOpenCandidateChatByIndex } from './chat.js';
 import {
@@ -14,6 +14,8 @@ import { runNormalSearch } from './normal-search.js';
 import { runRecommend } from './recommend.js';
 import { runPreview } from './preview.js';
 import { runRecommendGreet } from './greet.js';
+import { openConversationByTarget, type ConversationTarget } from './target_chat.js';
+import { runAcceptTargetResume, runDownloadTargetResume } from './attachment.js';
 export type { ChatPageAction };
 export type { DeepSearchGeekItem } from './deep-search.js';
 
@@ -21,8 +23,8 @@ export async function implLogin(): Promise<string> {
   return runLogin();
 }
 
-export async function implListCandidates(): Promise<string> {
-  return runGetCandidateList();
+export async function implListCandidates(opts: CandidateListOptions = {}): Promise<string> {
+  return runGetCandidateList(opts);
 }
 
 export async function implListUnreadCandidates(): Promise<string> {
@@ -34,6 +36,21 @@ export async function implOpenChat(
   exact: boolean,
 ): Promise<string> {
   return withBossSessionPage(async (page) => runOpenCandidateChat(page, candidateName, exact));
+}
+
+export async function implOpenTargetChat(target: ConversationTarget): Promise<string> {
+  return withBossSessionPage(async (page) => {
+    await openConversationByTarget(page, target);
+    return `已打开并核对候选人会话：${target.name} / ${target.dataId}`;
+  });
+}
+
+export async function implAcceptTargetResume(target: ConversationTarget): Promise<string> {
+  return runAcceptTargetResume(target);
+}
+
+export async function implDownloadTargetResume(target: ConversationTarget, outputDir?: string): Promise<string> {
+  return runDownloadTargetResume(target, outputDir);
 }
 
 export async function implOpenChatByIndex(params: {
@@ -62,10 +79,12 @@ export async function implChatAction(params: {
 export async function implSendMessage(params: {
   text: string;
   requestResume?: boolean;
+  target?: ConversationTarget;
 }): Promise<string> {
   return runSendChatMessage({
     text: params.text || undefined,
     requestResume: params.requestResume,
+    target: params.target,
   });
 }
 

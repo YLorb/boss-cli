@@ -10,12 +10,42 @@ import { ensurePage } from '../common/ensure_page.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 
 type CandidateItem = {
+  dataId: string;
   name: string;
   job: string;
   time: string;
   message: string;
   unreadCount: number;
 };
+
+export type CandidateListOptions = {
+  unreadOnly?: boolean;
+  chattingOnly?: boolean;
+  json?: boolean;
+};
+
+/** 顶部会话分类与列表内的「全部/未读」是两组不同筛选。 */
+export async function selectChatCategory(page: Page, category: 'all' | 'chatting'): Promise<void> {
+  const label = category === 'chatting' ? '沟通中' : '全部';
+  await page.waitForSelector('.label-list .chat-label-item', { timeout: 15_000 });
+  const changed = (await page.evaluate(`(() => {
+    const label = ${JSON.stringify(label)};
+    const items = Array.from(document.querySelectorAll('.label-list .chat-label-item'));
+    const target = items.find((el) => el.getAttribute('title') === label);
+    if (!target) throw new Error('未找到顶部会话分类：' + label);
+    if (target.classList.contains('selected')) return false;
+    target.click();
+    return true;
+  })()`)) as boolean;
+  if (changed) {
+    await page.waitForFunction(`(() => {
+      const label = ${JSON.stringify(label)};
+      return Array.from(document.querySelectorAll('.label-list .chat-label-item'))
+        .some((el) => el.getAttribute('title') === label && el.classList.contains('selected'));
+    })()`, { timeout: 10_000 });
+    await sleepRandom(LIST_FILTER_GAP_MS.min, LIST_FILTER_GAP_MS.max);
+  }
+}
 
 async function waitForCandidateListSettled(
   page: Page,
@@ -120,19 +150,12 @@ export async function ensureChatListReady(
   });
 }
 
-export async function runGetCandidateList(
-  opts: { unreadOnly?: boolean } = {},
-): Promise<string> {
-  const unreadOnly = opts.unreadOnly === true;
-
-  try {
-    return await withBossSessionPage(async (page) => {
-      await ensureChatListReady(page, unreadOnly ? 'unread' : 'all');
-
-      const items = (await page.evaluate(
+async function readCandidateItems(page: Page): Promise<CandidateItem[]> {
+  return (await page.evaluate(
         `(() => {
           const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
           return Array.from(document.querySelectorAll(".geek-item")).map((el) => {
+            const dataId = norm(el.getAttribute("data-id"));
             const name = norm(el.querySelector(".geek-name")?.textContent);
             const job = norm(el.querySelector(".source-job")?.textContent);
             const time = norm(el.querySelector(".time")?.textContent);
@@ -143,16 +166,76 @@ export async function runGetCandidateList(
               const digits = norm(badge.textContent).replace(/\\D/g, "");
               if (digits) unreadCount = parseInt(digits, 10) || 0;
             }
-            return { name, job, time, message, unreadCount };
+            return { dataId, name, job, time, message, unreadCount };
           });
         })()`,
-      )) as CandidateItem[];
+  )) as CandidateItem[];
+}
+
+async function readAllChattingCandidateItems(page: Page): Promise<CandidateItem[]> {
+  const found = new Map<string, CandidateItem>();
+  let idle = 0;
+  for (let round = 0; round < 160; round++) {
+    const items = await readCandidateItems(page);
+    for (const item of items) {
+      if (!item.name) continue;
+      if (!item.dataId) throw new Error(`「沟通中」候选人「${item.name}」缺少 data-id。`);
+      const previous = found.get(item.dataId);
+      if (previous && previous.name !== item.name) {
+        throw new Error(`「沟通中」列表的 data-id「${item.dataId}」对应多个显示名称。`);
+      }
+      found.set(item.dataId, item);
+    }
+    const moved = (await page.evaluate(`(() => {
+      const row = document.querySelector('.geek-item');
+      if (!row) return false;
+      let node = row.parentElement;
+      while (node) {
+        const style = getComputedStyle(node);
+        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight) break;
+        node = node.parentElement;
+      }
+      if (!node) return false;
+      const before = node.scrollTop;
+      node.scrollTop = Math.min(node.scrollTop + Math.max(160, Math.floor(node.clientHeight * 0.8)), node.scrollHeight);
+      return node.scrollTop !== before;
+    })()`)) as boolean;
+    idle = moved ? 0 : idle + 1;
+    if (idle >= 2) return [...found.values()];
+    await sleepRandom(350, 550);
+  }
+  throw new Error('扫描「沟通中」列表超过 160 轮，无法确认已读取完整列表。');
+}
+
+export async function runGetCandidateList(
+  opts: CandidateListOptions = {},
+): Promise<string> {
+  const unreadOnly = opts.unreadOnly === true;
+
+  try {
+    return await withBossSessionPage(async (page) => {
+      if (opts.chattingOnly) {
+        await ensurePage(page, {
+          name: '沟通列表页', targetUrl: BOSS_CHAT_INDEX_URL, matches: isBossChatIndexUrl,
+        });
+        await selectChatCategory(page, 'chatting');
+      }
+      await ensureChatListReady(page, unreadOnly ? 'unread' : 'all');
+
+      const items = opts.chattingOnly ? await readAllChattingCandidateItems(page) : await readCandidateItems(page);
 
       const candidates = items.filter((it) => it.name) as CandidateItem[];
+      if (opts.json) {
+        if (candidates.some((it) => !it.dataId)) {
+          throw new Error('候选人列表含缺少 data-id 的会话，无法输出稳定定位结果。');
+        }
+        return JSON.stringify({ category: opts.chattingOnly ? 'chatting' : 'current',
+          filter: unreadOnly ? 'unread' : 'all', candidates });
+      }
       const withUnread = candidates.filter((it) => it.unreadCount > 0).length;
       const visible = unreadOnly ? candidates : candidates;
       const lines = visible.map((it, idx) => {
-        const base = `${idx + 1}. ${it.name}${it.job ? `｜${it.job}` : ''}`;
+        const base = `${idx + 1}. ${it.name}${it.dataId ? `｜data-id:${it.dataId}` : ''}${it.job ? `｜${it.job}` : ''}`;
         const meta = [
           it.unreadCount > 0 ? `未读:${it.unreadCount}` : '',
           it.time ? `时间:${it.time}` : '',

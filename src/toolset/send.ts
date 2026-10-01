@@ -10,11 +10,13 @@ import {
 import { isBossChatIndexUrl } from '../common/auth.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { runRequestAttachmentResume } from './action.js';
+import { assertSelectedConversation, openConversationByTarget, type ConversationTarget } from './target_chat.js';
 
 export type SendChatMessageOptions = {
   text?: string;
   requestResume?: boolean;
   signal?: AbortSignal;
+  target?: ConversationTarget;
 };
 
 export async function runSendChatMessage(options: SendChatMessageOptions): Promise<string> {
@@ -28,6 +30,9 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
 
   try {
     return await withBossSessionPage(async (page) => {
+      if (options.target) {
+        await openConversationByTarget(page, options.target);
+      }
       const currentUrl = page.url();
       if (!isBossChatIndexUrl(currentUrl)) {
         throw new Error('请先进入聊天列表页（/web/chat/index）并打开候选人聊天。');
@@ -37,6 +42,13 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
       if (!input) {
         throw new Error('未找到聊天输入框（#boss-chat-editor-input）。');
       }
+      if (options.target) await assertSelectedConversation(page, options.target);
+      const sentBefore = (await page.evaluate(`(() => {
+        const text = ${JSON.stringify(messageText)};
+        const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
+        return Array.from(document.querySelectorAll('.chat-message-list .item-myself .text span'))
+          .filter((el) => norm(el.textContent) === text).length;
+      })()`)) as number;
 
       await input.click({
         delay: randomIntInclusive(SEND_INPUT_CLICK_MS.min, SEND_INPUT_CLICK_MS.max),
@@ -57,14 +69,24 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
         signal,
       );
       await sleepRandom(120, 420, signal);
+      if (options.target) await assertSelectedConversation(page, options.target);
       await page.keyboard.press('Enter');
       await sleepRandom(SEND_AFTER_ENTER_MS.min, SEND_AFTER_ENTER_MS.max, signal);
+      await page.waitForFunction(`(() => {
+        const text = ${JSON.stringify(messageText)};
+        const before = ${sentBefore};
+        const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
+        return Array.from(document.querySelectorAll('.chat-message-list .item-myself .text span'))
+          .filter((el) => norm(el.textContent) === text).length > before;
+      })()`, { timeout: 15_000 });
+      if (options.target) await assertSelectedConversation(page, options.target);
 
       if (!requestResume) {
         return `已发送消息：${messageText}`;
       }
 
       await sleepRandom(1200, 2800, signal);
+      if (options.target) await assertSelectedConversation(page, options.target);
       const resumeResult = await runRequestAttachmentResume(page);
       return `已发送消息：${messageText}\n${resumeResult}`;
     });
