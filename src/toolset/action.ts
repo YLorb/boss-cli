@@ -19,7 +19,6 @@ import {
   waitForVisibleCResumeIframeReady,
 } from '../common/c_resume_capture.js';
 import { ensureAppDataLayout, RESUME_SCREENSHOTS_DIR } from '../config.js';
-import { isResumeOcrEnabled, ocrResumePngToTextFile } from '../ocr/index.js';
 import { runGetCommunicationHistory } from './chat.js';
 
 type IncomingCardBtn = 'agree' | 'refuse';
@@ -575,16 +574,7 @@ export async function runChatActionOnCurrentConversation(
       if (resumeShotPath === null) {
         throw new Error('未找到在线简历入口，或在线简历弹层未正常出现。');
       }
-      if (!isResumeOcrEnabled()) {
-        return `在线简历操作成功，截图文件：${resumeShotPath}`;
-      }
-      try {
-        const ocr = await ocrResumePngToTextFile(resumeShotPath);
-        return `在线简历操作成功，\n在线简历 OCR 正文：\n\n${ocr.text}`;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new Error(`在线简历截图成功，但 OCR 失败：${msg}`);
-      }
+      return `在线简历操作成功，截图文件：${resumeShotPath}`;
     }
     case 'agree-resume':
       return runIncomingResumeCardAction(page, 'agree');

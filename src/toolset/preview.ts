@@ -16,7 +16,6 @@ import {
   waitForVisibleCResumeIframeReady,
 } from '../common/c_resume_capture.js';
 import { ensureAppDataLayout, RESUME_SCREENSHOTS_DIR } from '../config.js';
-import { isResumeOcrEnabled, ocrResumePngToTextFile } from '../ocr/index.js';
 import {
   ensureInDeepSearchPage,
   isBossChatAiFormUrl,
@@ -102,25 +101,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const disclaimer =
         '说明：平台对在线简历的每日可查看次数有限，请按需使用、谨慎查看。';
 
-      if (!isResumeOcrEnabled()) {
-        return [jobLine, `简历预览截图：${absPath}`, '', disclaimer].join('\n');
-      }
-      try {
-        const ocr = await ocrResumePngToTextFile(absPath);
-        return [
-          jobLine,
-          `简历预览截图：${absPath}`,
-          '',
-          '在线简历 OCR 正文：',
-          '',
-          ocr.text,
-          '',
-          disclaimer,
-        ].join('\n');
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        throw new Error(`简历预览截图已保存，但 OCR 失败：${msg}`);
-      }
+      return [jobLine, `简历预览截图：${absPath}`, '', disclaimer].join('\n');
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
