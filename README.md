@@ -17,7 +17,7 @@ boss login
 boss help
 ```
 
-> 纯 CLI，不内置对话式 Agent。每条命令输出结构化纯文本，Agent 可直接解析并编排多步流程。
+> 纯 CLI，不内置对话式 Agent。当前 `dev` 分支的命令默认输出文本；`boss list --json` 和 `boss download-resume` 提供 JSON，便于 Agent 编排。
 
 ---
 
@@ -43,6 +43,16 @@ npm install -g @joohw/boss-cli@latest
 boss help
 ```
 
+上面安装的是 npm 已发布版本。当前 `dev` 分支新增的联合键、附件下载等命令尚未通过 npm 发布；在本仓库中使用这些改动时，需从源码构建并运行：
+
+```bash
+npm ci
+npm run build
+node dist/cli/index.js help
+```
+
+下文新增命令以当前 `dev` 分支为准。
+
 如果你觉得 boss-cli 好用，欢迎给本仓库一个 Star；使用中遇到问题请提交 Issue，新功能或改进也欢迎提交 PR。
 
 > **macOS / Linux 权限问题**：系统 Node 默认全局前缀在 `/usr/local`，当前账户无写权限。建议先把全局前缀挪到用户目录（一次性配置）：
@@ -64,10 +74,13 @@ boss help
 | --- | --- |
 | `boss login` | 打开 Boss直聘登录页（扫码/验证后手动完成） |
 | `boss update` | 通过 npm 安装最新版 boss-cli |
-| `boss list [--unread]` | 读取聊天列表；`--unread` 仅未读 |
+| `boss list [--unread] [--chatting] [--json]` | 读取聊天列表；`--chatting` 选“沟通中”，`--json` 包含显示名称、`data-id` 和当前沟通职位 |
 | `boss chat <姓名> [--strict]` | 打开指定候选人会话 |
 | `boss chat [姓名] --index <序号> [--unread] [--strict]` | 按 `boss list` 输出序号打开会话；同名候选人建议用序号 |
-| `boss send [--text <内容>]` | 向当前会话发送消息 |
+| `boss chat <姓名> --data-id <会话ID>` | 按显示名称和会话 `data-id` 联合定位 |
+| `boss accept-resume <姓名> --data-id <会话ID>` | 在指定会话同意接收附件简历，不发送文字消息 |
+| `boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]` | 下载已收到的原附件，返回文件路径、大小和 SHA-256 |
+| `boss send --text <内容> [--name <姓名> --data-id <会话ID>]` | 向当前会话发送；指定联合键时先核对收件人 |
 | `boss action <操作>` | 索要简历 / 不合适 / 备注 / 交换微信等 |
 | `boss recommend [岗位关键字]` | 读取推荐候选人列表 |
 | `boss search [关键词]` | 常规搜索牛人列表 |
@@ -116,17 +129,13 @@ boss deep-search --match
 
 ## 与 AI Agent 集成
 
-boss-cli 每条命令输出纯文本，适合 LLM 通过子进程编排：
+boss-cli 可由外部 Agent 通过子进程编排。采集附件时使用会话联合键，并根据列表里的当前沟通职位决定是否继续：
 
 ```
-1. boss list --unread     → 获取未读候选人
-2. boss chat <姓名>       → 打开会话
-   同名时用 boss chat [姓名] --index <序号> [--unread]
-3. boss action resume     → 索要简历
-4. boss send -t "..."     → 发送消息
-5. boss recommend         → 读取推荐列表
-6. boss search <关键词>   → 读取常规搜索列表
-7. boss greet <姓名>      → 批量打招呼
+1. boss list --chatting --json                         → 获取显示名称、data-id、当前沟通职位
+2. boss accept-resume <姓名> --data-id <会话ID>          → 同意接收候选人附件
+3. boss download-resume <姓名> --data-id <会话ID>        → 下载原附件并获取文件信息
+4. boss send --text "..." --name <姓名> --data-id <会话ID> → 按联合键核对后发送
 ```
 
 详见 [AGENTS.md](./AGENTS.md)。
@@ -161,6 +170,7 @@ boss-cli 基于 CDP 连接本机 Chrome，复用已有登录态，针对 Boss直
 | --- | --- |
 | `~/.boss-cli/.cache/` | Cookie、浏览器用户数据 |
 | `~/.boss-cli/jd/` | `boss jd` 缓存的岗位描述 |
+| `~/.boss-cli/resume-files/` | `boss download-resume` 默认保存的原附件 |
 
 ---
 
@@ -170,6 +180,13 @@ boss-cli 基于 CDP 连接本机 Chrome，复用已有登录态，针对 Boss直
 npm run build   # 编译到 dist/
 npm run dev     # build + 交互模式
 ```
+
+提交前维护两份日志：
+
+- [功能变化日志](./CHANGELOG.md) 纳入 Git。每次提交新增一条，记录该提交的用户可见功能变化；仅改文档或维护配置时写明“无用户可见功能变化”。
+- 开发日志位于 `docs/development-log.md`，由 `.gitignore` 排除，仅保留在本地。每次提交新增一条，记录改动文件、实现要点、验证结果及未完成项；其中的简历或账号信息不应写入日志。
+
+现有日志从 2026-10-02 的两次 Boss CLI 提交开始记录；更早的提交历史以 `git log` 为准。新增提交应在提交前同时更新两份日志，提交主题可先作为条目标识，提交后再补充哈希。
 
 ---
 

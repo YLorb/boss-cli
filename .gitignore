@@ -5,3 +5,4 @@ dist/
 *.log
 .browser-profile/
 .boss-sessions/
+/docs/development-log.md
