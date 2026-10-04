@@ -24,9 +24,16 @@ export type CandidateListOptions = {
   json?: boolean;
 };
 
+function traceListStep(message: string): void {
+  if (process.env.BOSS_CLI_TRACE === 'true' || process.env.BOSS_CLI_TRACE === '1') {
+    console.error(`[boss-cli][list] ${message}`);
+  }
+}
+
 /** 顶部会话分类与列表内的「全部/未读」是两组不同筛选。 */
 export async function selectChatCategory(page: Page, category: 'all' | 'chatting'): Promise<void> {
   const label = category === 'chatting' ? '沟通中' : '全部';
+  traceListStep(`检查顶部「${label}」分类`);
   await page.waitForSelector('.label-list .chat-label-item', { timeout: 15_000 });
   const changed = (await page.evaluate(`(() => {
     const label = ${JSON.stringify(label)};
@@ -38,12 +45,15 @@ export async function selectChatCategory(page: Page, category: 'all' | 'chatting
     return true;
   })()`)) as boolean;
   if (changed) {
+    traceListStep(`已点击顶部「${label}」，等待切换完成`);
     await page.waitForFunction(`(() => {
       const label = ${JSON.stringify(label)};
       return Array.from(document.querySelectorAll('.label-list .chat-label-item'))
         .some((el) => el.getAttribute('title') === label && el.classList.contains('selected'));
     })()`, { timeout: 10_000 });
     await sleepRandom(LIST_FILTER_GAP_MS.min, LIST_FILTER_GAP_MS.max);
+  } else {
+    traceListStep(`顶部「${label}」已选中`);
   }
 }
 
@@ -122,6 +132,7 @@ export async function ensureChatListReady(
   page: Page,
   filter: 'all' | 'unread' = 'all',
 ): Promise<void> {
+  traceListStep('确认或进入沟通列表页');
   await ensurePage(page, {
     name: '沟通列表页',
     targetUrl: BOSS_CHAT_INDEX_URL,
@@ -139,6 +150,7 @@ export async function ensureChatListReady(
   );
 
   const filterLabel = filter === 'unread' ? '未读' : '全部';
+  traceListStep(`点击列表「${filterLabel}」筛选`);
   await clickChatFilterTab(page, filterLabel);
   await sleepRandom(LIST_FILTER_GAP_MS.min, LIST_FILTER_GAP_MS.max);
   await waitForChatFilterTabSelected(page, filterLabel);
@@ -148,6 +160,7 @@ export async function ensureChatListReady(
     pollMsMax: LIST_POLL_MS.max,
     minMsBeforeEmptyOk: LIST_MIN_BEFORE_EMPTY_OK_MS,
   });
+  traceListStep(`列表「${filterLabel}」已加载`);
 }
 
 async function readCandidateItems(page: Page): Promise<CandidateItem[]> {
@@ -200,6 +213,7 @@ async function readAllChattingCandidateItems(page: Page): Promise<CandidateItem[
       node.scrollTop = Math.min(node.scrollTop + Math.max(160, Math.floor(node.clientHeight * 0.8)), node.scrollHeight);
       return node.scrollTop !== before;
     })()`)) as boolean;
+    traceListStep(`扫描第 ${round + 1} 轮：累计 ${found.size} 个会话，${moved ? '继续滚动' : '已到列表末尾'}`);
     idle = moved ? 0 : idle + 1;
     if (idle >= 2) return [...found.values()];
     await sleepRandom(350, 550);
@@ -213,8 +227,11 @@ export async function runGetCandidateList(
   const unreadOnly = opts.unreadOnly === true;
 
   try {
+    traceListStep('连接浏览器会话');
     return await withBossSessionPage(async (page) => {
+      traceListStep(`浏览器已连接，当前页面：${page.url().split('?')[0]}`);
       if (opts.chattingOnly) {
+        traceListStep('进入「沟通中」列表');
         await ensurePage(page, {
           name: '沟通列表页', targetUrl: BOSS_CHAT_INDEX_URL, matches: isBossChatIndexUrl,
         });
@@ -225,6 +242,7 @@ export async function runGetCandidateList(
       const items = opts.chattingOnly ? await readAllChattingCandidateItems(page) : await readCandidateItems(page);
 
       const candidates = items.filter((it) => it.name) as CandidateItem[];
+      traceListStep(`读取完成：${candidates.length} 个候选人会话`);
       if (opts.json) {
         if (candidates.some((it) => !it.dataId)) {
           throw new Error('候选人列表含缺少 data-id 的会话，无法输出稳定定位结果。');

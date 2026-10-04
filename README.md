@@ -159,6 +159,9 @@ boss-cli 基于 CDP 连接本机 Chrome，复用已有登录态，针对 Boss直
 **如何无头模式运行？**
 设置环境变量 `BOSS_BROWSER_HEADLESS=true`（默认 headful，便于扫码登录）。
 
+**如何实时查看列表命令的操作步骤？**
+设置 `BOSS_CLI_TRACE=true` 后运行 `boss login` 或 `boss list --chatting`（源码构建版用 `node dist/cli/index.js` 加相应子命令）。浏览器窗口会显示页面操作，终端会依次显示连接、进入页面、选择筛选、滚动扫描和完成状态；步骤日志写到 stderr，`--json` 的 stdout 仍可单独解析。该开关目前覆盖登录和列表命令，不包含其他命令的内部步骤。
+
 **如何自定义操作蒙层品牌？**
 设置环境变量 `BOSS_CLI_AGENT_BRAND=你的品牌名`。
 

@@ -12,6 +12,12 @@ import {
 
 const BOSS_LOGIN_URL = 'https://www.zhipin.com/web/user/?ka=header-login';
 
+function traceLoginStep(message: string): void {
+  if (process.env.BOSS_CLI_TRACE === 'true' || process.env.BOSS_CLI_TRACE === '1') {
+    console.error(`[boss-cli][login] ${message}`);
+  }
+}
+
 async function pickExistingPage(browser: Browser): Promise<Page | null> {
   const pages = (await browser.pages()).filter((p) => !p.isClosed());
   if (pages.length === 0) return null;
@@ -45,6 +51,7 @@ async function pickExistingPage(browser: Browser): Promise<Page | null> {
  */
 export async function runLogin(): Promise<string> {
   // 登录必须可见：即使之前已启动 headless 会话，也需要重启为 headful。
+  traceLoginStep('准备连接可见浏览器');
   process.env.BOSS_BROWSER_HEADLESS = 'false';
   const existing = getBrowserRef();
   try {
@@ -74,15 +81,19 @@ export async function runLogin(): Promise<string> {
     throw new Error('无法获取浏览器实例，登录失败。');
   }
 
+  traceLoginStep('浏览器已连接，选择操作页面');
   let page: Page | null = getPageRef() ?? null;
   if (!page || page.isClosed()) {
     page = (await pickExistingPage(browser)) ?? (await browser.newPage());
   }
   setSessionPage(page);
   await page.bringToFront();
+  traceLoginStep('页面已置于前台，打开 Boss 登录页');
   await page.goto(BOSS_LOGIN_URL, { waitUntil: 'load', timeout: 60_000 });
+  traceLoginStep('Boss 登录页已加载，交由用户手动登录');
 
   await detachBrowserSession();
+  traceLoginStep('CLI 已断开连接，浏览器窗口保持打开');
 
   // 不做任何登录校验：只把浏览器打开到登录页；立即断开 CDP，CLI 不与浏览器进程长期绑定。
   return [
