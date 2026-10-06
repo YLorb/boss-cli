@@ -49,23 +49,24 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
         const row = matches[0];
         const foundName = norm(row.querySelector('.geek-name')?.textContent);
         if (foundName !== name) return { kind: 'name_mismatch', foundName, x: 0, y: 0 };
-        row.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
         const r = row.getBoundingClientRect();
+        const container = row.closest('.user-list');
+        if (!container) return { kind: 'no_scroller', foundName: '', x: 0, y: 0 };
+        const viewport = container.getBoundingClientRect();
+        if (r.top < viewport.top || r.bottom > viewport.bottom) {
+          return { kind: 'next', foundName, x: viewport.left + viewport.width / 2,
+            y: viewport.top + viewport.height / 2, deltaY: r.top < viewport.top ? -350 : 350 };
+        }
         return { kind: 'found', foundName, x: r.left + r.width / 2, y: r.top + r.height / 2 };
       }
       const first = rows[0];
       if (!first) return { kind: 'empty', foundName: '', x: 0, y: 0 };
-      let node = first.parentElement;
-      while (node) {
-        const style = getComputedStyle(node);
-        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && node.scrollHeight > node.clientHeight) break;
-        node = node.parentElement;
-      }
+      // BOSS uses BetterScroll with overflow:hidden; scrollTop does not drive its virtual list.
+      const node = first.closest('.user-list');
       if (!node) return { kind: 'no_scroller', foundName: '', x: 0, y: 0 };
-      const old = node.scrollTop;
-      node.scrollTop = Math.min(old + Math.max(160, Math.floor(node.clientHeight * 0.8)), node.scrollHeight);
-      return { kind: node.scrollTop === old ? 'end' : 'next', foundName: '', x: 0, y: 0 };
-    })()`)) as { kind: string; foundName: string; x: number; y: number };
+      const r = node.getBoundingClientRect();
+      return { kind: 'next', foundName: '', x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`)) as { kind: string; foundName: string; x: number; y: number; deltaY?: number };
     if (state.kind === 'found') {
       await page.mouse.click(state.x, state.y, { delay: 40 });
       await page.waitForFunction(`(() => {
@@ -84,7 +85,9 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
       throw new Error(`data-id「${target.dataId}」的显示名称已变为「${state.foundName}」，与「${target.name}」不一致。`);
     }
     if (state.kind !== 'next') throw new Error(`未找到会话「${target.name} / ${target.dataId}」：${state.kind}。`);
-    await sleepRandom(180, 350);
+    await page.mouse.move(state.x, state.y);
+    await page.mouse.wheel({ deltaY: state.deltaY ?? 500 });
+    await sleepRandom(350, 550);
   }
   throw new Error(`扫描会话列表超过 120 轮，仍未找到「${target.name} / ${target.dataId}」。`);
 }
