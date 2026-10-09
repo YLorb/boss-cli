@@ -2,6 +2,15 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-10-10 · fix(cli): close attachment previews between resume operations
+
+- 下载原附件并校验文件后收起预览弹层；下次按显示名称和 `data-id` 定位会话前，也会先收起仍打开的附件预览，避免弹层挡住列表。
+- 释放已启动 Chrome 的日志管道，避免一次性 CLI 命令完成后仍被浏览器子进程占住而无法退出。
+
+## 2026-10-06 · `d622810` · fix(cli): locate resume conversations in custom scroll lists
+
+- 联合键定位改用鼠标滚轮驱动 Boss 的自定义会话列表，只点击完整可见的目标行，并保持姓名、`data-id` 与详情校验。
+
 ## 2026-10-04 · feat: show live steps for login and candidate list
 
 - 设置 `BOSS_CLI_TRACE=true` 后，`boss login` 和 `boss list` 会在终端实时输出浏览器连接、页面切换、筛选与列表扫描等步骤；不设置时保持原有输出。

@@ -6,7 +6,7 @@ import type { Page } from 'puppeteer-core';
 import { APP_HOME } from '../config.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { runChatActionOnCurrentConversation } from './action.js';
-import { assertSelectedConversation, openConversationByTarget, type ConversationTarget } from './target_chat.js';
+import { assertSelectedConversation, closeAttachmentPreview, openConversationByTarget, type ConversationTarget } from './target_chat.js';
 
 const MAX_BYTES = 50 * 1024 * 1024;
 
@@ -113,6 +113,7 @@ export async function runDownloadTargetResume(
     await assertSelectedConversation(page, target);
     const info = await stat(file);
     const hash = await sha256File(file);
+    await closeAttachmentPreview(page);
     return JSON.stringify({ name: target.name, dataId: target.dataId, geekId: preview.geekId,
       attachmentName: cardName, fileName: path.basename(file), path: file,
       bytes: info.size, sha256: hash });

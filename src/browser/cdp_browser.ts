@@ -29,6 +29,10 @@ let spawnedChromeChild: ChildProcess | null = null;
 let lastChromeLaunchHeadless = false;
 
 export function clearSpawnedChromeProcessRef(): void {
+  // Release launch-log pipes so a detached browser cannot keep the CLI alive.
+  spawnedChromeChild?.stdout?.destroy();
+  spawnedChromeChild?.stderr?.destroy();
+  spawnedChromeChild?.unref();
   spawnedChromeChild = null;
 }
 
