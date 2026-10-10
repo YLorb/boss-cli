@@ -49,7 +49,7 @@ export const PROBE_LOGIN_POLL_MS = { min: 520, max: 980 } as const;
 export const SEND_INPUT_CLICK_MS = { min: 45, max: 160 } as const;
 
 /** 逐字输入：字符间隔（随机） */
-export const SEND_TYPING_GAP_MS = { min: 38, max: 125 } as const;
+export const SEND_TYPING_GAP_MS = { min: 400, max: 800 } as const;
 
 /** 按下 Enter 后、流程结束前短停顿 */
 export const SEND_AFTER_ENTER_MS = { min: 260, max: 920 } as const;
