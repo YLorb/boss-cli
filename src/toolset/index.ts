@@ -2,7 +2,7 @@
 import { runLogin } from './login.js';
 import { runGetCandidateList, type CandidateListOptions } from './list.js';
 import { runListOpenPositions } from './jd.js';
-import { runOpenCandidateChat, runOpenCandidateChatByIndex } from './chat.js';
+import { renderOpenedCandidateChat, runOpenCandidateChat, runOpenCandidateChatByIndex } from './chat.js';
 import {
   runChatActionOnCurrentConversation,
   type ChatPageAction,
@@ -19,8 +19,8 @@ import { runAcceptTargetResume, runDownloadTargetResume } from './attachment.js'
 export type { ChatPageAction };
 export type { DeepSearchGeekItem } from './deep-search.js';
 
-export async function implLogin(): Promise<string> {
-  return runLogin();
+export async function implLogin(json = false): Promise<string> {
+  return runLogin(json);
 }
 
 export async function implListCandidates(opts: CandidateListOptions = {}): Promise<string> {
@@ -34,19 +34,21 @@ export async function implListUnreadCandidates(): Promise<string> {
 export async function implOpenChat(
   candidateName: string,
   exact: boolean,
+  json = false,
 ): Promise<string> {
-  return withBossSessionPage(async (page) => runOpenCandidateChat(page, candidateName, exact));
+  return withBossSessionPage(async (page) => runOpenCandidateChat(page, candidateName, exact, json));
 }
 
-export async function implOpenTargetChat(target: ConversationTarget): Promise<string> {
+export async function implOpenTargetChat(target: ConversationTarget, json = false): Promise<string> {
   return withBossSessionPage(async (page) => {
     await openConversationByTarget(page, target);
+    if (json) return renderOpenedCandidateChat(page, target.name, true);
     return `已打开并核对候选人会话：${target.name} / ${target.dataId}`;
   });
 }
 
-export async function implAcceptTargetResume(target: ConversationTarget): Promise<string> {
-  return runAcceptTargetResume(target);
+export async function implAcceptTargetResume(target: ConversationTarget, json = false): Promise<string> {
+  return runAcceptTargetResume(target, json);
 }
 
 export async function implDownloadTargetResume(target: ConversationTarget, outputDir?: string): Promise<string> {
@@ -58,6 +60,7 @@ export async function implOpenChatByIndex(params: {
   unreadOnly?: boolean;
   expectedName?: string;
   exact?: boolean;
+  json?: boolean;
 }): Promise<string> {
   return withBossSessionPage(async (page) =>
     runOpenCandidateChatByIndex(page, {
@@ -65,6 +68,7 @@ export async function implOpenChatByIndex(params: {
       filter: params.unreadOnly ? 'unread' : 'all',
       expectedName: params.expectedName,
       exact: params.exact,
+      json: params.json,
     }),
   );
 }
@@ -72,6 +76,7 @@ export async function implOpenChatByIndex(params: {
 export async function implChatAction(params: {
   action: ChatPageAction;
   remark?: string;
+  json?: boolean;
 }): Promise<string> {
   return withBossSessionPage(async (page) => runChatActionOnCurrentConversation(page, params));
 }
@@ -80,25 +85,29 @@ export async function implSendMessage(params: {
   text: string;
   requestResume?: boolean;
   target?: ConversationTarget;
+  json?: boolean;
 }): Promise<string> {
   return runSendChatMessage({
     text: params.text || undefined,
     requestResume: params.requestResume,
     target: params.target,
+    json: params.json,
   });
 }
 
-export async function implListPositions(): Promise<string> {
-  return runListOpenPositions();
+export async function implListPositions(json = false): Promise<string> {
+  return runListOpenPositions({ json });
 }
 
 export async function implListPositionsWithOptions(opts: {
   detail?: boolean;
   name?: string;
+  json?: boolean;
 }): Promise<string> {
   return runListOpenPositions({
     detail: opts.detail,
     detailName: opts.name,
+    json: opts.json,
   });
 }
 
@@ -108,13 +117,14 @@ export async function implBossSearch(
     coreRequirements?: string[];
     bonusRequirements?: string[];
     match?: boolean;
+    json?: boolean;
   } = {},
 ): Promise<string> {
   return runBossSearch(opts);
 }
 
-export async function implNormalSearch(keyword?: string): Promise<string> {
-  return runNormalSearch(keyword);
+export async function implNormalSearch(keyword?: string, json = false): Promise<string> {
+  return runNormalSearch(keyword, json);
 }
 
 export async function implBossSearchSet(opts: {
@@ -125,12 +135,13 @@ export async function implBossSearchSet(opts: {
   return runBossSearchSet(opts);
 }
 
-export async function implRecommend(jobKeyword?: string): Promise<string> {
-  return runRecommend(jobKeyword);
+export async function implRecommend(jobKeyword?: string, json = false): Promise<string> {
+  return runRecommend(jobKeyword, json);
 }
 
 export async function implPreview(opts: {
   candidateTarget: string;
+  json?: boolean;
 }): Promise<string> {
   return runPreview(opts);
 }
@@ -138,6 +149,7 @@ export async function implPreview(opts: {
 export async function implRecommendGreet(opts: {
   candidateTarget: string;
   jobKeyword?: string;
+  json?: boolean;
 }): Promise<string> {
   return runRecommendGreet(opts);
 }

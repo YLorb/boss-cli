@@ -17,6 +17,7 @@ export type SendChatMessageOptions = {
   requestResume?: boolean;
   signal?: AbortSignal;
   target?: ConversationTarget;
+  json?: boolean;
 };
 
 export async function runSendChatMessage(options: SendChatMessageOptions): Promise<string> {
@@ -82,12 +83,14 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
       if (options.target) await assertSelectedConversation(page, options.target);
 
       if (!requestResume) {
+        if (options.json) return JSON.stringify({ text: messageText, target: options.target ?? null, status: 'message-visible', requestResume: false });
         return `已发送消息：${messageText}`;
       }
 
       await sleepRandom(1200, 2800, signal);
       if (options.target) await assertSelectedConversation(page, options.target);
-      const resumeResult = await runRequestAttachmentResume(page);
+      const resumeResult = await runRequestAttachmentResume(page, options.json);
+      if (options.json) return JSON.stringify({ text: messageText, target: options.target ?? null, status: 'message-visible', requestResume: true, resumeRequest: JSON.parse(resumeResult) });
       return `已发送消息：${messageText}\n${resumeResult}`;
     });
   } catch (e) {

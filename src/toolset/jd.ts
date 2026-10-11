@@ -13,6 +13,7 @@ export type ListOpenPositionsDeps = {
   detailName?: string;
   projectDir?: string;
   detailWaitMs?: number;
+  json?: boolean;
 };
 
 const BOSS_CHAT_JOB_LIST_URL = 'https://www.zhipin.com/web/chat/job/list';
@@ -425,6 +426,7 @@ export async function runListOpenPositions(
     const candidates = cacheFileCandidates(projectDir, detailName);
     for (const p of candidates) {
       if (await fileExists(p)) {
+        if (deps.json) return JSON.stringify({ name: detailName, path: p, markdown: await readFile(p, 'utf8'), source: 'cache' });
         return readFile(p, 'utf8');
       }
     }
@@ -458,6 +460,7 @@ export async function runListOpenPositions(
       const totalText = ready.data.totalText ? `（页面统计：${ready.data.totalText}）` : '';
 
       if (!detailMode) {
+        if (deps.json) return JSON.stringify({ jobs, totalText: ready.data.totalText, url: BOSS_CHAT_JOB_LIST_URL });
         return [
           `已读取 ${jobs.length} 个职位${totalText}。`,
           `状态统计：开放中 ${openCount}｜待开放 ${waitOpenCount}｜已关闭 ${closedCount}`,
@@ -486,6 +489,7 @@ export async function runListOpenPositions(
         const msg = closeError instanceof Error ? closeError.message : String(closeError);
         console.warn(`[boss-cli] jd detail close warning: ${msg}`);
       }
+      if (deps.json) return JSON.stringify({ name: targetJob.title, path: outPath, markdown, source: 'page' });
       return markdown;
     });
   } catch (e) {

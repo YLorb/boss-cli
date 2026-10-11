@@ -55,6 +55,7 @@ async function cleanupGreetModalIfPresent(page: Page): Promise<void> {
 export type GreetOptions = {
   candidateTarget: string;
   jobKeyword?: string;
+  json?: boolean;
 };
 
 export async function runRecommendGreet(options: GreetOptions): Promise<string> {
@@ -80,6 +81,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
         await sleepRandom(380, 1000);
         const after = await readDeepSearchGeekList(page);
         await cleanupGreetModalIfPresent(page);
+        if (options.json) return JSON.stringify({ source: 'deep-search', ...greetResult, jobKeyword: kw, status: 'clicked', candidates: after });
         const lines = [greetResult.message];
         if (jobLine) {
           lines.unshift(jobLine);
@@ -105,6 +107,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
         const after = await readRecommendList(frame);
         markGreetProduced(before, after);
         await cleanupGreetModalIfPresent(page);
+        if (options.json) return JSON.stringify({ source: 'recommend', ...greetResult, job: selectedJob, status: 'clicked', candidates: after });
         return [jobLine, greetResult.message, '', '当前推荐列表（来源分组）：', renderRecommendList(after)].join('\n');
       } finally {
         await resumeHeight(page, savedViewport);

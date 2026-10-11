@@ -86,7 +86,7 @@ async function ensureRecommendFrameReady(frame: Frame): Promise<void> {
   );
 }
 
-async function readCurrentRecommendJobLabel(frame: Frame): Promise<string> {
+export async function readCurrentRecommendJobLabel(frame: Frame): Promise<string> {
   return (await frame.evaluate(`(() => {
     const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
     return norm(document.querySelector(".job-selecter-wrap .ui-dropmenu-label")?.textContent);
@@ -355,7 +355,7 @@ export function renderRecommendList(candidates: RecommendCandidate[]): string {
 export async function clickGreet(
   frame: Frame,
   target: string,
-): Promise<{ message: string }> {
+): Promise<{ message: string; name: string; geekId: string }> {
   const targetLiteral = JSON.stringify(target.trim());
   const result = (await frame.evaluate(
     `(() => {
@@ -416,6 +416,8 @@ export async function clickGreet(
     case 'clicked':
       return {
         message: `已对 ${result.name} 点击“打招呼”。`,
+        name: result.name,
+        geekId: result.geekId,
       };
     default: {
       const _x: never = result;
@@ -493,12 +495,13 @@ export async function openRecommendResumePreview(frame: Frame, target: string): 
   return opened;
 }
 
-export async function runRecommend(jobKeyword?: string): Promise<string> {
+export async function runRecommend(jobKeyword?: string, json = false): Promise<string> {
   try {
     return await withBossSessionPage(async (page) => {
       const frame = await ensureInRecommendPage(page);
       const selectedJob = await selectRecommendJob(frame, (jobKeyword ?? '').trim());
       const candidates = await readRecommendList(frame);
+      if (json) return JSON.stringify({ job: selectedJob, candidates });
       const title = selectedJob ? `当前岗位：${selectedJob}` : '当前岗位：默认';
       return [title, '', renderRecommendList(candidates)].join('\n');
     });

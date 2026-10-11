@@ -1,0 +1,150 @@
+import assert from 'node:assert/strict';
+import { test, mock } from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, writeFile, rm, rmdir } from 'node:fs/promises';
+import path from 'node:path';
+import { splitJsonFlag } from '../dist/cli/output.js';
+
+const calls = [];
+const names = ['implChatAction','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
+mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries(names.map(name => [name, async (...args) => {
+  calls.push({name,args});
+  return JSON.stringify({reader:name,args});
+}])) });
+const { executeCommand } = await import('../dist/cli/cliRouter.js');
+
+test('every business command forwards --json to its reader, including aliases and flag placement', async () => {
+  const cases = [
+    [['login','--json'],'implLogin',[true]],
+    [['list','--unread','--json'],'implListCandidates',[{unreadOnly:true,chattingOnly:false,json:true}]],
+    [['list-candidates','--json','--chatting'],'implListCandidates',[{unreadOnly:false,chattingOnly:true,json:true}]],
+    [['chat','--json','测试候选人','--data-id','123'],'implOpenTargetChat',[{name:'测试候选人',dataId:'123'},true]],
+    [['chat','测试候选人','--strict','--json'],'implOpenChat',['测试候选人',true,true]],
+    [['chat','--index','2','--unread','--json'],'implOpenChatByIndex',[{index:2,unreadOnly:true,expectedName:undefined,exact:false,json:true}]],
+    [['action','remark','--remark','包含换行\n和引号"','--json'],'implChatAction',[{action:'remark',remark:'包含换行\n和引号"',json:true}]],
+    [['accept-resume','测试候选人','--data-id','123','--json'],'implAcceptTargetResume',[{name:'测试候选人',dataId:'123'},true]],
+    [['download-resume','测试候选人','--data-id','123','--json'],'implDownloadTargetResume',[{name:'测试候选人',dataId:'123'},undefined]],
+    [['send','--text','含引号"与换行\n的消息','--name','测试候选人','--data-id','123','--json'],'implSendMessage',[{text:'含引号"与换行\n的消息',requestResume:false,target:{name:'测试候选人',dataId:'123'},json:true}]],
+    [['positions','--json'],'implListPositions',[true]],
+    [['jd','测试岗位','--json'],'implListPositionsWithOptions',[{detail:true,name:'测试岗位',json:true}]],
+    [['search','--json','评估'],'implNormalSearch',['评估',true]],
+    [['recommend','测试岗位','--json'],'implRecommend',['测试岗位',true]],
+    [['deep-search','--core','Python','--bonus','评测','--json'],'implBossSearch',[{jobKeyword:undefined,coreRequirements:['Python'],bonusRequirements:['评测'],match:false,json:true}]],
+    [['preview','测试候选人','--json'],'implPreview',[{candidateTarget:'测试候选人',json:true}]],
+    [['greet','测试候选人','--job','测试岗位','--json'],'implRecommendGreet',[{candidateTarget:'测试候选人',jobKeyword:'测试岗位',json:true}]],
+  ];
+  for (const [argv,name,args] of cases) {
+    const result=JSON.parse(await executeCommand(argv));
+    assert.equal(result.reader,name);
+    assert.deepEqual(calls.at(-1),{name,args});
+  }
+});
+
+test('literal --json after -- and inside --text=value is not an output flag; text defaults remain', async () => {
+  assert.deepEqual(splitJsonFlag(['--text=--json']),{args:['--text=--json'],json:false});
+  assert.deepEqual(splitJsonFlag(['--','--json']),{args:['--','--json'],json:false});
+  await executeCommand(['list','--unread']);
+  assert.equal(calls.at(-1).name,'implListUnreadCandidates');
+  await executeCommand(['send','--text=--json']);
+  assert.equal(calls.at(-1).args[0].text,'--json');
+  assert.equal(calls.at(-1).args[0].json,false);
+});
+
+test('invalid JSON commands fail before invoking a business action', async () => {
+  const count=calls.length;
+  for(const argv of [['chat','--index','0','--json'],['accept-resume','name','--json'],['send','--json'],['action','remark','--json'],['update','--json'],['action','not-fit','--json=false']]) {
+    await assert.rejects(executeCommand(argv));
+  }
+  assert.equal(calls.length,count);
+});
+
+test('real CLI emits a single JSON error with a nonzero exit code and no update notice', () => {
+  const result=spawnSync(process.execPath,['dist/cli/index.js','chat','--index','0','--json'],{encoding:'utf8',timeout:15000});
+  assert.equal(result.status,1);
+  const data=JSON.parse(result.stdout);
+  assert.equal(data.ok,false);
+  assert.equal(data.command,'chat');
+  assert.equal(data.error.name,'CliError');
+  assert.match(data.error.message,/从 1 开始/);
+  assert.equal(result.stderr,'');
+});
+
+let activePage;
+mock.module('../dist/common/boss_session_page.js',{namedExports:{withBossSessionPage:async callback=>callback(activePage)}});
+const {runRecommend}=await import('../dist/toolset/recommend.js');
+const {runNormalSearch}=await import('../dist/toolset/normal-search.js');
+const {renderOpenedCandidateChat}=await import('../dist/toolset/chat.js');
+const {runListOpenPositions}=await import('../dist/toolset/jd.js');
+const {runBossSearch}=await import('../dist/toolset/deep-search.js');
+const {runSendChatMessage}=await import('../dist/toolset/send.js');
+const {runChatActionOnCurrentConversation}=await import('../dist/toolset/action.js');
+
+function framePage(kind,evaluate) {
+  const frame={url:()=>`https://www.zhipin.com/web/frame/${kind}`,waitForFunction:async()=>{},evaluate};
+  return {url:()=>`https://www.zhipin.com/web/chat/${kind}`,waitForSelector:async()=>({contentFrame:async()=>frame})};
+}
+
+test('recommend and search expose original fields, including values omitted by text rendering', async () => {
+  const candidate={geekId:'g1',name:'测试',salary:'20-30K',baseInfo:'硕士 / 3年',expect:'深圳',experience:'研发',advantage:'',highlights:['Python','评测','第三项','第四项'],canGreet:true,hasHistoryChat:false,hasViewed:false};
+  activePage=framePage('recommend',async script=>script.includes('return cards.map')?[candidate]:'测试岗位');
+  assert.deepEqual(JSON.parse(await runRecommend(undefined,true)),{job:'测试岗位',candidates:[candidate]});
+  const searchCandidate={name:'测试',active:'今日活跃',labels:[],basicInfo:'硕士',summary:'摘要',tags:['评测'],expectation:'深圳',work:['研发'],education:'大学',reason:'理由',contactText:'获取联系方式'};
+  activePage=framePage('search',async script=>script.includes('card-label')?[searchCandidate]:script.includes('.search-input')?'评估':'测试岗位');
+  assert.deepEqual(JSON.parse(await runNormalSearch(undefined,true)),{keyword:'评估',job:'测试岗位',candidates:[searchCandidate]});
+});
+
+test('chat preserves roles, attachment presence and summary arrays without parsing text', async () => {
+  const summary={name:'测试',active:'今日活跃',basicFacts:['硕士','UI文字'],recentExperience:['研发'],communicationPosition:'评估',expectation:'深圳',remark:''};
+  const chat={messages:[{time:'10:00',from:'friend',text:'正文含引号"和\n换行'}],hasFriendResumeAttachment:true};
+  const page={waitForFunction:async()=>{},evaluate:async script=>script.includes('const lists =')?chat:script.includes('const targetName =')?summary:'row1'};
+  assert.deepEqual(JSON.parse(await renderOpenedCandidateChat(page,'测试',true)),{name:'测试',dataId:'row1',summary,...chat});
+});
+
+test('JD JSON reuses Markdown cache without browser access or modification', async () => {
+  await mkdir(path.resolve('output'),{recursive:true});
+  const dir=await mkdtemp(path.resolve('output/jd-json-test-'));
+  const file=path.join(dir,'测试岗位.md');
+  try {
+    const markdown='# 测试岗位\n\n原始 JD 正文\n';
+    await writeFile(file,markdown);
+    activePage=null;
+    assert.deepEqual(JSON.parse(await runListOpenPositions({detail:true,detailName:'测试岗位',projectDir:dir,json:true})),{name:'测试岗位',path:file,markdown,source:'cache'});
+    assert.equal(await runListOpenPositions({detail:true,detailName:'测试岗位',projectDir:dir}),markdown);
+  }finally{await rm(file);await rmdir(dir);}
+});
+
+test('deep-search JSON preserves unknown count and disabled state without triggering match', async () => {
+  const form={selectedJob:'测试岗位',coreRequirements:['Python'],bonusRequirements:[],remainingCountText:'',remainingCount:null,matchButtonText:'匹配',matchButtonDisabled:true};
+  let reads=0;
+  activePage={url:()=> 'https://www.zhipin.com/web/chat/aiform',waitForFunction:async()=>{},evaluate:async()=>{reads++;return form;}};
+  assert.deepEqual(JSON.parse(await runBossSearch({json:true})),{matched:false,form});
+  assert.equal(reads,1);
+});
+
+test('send JSON reports page-confirmed message, preserves text, and does not request resume implicitly', async () => {
+  const pressed=[];
+  const typed=[];
+  activePage={url:()=> 'https://www.zhipin.com/web/chat/index',
+    $:async selector=>{assert.equal(selector,'#boss-chat-editor-input');return {click:async()=>{}};},
+    keyboard:{down:async()=>{},up:async()=>{},press:async key=>pressed.push(key),type:async char=>typed.push(char)},
+    evaluate:async()=>0,waitForFunction:async()=>{},
+  };
+  assert.deepEqual(JSON.parse(await runSendChatMessage({text:'测"试',json:true})),{text:'测"试',target:null,status:'message-visible',requestResume:false});
+  assert.equal(typed.join(''),'测"试');
+  assert.equal(pressed.filter(key=>key==='Enter').length,1);
+});
+
+test('accept action JSON is produced only after the received attachment check; handled requests fail', async () => {
+  let checks=0;
+  let evaluations=0;
+  const page={url:()=> 'https://www.zhipin.com/web/chat/index',$:async()=>({}),
+    evaluate:async()=> ++evaluations===1?0:{kind:'clicked',which:'agree'},
+    waitForFunction:async()=>{checks++;},
+  };
+  assert.deepEqual(JSON.parse(await runChatActionOnCurrentConversation(page,{action:'agree-resume',json:true})),{action:'agree-resume',kind:'clicked',which:'agree',target:null,attachmentReceived:true});
+  assert.equal(checks,1);
+  evaluations=0;
+  page.evaluate=async()=> ++evaluations===1?0:{kind:'already_handled',which:'agree'};
+  await assert.rejects(runChatActionOnCurrentConversation(page,{action:'agree-resume',json:true}),/已经处理/);
+  assert.equal(checks,1);
+});

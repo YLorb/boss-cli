@@ -26,6 +26,7 @@ import {
   assertRecommendPageReadyForPreview,
   isBossChatRecommendUrl,
   openRecommendResumePreview,
+  readCurrentRecommendJobLabel,
 } from './recommend.js';
 import {
   assertNormalSearchPageReadyForPreview,
@@ -35,6 +36,7 @@ import {
 } from './normal-search.js';
 
 export type PreviewOptions = {
+  json?: boolean;
   candidateTarget: string;
 };
 
@@ -47,23 +49,27 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
     return await withBossSessionPage(async (page) => {
       const url = page.url();
       let jobLine: string;
+      let job: string;
       let savedOriginal: Awaited<ReturnType<typeof snapshotBossPageViewport>>;
       let opened: boolean;
 
       if (isBossChatAiFormUrl(url)) {
         await ensureInDeepSearchPage(page);
         const label = await readAiFormSelectedJobLabel(page);
+        job = label;
         jobLine = `当前岗位：${label}`;
         savedOriginal = await snapshotBossPageViewport(page);
         opened = await openDeepSearchResumePreview(page, target);
       } else if (isBossChatRecommendUrl(url)) {
         const frame = await assertRecommendPageReadyForPreview(page);
+        job = options.json ? await readCurrentRecommendJobLabel(frame) : '';
         jobLine = '当前岗位：当前推荐列表';
         savedOriginal = await snapshotBossPageViewport(page);
         opened = await openRecommendResumePreview(frame, target);
       } else if (isBossChatSearchUrl(url)) {
         const frame = await assertNormalSearchPageReadyForPreview(page);
         const label = await readNormalSearchSelectedJobLabel(frame);
+        job = label;
         jobLine = `当前岗位：${label}`;
         savedOriginal = await snapshotBossPageViewport(page);
         opened = await openNormalSearchResumePreview(frame, target);
@@ -100,6 +106,8 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
 
       const disclaimer =
         '说明：平台对在线简历的每日可查看次数有限，请按需使用、谨慎查看。';
+
+      if (options.json) return JSON.stringify({ name: target, sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot' });
 
       return [jobLine, `简历预览截图：${absPath}`, '', disclaimer].join('\n');
     });

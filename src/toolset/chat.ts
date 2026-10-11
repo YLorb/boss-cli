@@ -54,7 +54,7 @@ async function waitForChatHistoryPanelReady(page: Page, selectedTab?: string): P
  * 打开「沟通记录」弹窗，依次读取「同事沟通」「我的沟通」列表，关闭弹窗。
  * 未找到入口时返回 null（视为暂无同事沟通记录，不输出该段）。
  */
-async function fetchColleagueChatHistorySection(page: Page): Promise<string | null> {
+async function fetchColleagueChatHistorySection(page: Page, json = false): Promise<string | null> {
   const clicked = (await page.evaluate(`(() => {
     function norm(v) {
       return (v ?? "").replace(/\\s+/g, " ").trim();
@@ -95,7 +95,8 @@ async function fetchColleagueChatHistorySection(page: Page): Promise<string | nu
 
   try {
     await waitForChatHistoryPanelReady(page);
-  } catch {
+  } catch (error) {
+    if (json) throw error;
     return '(已点击「沟通记录」，但弹窗未在预期时间内出现。)';
   }
 
@@ -163,10 +164,11 @@ async function fetchColleagueChatHistorySection(page: Page): Promise<string | nu
 
   await closeChatHistoryPopup(page);
 
+  if (json) return JSON.stringify({ action: 'history', status: 'read', colleague: rowsColleague, mine: rowsMine });
   return parts.join('\n');
 }
 
-export async function runGetCommunicationHistory(page: Page): Promise<string> {
+export async function runGetCommunicationHistory(page: Page, json = false): Promise<string> {
   const currentUrl = page.url();
   if (!isBossChatIndexUrl(currentUrl)) {
     throw new Error('请先进入聊天列表页（/web/chat/index）并打开候选人聊天。');
@@ -177,10 +179,12 @@ export async function runGetCommunicationHistory(page: Page): Promise<string> {
   }
 
   let historyBlock: string | null = null;
-  historyBlock = await fetchColleagueChatHistorySection(page);
+  historyBlock = await fetchColleagueChatHistorySection(page, json);
   if (historyBlock === null) {
+    if (json) return JSON.stringify({ action: 'history', status: 'unavailable', colleague: null, mine: null });
     return '未找到「沟通记录」入口，或当前候选人暂无可读取记录。';
   }
+  if (json) return historyBlock;
   return ['同事/我的沟通记录：', '', historyBlock].join('\n');
 }
 
@@ -433,7 +437,7 @@ async function scrapeCurrentChatMessages(page: Page): Promise<ChatMessageSnapsho
   })()`)) as ChatMessageSnapshot;
 }
 
-async function renderOpenedCandidateChat(page: Page, foundName: string): Promise<string> {
+export async function renderOpenedCandidateChat(page: Page, foundName: string, json = false): Promise<string> {
   await waitForOpenedCandidateChat(page, foundName);
   const scraped = await scrapeCurrentChatMessages(page);
   const detailLines = scraped.messages.map((m) => {
@@ -444,6 +448,10 @@ async function renderOpenedCandidateChat(page: Page, foundName: string): Promise
 
   const resumeStatus = scraped.hasFriendResumeAttachment ? '已获取' : '未获取';
   const summary = await fetchCandidateSummary(page, foundName, true);
+  if (json) {
+    const dataId = await page.evaluate(`(() => document.querySelector('.geek-item.selected')?.getAttribute('data-id') ?? '')()`);
+    return JSON.stringify({ name: foundName, dataId, summary, ...scraped });
+  }
 
   const out: string[] = [
     `成功进入候选人聊天：${foundName}`,
@@ -492,6 +500,7 @@ export async function runOpenCandidateChatByIndex(
     filter?: 'all' | 'unread';
     expectedName?: string;
     exact?: boolean;
+    json?: boolean;
   },
 ): Promise<string> {
   if (!Number.isInteger(params.index) || params.index < 1) {
@@ -550,13 +559,14 @@ export async function runOpenCandidateChatByIndex(
 
   await page.mouse.click(rowInfo.x, rowInfo.y, { delay: 40 });
   await sleepRandom(OPEN_CHAT_AFTER_ROW_CLICK_MS.min, OPEN_CHAT_AFTER_ROW_CLICK_MS.max);
-  return renderOpenedCandidateChat(page, rowInfo.name);
+  return renderOpenedCandidateChat(page, rowInfo.name, params.json);
 }
 
 export async function runOpenCandidateChat(
   page: Page,
   candidateName: string,
   exact = true,
+  json = false,
 ): Promise<string> {
   const targetName = candidateName.trim();
 
@@ -838,6 +848,10 @@ export async function runOpenCandidateChat(
 
     const resumeStatus = hasFriendResumeAttachment ? '已获取' : '未获取';
     const summary = await fetchCandidateSummary(page, foundName || targetName, exact);
+    if (json) {
+      const dataId = await page.evaluate(`(() => document.querySelector('.geek-item.selected')?.getAttribute('data-id') ?? '')()`);
+      return JSON.stringify({ name: foundName || targetName, dataId, summary, messages: fullMessages, hasFriendResumeAttachment });
+    }
 
     const out: string[] = [
       `成功进入候选人聊天：${foundName}`,
