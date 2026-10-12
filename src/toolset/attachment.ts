@@ -11,9 +11,9 @@ import { ATTACHMENT_PREVIEW_CONTENT_SELECTOR, assertSelectedConversation, closeA
 const MAX_BYTES = 50 * 1024 * 1024;
 
 /** 接受当前候选人发来的附件请求；不发送任何文字消息。 */
-export async function runAcceptTargetResume(target: ConversationTarget, json = false): Promise<string> {
+export async function runAcceptTargetResume(target: ConversationTarget, json = false, check = false): Promise<string> {
   return withBossSessionPage(async (page) => {
-    await openConversationByTarget(page, target);
+    await openConversationByTarget(page, target, check);
     return runChatActionOnCurrentConversation(page, { action: 'agree-resume', target, json });
   });
 }
@@ -63,9 +63,10 @@ async function sha256File(file: string): Promise<string> {
 export async function runDownloadTargetResume(
   target: ConversationTarget,
   outputDir = path.join(APP_HOME, 'resume-files'),
+  check = false,
 ): Promise<string> {
   return withBossSessionPage(async (page) => {
-    await openConversationByTarget(page, target);
+    await openConversationByTarget(page, target, check);
     const cardName = await latestAttachmentCard(page);
     await assertSelectedConversation(page, target);
     const previewButtons = await page.$$('.chat-message-list .message-item .item-friend:has(.resume-icon) .message-card-buttons .card-btn');

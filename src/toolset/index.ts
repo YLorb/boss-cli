@@ -47,12 +47,12 @@ export async function implOpenTargetChat(target: ConversationTarget, json = fals
   });
 }
 
-export async function implAcceptTargetResume(target: ConversationTarget, json = false): Promise<string> {
-  return runAcceptTargetResume(target, json);
+export async function implAcceptTargetResume(target: ConversationTarget, json = false, check = false): Promise<string> {
+  return runAcceptTargetResume(target, json, check);
 }
 
-export async function implDownloadTargetResume(target: ConversationTarget, outputDir?: string): Promise<string> {
-  return runDownloadTargetResume(target, outputDir);
+export async function implDownloadTargetResume(target: ConversationTarget, outputDir?: string, check = false): Promise<string> {
+  return runDownloadTargetResume(target, outputDir, check);
 }
 
 export async function implOpenChatByIndex(params: {
@@ -86,12 +86,14 @@ export async function implSendMessage(params: {
   requestResume?: boolean;
   target?: ConversationTarget;
   json?: boolean;
+  check?: boolean;
 }): Promise<string> {
   return runSendChatMessage({
     text: params.text || undefined,
     requestResume: params.requestResume,
     target: params.target,
     json: params.json,
+    check: params.check,
   });
 }
 

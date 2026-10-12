@@ -15,6 +15,9 @@
 
 ## 约定
 
+- `send` 将整段话术写入剪贴板，全选后粘贴，核对输入内容再发送；任何一步失败直接报错，不回退到逐字符输入。该操作会覆盖系统剪贴板文本。
+- `download-resume`、`accept-resume` 和指定姓名及 `data-id` 的 `send` 支持无值开关 `--check`。加开关时直接只读读取当前沟通页选中行的 `data-id`；相同 ID 时仅核对姓名、选中行和详情，不关闭预览、不切分类、不滚动、不再次点击会话。不相同时正常按联合键定位。相同 ID 但姓名或详情不符直接报错，不改走定位路径。未加开关仍执行完整定位。直接比较页面现状，不安装全局变量或 DOM 观察器；当前选中行数量异常直接报错。
+
 - 所有业务命令支持 `--json`：`login/list/chat/action/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet`。默认文本行为保留，`download-resume` 默认已输出 JSON；JSON 字段与用法见 [CLI JSON 输出](cli-json-output.md)。JSON 模式 stdout 仅输出一个结果，日志走 stderr，参数或执行失败输出 JSON 错误并返回非零退出码。
 - `chat --data-id --json` 在身份核对后读取人才摘要、当前已加载的消息和附件存在标记；默认文本仍仅输出定位确认。`jd --json` 继续保存和复用 Markdown，返回正文、文件路径与 `cache/page` 来源，不解析 Markdown 或强制刷新。
 

@@ -161,16 +161,17 @@ function printHelp(): void {
       仅用于已建立联系的候选人（即在 list 里可见的会话对象）
   boss chat <姓名> --data-id <会话ID>
       在顶部「全部」会话中按姓名 + data-id 精确定位并核对详情
-  boss accept-resume <姓名> --data-id <会话ID>
+  boss accept-resume <姓名> --data-id <会话ID> [--check]
       在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
-  boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]
+  boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]
       下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
+      --check：检查当前会话，同一 data-id 时跳过列表定位；仍核对姓名与详情
   boss action <操作> [--remark <备注>]
       仅在当前聊天页已打开候选人详情时执行操作，并只返回 action 执行结果
       操作: resume | not-fit | remark | agree-resume | request-attachment-resume | history | wechat
       request-attachment-resume：工具栏「求简历」，确认后向对方发送默认话术索要附件简历（需双方各至少发过一条消息）
       操作为 remark 时必须提供 --remark
-  boss send [--text <内容>] [-t <内容>] [--name <姓名> --data-id <会话ID>] [--request-resume]
+  boss send [--text <内容>] [-t <内容>] [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]
       仅发送文本消息（等价于在当前会话输入框发送后回车）
       --request-resume：发送后延迟片刻自动执行「求简历」操作
   boss positions
@@ -198,7 +199,7 @@ function printHelp(): void {
 }
 
 /** 解析 `--key value` / `--key=value` / 布尔 `--flag` */
-function parseOpts(argv: string[]): {
+function parseOpts(argv: string[], booleanFlags: ReadonlySet<string> = new Set()): {
   rest: string[];
   flags: Set<string>;
   opts: Record<string, string>;
@@ -216,10 +217,15 @@ function parseOpts(argv: string[]): {
       const eq = a.indexOf('=');
       if (eq !== -1) {
         const k = a.slice(2, eq);
+        if (booleanFlags.has(k)) die(`❌ --${k} 是布尔开关，不接受值。`);
         opts[k] = a.slice(eq + 1);
         continue;
       }
       const key = a.slice(2);
+      if (booleanFlags.has(key)) {
+        flags.add(key);
+        continue;
+      }
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith('-')) {
         opts[key] = next;
@@ -507,21 +513,23 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'accept-resume' || cmd === 'download-resume') {
-    const { rest, opts, flags } = parseOpts(tail);
+    const { rest, opts, flags } = parseOpts(tail, new Set(['check']));
+    const check = flags.has('check');
     const name = rest.join(' ').trim();
     const dataId = (opts['data-id'] ?? '').trim();
     const allowed = cmd === 'download-resume' ? ['data-id', 'output-dir'] : ['data-id'];
-    if (!name || !dataId || flags.size || Object.keys(opts).some((key) => !allowed.includes(key))) {
-      die(`❌ 用法: ${cmd} <姓名> --data-id <会话ID>${cmd === 'download-resume' ? ' [--output-dir <目录>]' : ''}`);
+    if (!name || !dataId || Array.from(flags).some(flag => flag !== 'check') || Object.keys(opts).some((key) => !allowed.includes(key))) {
+      die(`❌ 用法: ${cmd} <姓名> --data-id <会话ID>${cmd === 'download-resume' ? ' [--output-dir <目录>]' : ''} [--check]`);
     }
     const target = { name, dataId };
     return cmd === 'accept-resume'
-      ? implAcceptTargetResume(target, json)
-      : implDownloadTargetResume(target, opts['output-dir']?.trim() || undefined);
+      ? implAcceptTargetResume(target, json, check)
+      : implDownloadTargetResume(target, opts['output-dir']?.trim() || undefined, check);
   }
 
   if (cmd === 'send') {
-    const { flags, opts } = parseOpts(tail);
+    const { flags, opts } = parseOpts(tail, new Set(['check']));
+    const check = flags.has('check');
     const text = opts.text?.trim() || opts.t?.trim() || '';
     if (!text) {
       die('❌ 用法: send [--text <消息>] [-t <消息>] [--request-resume]');
@@ -532,11 +540,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (Boolean(name) !== Boolean(dataId)) {
       die('❌ 指定收件人时必须同时提供 --name 和 --data-id。');
     }
+    if (check && !name) die('❌ send --check 必须同时提供 --name 和 --data-id。');
     if (Object.keys(opts).some((key) => !['text', 't', 'name', 'data-id'].includes(key)) ||
-        Array.from(flags).some((flag) => flag !== 'request-resume')) {
-      die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume]');
+        Array.from(flags).some((flag) => flag !== 'request-resume' && flag !== 'check')) {
+      die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]');
     }
-    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json });
+    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check });
   }
 
   if (cmd === 'positions') {

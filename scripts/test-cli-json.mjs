@@ -22,9 +22,12 @@ test('every business command forwards --json to its reader, including aliases an
     [['chat','测试候选人','--strict','--json'],'implOpenChat',['测试候选人',true,true]],
     [['chat','--index','2','--unread','--json'],'implOpenChatByIndex',[{index:2,unreadOnly:true,expectedName:undefined,exact:false,json:true}]],
     [['action','remark','--remark','包含换行\n和引号"','--json'],'implChatAction',[{action:'remark',remark:'包含换行\n和引号"',json:true}]],
-    [['accept-resume','测试候选人','--data-id','123','--json'],'implAcceptTargetResume',[{name:'测试候选人',dataId:'123'},true]],
-    [['download-resume','测试候选人','--data-id','123','--json'],'implDownloadTargetResume',[{name:'测试候选人',dataId:'123'},undefined]],
-    [['send','--text','含引号"与换行\n的消息','--name','测试候选人','--data-id','123','--json'],'implSendMessage',[{text:'含引号"与换行\n的消息',requestResume:false,target:{name:'测试候选人',dataId:'123'},json:true}]],
+    [['accept-resume','测试候选人','--data-id','123','--json'],'implAcceptTargetResume',[{name:'测试候选人',dataId:'123'},true,false]],
+    [['download-resume','测试候选人','--data-id','123','--json'],'implDownloadTargetResume',[{name:'测试候选人',dataId:'123'},undefined,false]],
+    [['send','--text','含引号"与换行\n的消息','--name','测试候选人','--data-id','123','--json'],'implSendMessage',[{text:'含引号"与换行\n的消息',requestResume:false,target:{name:'测试候选人',dataId:'123'},json:true,check:false}]],
+    [['download-resume','--check','测试候选人','--data-id','123','--json'],'implDownloadTargetResume',[{name:'测试候选人',dataId:'123'},undefined,true]],
+    [['accept-resume','测试候选人','--data-id','123','--check','--json'],'implAcceptTargetResume',[{name:'测试候选人',dataId:'123'},true,true]],
+    [['send','--check','--text','测试','--name','测试候选人','--data-id','123','--json'],'implSendMessage',[{text:'测试',requestResume:false,target:{name:'测试候选人',dataId:'123'},json:true,check:true}]],
     [['positions','--json'],'implListPositions',[true]],
     [['jd','测试岗位','--json'],'implListPositionsWithOptions',[{detail:true,name:'测试岗位',json:true}]],
     [['search','--json','评估'],'implNormalSearch',['评估',true]],
@@ -52,7 +55,7 @@ test('literal --json after -- and inside --text=value is not an output flag; tex
 
 test('invalid JSON commands fail before invoking a business action', async () => {
   const count=calls.length;
-  for(const argv of [['chat','--index','0','--json'],['accept-resume','name','--json'],['send','--json'],['action','remark','--json'],['update','--json'],['action','not-fit','--json=false']]) {
+  for(const argv of [['chat','--index','0','--json'],['accept-resume','name','--json'],['send','--json'],['action','remark','--json'],['update','--json'],['action','not-fit','--json=false'],['download-resume','name','--data-id','123','--check=true'],['send','--text','测试','--check']]) {
     await assert.rejects(executeCommand(argv));
   }
   assert.equal(calls.length,count);
@@ -123,14 +126,16 @@ test('deep-search JSON preserves unknown count and disabled state without trigge
 
 test('send JSON reports page-confirmed message, preserves text, and does not request resume implicitly', async () => {
   const pressed=[];
-  const typed=[];
+  const evaluations=[];
   activePage={url:()=> 'https://www.zhipin.com/web/chat/index',
     $:async selector=>{assert.equal(selector,'#boss-chat-editor-input');return {click:async()=>{}};},
-    keyboard:{down:async()=>{},up:async()=>{},press:async key=>pressed.push(key),type:async char=>typed.push(char)},
-    evaluate:async()=>0,waitForFunction:async()=>{},
+    keyboard:{down:async()=>{},up:async()=>{},press:async key=>pressed.push(key)},
+    createCDPSession:async()=>({send:async()=>{},detach:async()=>{}}),
+    evaluate:async script=>{evaluations.push(script);return 0;},waitForFunction:async()=>{},
   };
   assert.deepEqual(JSON.parse(await runSendChatMessage({text:'测"试',json:true})),{text:'测"试',target:null,status:'message-visible',requestResume:false});
-  assert.equal(typed.join(''),'测"试');
+  assert.ok(evaluations.some(script=>script.includes('navigator.clipboard.writeText')));
+  assert.equal(pressed.filter(key=>key==='KeyV').length,1);
   assert.equal(pressed.filter(key=>key==='Enter').length,1);
 });
 
