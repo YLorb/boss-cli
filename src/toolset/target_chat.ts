@@ -1,6 +1,6 @@
 import type { Page } from 'puppeteer-core';
 import { sleepRandom } from '../browser/index.js';
-import { ensureChatListReady, selectChatCategory } from './list.js';
+import { ensureChatListReady } from './list.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
 
 export type ConversationTarget = { name: string; dataId: string };
@@ -70,9 +70,7 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
     }
   }
   await closeAttachmentPreview(page);
-  await ensureChatListReady(page, 'all');
-  await selectChatCategory(page, 'all');
-  await ensureChatListReady(page, 'all');
+  await ensureChatListReady(page, 'all', 'all');
 
   for (let round = 0; round < 120; round++) {
     const state = (await page.evaluate(`(() => {

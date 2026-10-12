@@ -11,3 +11,4 @@ dist/
 /docs/resume-collection-sop.md
 /src/sop/
 /scripts/test-resume-sop.mjs
+/scripts/local-resume-collection/

@@ -33,12 +33,12 @@ test('readonly conversation checks work across CLI processes without global stat
     assert.equal((await readSelectedConversation(page)).count, 0);
     await openConversationByTarget(page, { name: '甲', dataId: '123-0' }, true);
     assert.equal((await readSelectedConversation(page)).dataId, '123-0');
-    assert.equal(listCalls, 3);
+    assert.equal(listCalls, 1);
     await openConversationByTarget(page, { name: '甲', dataId: '123-0' }, true);
-    assert.equal(listCalls, 3);
+    assert.equal(listCalls, 1);
     assert.equal(await page.evaluate('window.chatClicks'), 1);
     await assert.rejects(openConversationByTarget(page, { name: '错误姓名', dataId: '123-0' }, true), /身份校验失败/);
-    assert.equal(listCalls, 3);
+    assert.equal(listCalls, 1);
 
     // A fresh Node process reads current DOM without storing state or clicking any row.
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
@@ -57,15 +57,15 @@ test('readonly conversation checks work across CLI processes without global stat
     await page.click('[data-id="456-0"]');
     assert.equal((await readSelectedConversation(page)).dataId, '456-0');
     await openConversationByTarget(page, { name: '乙', dataId: '456-0' }, true);
-    assert.equal(listCalls, 3);
+    assert.equal(listCalls, 1);
     await openConversationByTarget(page, { name: '乙', dataId: '456-0' });
-    assert.equal(listCalls, 6); // No flag preserves explicit full positioning.
+    assert.equal(listCalls, 2); // No flag preserves explicit full positioning.
     await page.evaluate("document.querySelector('.name-box').textContent = '错误详情'");
     await assert.rejects(openConversationByTarget(page, { name: '乙', dataId: '456-0' }, true), /身份校验失败/);
-    assert.equal(listCalls, 6);
+    assert.equal(listCalls, 2);
     await page.evaluate("document.querySelector('[data-id=\"123-0\"]').classList.add('selected')");
     await assert.rejects(openConversationByTarget(page, { name: '乙', dataId: '456-0' }, true), /选中行数量异常/);
-    assert.equal(listCalls, 6);
+    assert.equal(listCalls, 2);
     await page.goto('https://www.zhipin.com/web/chat/index');
     assert.equal((await readSelectedConversation(page)).count, 0);
   } finally { await browser.close(); }
