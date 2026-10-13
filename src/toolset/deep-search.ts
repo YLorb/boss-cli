@@ -31,6 +31,7 @@ export type DeepSearchGeekItem = {
 };
 
 export type BossSearchOptions = {
+  json?: boolean;
   jobKeyword?: string;
   coreRequirements?: string[];
   bonusRequirements?: string[];
@@ -1472,7 +1473,7 @@ export function renderGeekListSection(title: string, items: DeepSearchGeekItem[]
   return lines.join('\n').trimEnd();
 }
 
-export async function clickGreetDeepSearch(page: Page, target: string): Promise<{ message: string }> {
+export async function clickGreetDeepSearch(page: Page, target: string): Promise<{ message: string; name: string }> {
   const targetLiteral = JSON.stringify(target.trim());
   const result = (await page.evaluate(
     `(() => {
@@ -1546,7 +1547,7 @@ export async function clickGreetDeepSearch(page: Page, target: string): Promise<
     case 'disabled':
       throw new Error(`候选人 ${result.name} 的打招呼不可用（可能已打过招呼）。`);
     case 'clicked':
-      return { message: `已对 ${result.name} 在深度搜索页点击「打招呼」。` };
+      return { message: `已对 ${result.name} 在深度搜索页点击「打招呼」。`, name: result.name };
     default: {
       const _x: never = result;
       throw new Error(`未知结果：${String(_x)}`);
@@ -1718,9 +1719,11 @@ export async function runBossSearch(opts: BossSearchOptions = {}): Promise<strin
           ? '深度搜索：已更新表单，未触发「立即匹配」。'
           : '深度搜索：当前表单（未触发「立即匹配」）。';
       if (!shouldMatch) {
+        if (opts.json) return JSON.stringify({ matched: false, form: snap });
         return renderSearchFormSummary(snap, actionLine);
       }
       const geeks = (await readDeepSearchGeekList(page)).slice(0, 20);
+      if (opts.json) return JSON.stringify({ matched: true, form: snap, candidates: geeks });
       const listTitle = shouldMatch ? '本次新增推荐简历（最新20条）' : '推荐简历';
       return renderDeepSearchOutput(snap, geeks, actionLine, listTitle);
     });

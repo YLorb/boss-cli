@@ -49,7 +49,7 @@ async function pickExistingPage(browser: Browser): Promise<Page | null> {
  * 登录（手动）：只负责打开 Boss 登录页，让用户在浏览器中自行完成登录。
  * 不做登录态校验/等待/超时判断；成功与否由后续命令自行体现。
  */
-export async function runLogin(): Promise<string> {
+export async function runLogin(json = false): Promise<string> {
   // 登录必须可见：即使之前已启动 headless 会话，也需要重启为 headful。
   traceLoginStep('准备连接可见浏览器');
   process.env.BOSS_BROWSER_HEADLESS = 'false';
@@ -94,6 +94,8 @@ export async function runLogin(): Promise<string> {
 
   await detachBrowserSession();
   traceLoginStep('CLI 已断开连接，浏览器窗口保持打开');
+
+  if (json) return JSON.stringify({ url: BOSS_LOGIN_URL, status: 'awaiting-manual-login' });
 
   // 不做任何登录校验：只把浏览器打开到登录页；立即断开 CDP，CLI 不与浏览器进程长期绑定。
   return [

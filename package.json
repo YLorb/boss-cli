@@ -48,6 +48,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "npm run build && node dist/cli/index.js",
+    "test:json": "node --experimental-test-module-mocks --test scripts/test-cli-json.mjs",
+    "test:paste": "node --experimental-test-module-mocks --test scripts/test-send-paste.mjs",
+    "test:check": "node --experimental-test-module-mocks --test scripts/test-conversation-check.mjs",
     "test:baidu": "node --env-file=.env scripts/test-baidu-ocr.mjs",
     "deploy": "npm --prefix landing run deploy"
   },

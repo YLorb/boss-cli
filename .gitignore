@@ -6,3 +6,9 @@ dist/
 .browser-profile/
 .boss-sessions/
 /docs/development-log.md
+
+# Local resume collection SOP and its dedicated implementation/tests
+/docs/resume-collection-sop.md
+/src/sop/
+/scripts/test-resume-sop.mjs
+/scripts/local-resume-collection/

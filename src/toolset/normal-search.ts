@@ -261,7 +261,7 @@ function renderNormalSearchCandidates(
   return lines.join('\n');
 }
 
-export async function runNormalSearch(keyword?: string): Promise<string> {
+export async function runNormalSearch(keyword?: string, json = false): Promise<string> {
   const kw = (keyword ?? '').trim();
   if (kw.length > 20) {
     throw new Error('常规搜索关键词最多 20 个字符。');
@@ -278,6 +278,7 @@ export async function runNormalSearch(keyword?: string): Promise<string> {
         readCurrentSearchJob(frame),
         readNormalSearchCandidates(frame),
       ]);
+      if (json) return JSON.stringify({ keyword: currentKeyword || kw, job: currentJob, candidates });
       return renderNormalSearchCandidates(candidates, {
         keyword: currentKeyword || kw,
         job: currentJob,

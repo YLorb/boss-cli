@@ -27,6 +27,7 @@ import {
   type ChatPageAction,
 } from '../toolset/index.js';
 import { printBossInteractiveBanner } from './banner.js';
+import { jsonError, splitJsonFlag } from './output.js';
 import {
   printPackageUpdateNoticeIfDue,
   printVersionInfo,
@@ -144,6 +145,10 @@ function printHelp(): void {
       显示当前版本并检查 npm 是否有更新
   boss update
       使用 npm 安装最新版 boss-cli
+  业务命令均支持 --json（login/list/chat/action/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet）
+      输出各命令的原始字段；JSON 模式 stdout 仅输出结果，诊断日志写 stderr
+      失败输出 {ok:false,command,error:{name,message}} 并返回非零退出码
+      jd --json 返回 Markdown 正文与缓存路径；download-resume 默认已输出 JSON
   boss login
       打开登录页（需要用户在浏览器中自行完成登录，这个命令会直接返回）
   boss list [--unread] [--chatting] [--json]
@@ -156,16 +161,17 @@ function printHelp(): void {
       仅用于已建立联系的候选人（即在 list 里可见的会话对象）
   boss chat <姓名> --data-id <会话ID>
       在顶部「全部」会话中按姓名 + data-id 精确定位并核对详情
-  boss accept-resume <姓名> --data-id <会话ID>
+  boss accept-resume <姓名> --data-id <会话ID> [--check]
       在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
-  boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]
+  boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]
       下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
+      --check：检查当前会话，同一 data-id 时跳过列表定位；仍核对姓名与详情
   boss action <操作> [--remark <备注>]
       仅在当前聊天页已打开候选人详情时执行操作，并只返回 action 执行结果
       操作: resume | not-fit | remark | agree-resume | request-attachment-resume | history | wechat
       request-attachment-resume：工具栏「求简历」，确认后向对方发送默认话术索要附件简历（需双方各至少发过一条消息）
       操作为 remark 时必须提供 --remark
-  boss send [--text <内容>] [-t <内容>] [--name <姓名> --data-id <会话ID>] [--request-resume]
+  boss send [--text <内容>] [-t <内容>] [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]
       仅发送文本消息（等价于在当前会话输入框发送后回车）
       --request-resume：发送后延迟片刻自动执行「求简历」操作
   boss positions
@@ -193,7 +199,7 @@ function printHelp(): void {
 }
 
 /** 解析 `--key value` / `--key=value` / 布尔 `--flag` */
-function parseOpts(argv: string[]): {
+function parseOpts(argv: string[], booleanFlags: ReadonlySet<string> = new Set()): {
   rest: string[];
   flags: Set<string>;
   opts: Record<string, string>;
@@ -211,10 +217,15 @@ function parseOpts(argv: string[]): {
       const eq = a.indexOf('=');
       if (eq !== -1) {
         const k = a.slice(2, eq);
+        if (booleanFlags.has(k)) die(`❌ --${k} 是布尔开关，不接受值。`);
         opts[k] = a.slice(eq + 1);
         continue;
       }
       const key = a.slice(2);
+      if (booleanFlags.has(key)) {
+        flags.add(key);
+        continue;
+      }
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith('-')) {
         opts[key] = next;
@@ -377,7 +388,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   const cmd = normalizeSubcommand(argv[0]);
-  const tail = argv.slice(1);
+  const { args: tail, json } = splitJsonFlag(argv.slice(1));
+  const delimiter = tail.indexOf('--');
+  const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
+  if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
+  if (json && !['login', 'list', 'chat', 'action', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet'].includes(cmd)) {
+    die(`❌ ${cmd} 不支持 --json。`);
+  }
   configureHeadlessForCommand(cmd);
 
   if (cmd === '_baidu-keys') {
@@ -397,7 +414,8 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'login') {
-    return implLogin();
+    if (tail.length) die('❌ 用法: login [--json]');
+    return implLogin(json);
   }
 
   if (cmd === 'update') {
@@ -413,10 +431,10 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (rest.length || Object.keys(opts).length || Array.from(flags).some((f) => !['unread', 'chatting', 'json'].includes(f))) {
       die('❌ 用法: list [--unread] [--chatting] [--json]');
     }
-    if (flags.has('unread') && !flags.has('chatting') && !flags.has('json')) {
+    if (flags.has('unread') && !flags.has('chatting') && !json) {
       return implListUnreadCandidates();
     }
-    return implListCandidates({ unreadOnly: flags.has('unread'), chattingOnly: flags.has('chatting'), json: flags.has('json') });
+    return implListCandidates({ unreadOnly: flags.has('unread'), chattingOnly: flags.has('chatting'), json });
   }
 
   if (cmd === 'chat') {
@@ -441,7 +459,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       if (indexRaw || flags.has('unread') || !nameArg || Array.from(flags).some((f) => f !== 'strict')) {
         die('❌ 用法: chat <姓名> --data-id <会话ID>');
       }
-      return implOpenTargetChat({ name: nameArg, dataId });
+      return implOpenTargetChat({ name: nameArg, dataId }, json);
     }
     if (indexRaw) {
       const index = Number(indexRaw);
@@ -453,6 +471,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
         unreadOnly: flags.has('unread'),
         expectedName: nameArg || undefined,
         exact,
+        json,
       });
     }
     if (flags.has('unread')) {
@@ -461,7 +480,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!nameArg) {
       die('❌ 用法: chat <姓名> [--strict]；或 chat [姓名] --index <序号> [--unread]');
     }
-    return implOpenChat(nameArg, exact);
+    return implOpenChat(nameArg, exact, json);
   }
 
   if (cmd === 'action') {
@@ -490,25 +509,27 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (action === 'remark' && !remark) {
       die('❌ 当操作为 remark 时，必须提供 --remark <备注内容>。');
     }
-    return implChatAction({ action, remark });
+    return implChatAction({ action, remark, json });
   }
 
   if (cmd === 'accept-resume' || cmd === 'download-resume') {
-    const { rest, opts, flags } = parseOpts(tail);
+    const { rest, opts, flags } = parseOpts(tail, new Set(['check']));
+    const check = flags.has('check');
     const name = rest.join(' ').trim();
     const dataId = (opts['data-id'] ?? '').trim();
     const allowed = cmd === 'download-resume' ? ['data-id', 'output-dir'] : ['data-id'];
-    if (!name || !dataId || flags.size || Object.keys(opts).some((key) => !allowed.includes(key))) {
-      die(`❌ 用法: ${cmd} <姓名> --data-id <会话ID>${cmd === 'download-resume' ? ' [--output-dir <目录>]' : ''}`);
+    if (!name || !dataId || Array.from(flags).some(flag => flag !== 'check') || Object.keys(opts).some((key) => !allowed.includes(key))) {
+      die(`❌ 用法: ${cmd} <姓名> --data-id <会话ID>${cmd === 'download-resume' ? ' [--output-dir <目录>]' : ''} [--check]`);
     }
     const target = { name, dataId };
     return cmd === 'accept-resume'
-      ? implAcceptTargetResume(target)
-      : implDownloadTargetResume(target, opts['output-dir']?.trim() || undefined);
+      ? implAcceptTargetResume(target, json, check)
+      : implDownloadTargetResume(target, opts['output-dir']?.trim() || undefined, check);
   }
 
   if (cmd === 'send') {
-    const { flags, opts } = parseOpts(tail);
+    const { flags, opts } = parseOpts(tail, new Set(['check']));
+    const check = flags.has('check');
     const text = opts.text?.trim() || opts.t?.trim() || '';
     if (!text) {
       die('❌ 用法: send [--text <消息>] [-t <消息>] [--request-resume]');
@@ -519,11 +540,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (Boolean(name) !== Boolean(dataId)) {
       die('❌ 指定收件人时必须同时提供 --name 和 --data-id。');
     }
+    if (check && !name) die('❌ send --check 必须同时提供 --name 和 --data-id。');
     if (Object.keys(opts).some((key) => !['text', 't', 'name', 'data-id'].includes(key)) ||
-        Array.from(flags).some((flag) => flag !== 'request-resume')) {
-      die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume]');
+        Array.from(flags).some((flag) => flag !== 'request-resume' && flag !== 'check')) {
+      die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]');
     }
-    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined });
+    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check });
   }
 
   if (cmd === 'positions') {
@@ -531,7 +553,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (rest.length > 0 || Object.keys(opts).length > 0 || flags.size > 0) {
       die('❌ 用法: positions');
     }
-    return implListPositions();
+    return implListPositions(json);
   }
 
   if (cmd === 'jd') {
@@ -551,11 +573,11 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (unknownOpts.length > 0) {
       die(`❌ jd 不支持参数: --${unknownOpts.join(', --')}`);
     }
-    return implListPositionsWithOptions({ detail: true, name: detailName });
+    return implListPositionsWithOptions({ detail: true, name: detailName, json });
   }
 
   if (cmd === 'deep-search' || cmd === 'deepsearch') {
-    return implBossSearch(parseDeepSearchArgs(tail));
+    return implBossSearch({ ...parseDeepSearchArgs(tail), json });
   }
 
   if (cmd === 'search') {
@@ -564,7 +586,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       die('❌ 用法: search [关键词]');
     }
     const keyword = rest.join(' ').trim();
-    return implNormalSearch(keyword || undefined);
+    return implNormalSearch(keyword || undefined, json);
   }
 
   if (cmd === 'preview') {
@@ -580,7 +602,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!candidateTarget) {
       die('❌ 用法: preview <姓名>');
     }
-    return implPreview({ candidateTarget });
+    return implPreview({ candidateTarget, json });
   }
 
   if (cmd === 'recommend') {
@@ -592,7 +614,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       die('❌ 用法: recommend [岗位关键字]');
     }
     const jobKeyword = rest.join(' ').trim();
-    return implRecommend(jobKeyword || undefined);
+    return implRecommend(jobKeyword || undefined, json);
   }
 
   if (cmd === 'greet') {
@@ -609,7 +631,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!target) {
       die('❌ 用法: greet <姓名> [--job <岗位关键字>]');
     }
-    return implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined });
+    return implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json });
   }
 
   die(`❌ 未知命令 “${argv[0]}”。输入 help 查看用法。`);
@@ -623,7 +645,8 @@ export async function runOneCommand(argv: string[]): Promise<void> {
     const text = await executeCommand(argv);
     printStdout(text);
   } catch (e) {
-    console.error(e instanceof Error ? e.message : String(e));
+    if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
+    else console.error(e instanceof Error ? e.message : String(e));
     process.exitCode = 1;
   }
 }
@@ -666,7 +689,8 @@ async function runInteractiveLoop(): Promise<void> {
         });
         printStdout(text);
       } catch (e) {
-        console.error(e instanceof Error ? e.message : e);
+        if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
+        else console.error(e instanceof Error ? e.message : e);
       }
     }
   } finally {
@@ -697,7 +721,7 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
-  if (normalizeSubcommand(argv[0] ?? '') !== 'update') {
+  if (normalizeSubcommand(argv[0] ?? '') !== 'update' && !splitJsonFlag(argv.slice(1)).json) {
     await printPackageUpdateNoticeIfDue();
   }
 

@@ -87,9 +87,9 @@ async function waitForCandidateListSettled(
   }
 }
 
-async function clickChatFilterTab(page: Page, label: string): Promise<void> {
+async function clickChatFilterTab(page: Page, label: string): Promise<boolean> {
   const labelLiteral = JSON.stringify(label);
-  await page.evaluate(`(() => {
+  return (await page.evaluate(`(() => {
     const targetText = ${labelLiteral};
     const container = document.querySelector(".chat-message-filter-left");
     if (!container) {
@@ -102,9 +102,13 @@ async function clickChatFilterTab(page: Page, label: string): Promise<void> {
       const labels = spans.map((el) => norm(el.textContent)).filter(Boolean).join(",");
       throw new Error("未找到聊天筛选项：" + targetText + "；当前筛选项：" + (labels || "空"));
     }
-    target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    const selected = /active|selected|current|checked/.test(String(target.className || "")) ||
+      target.getAttribute("aria-selected") === "true" ||
+      !!target.closest(".active, .selected, .current, .checked");
+    if (selected) return false;
     target.click();
-  })()`);
+    return true;
+  })()`)) as boolean;
 }
 
 async function waitForChatFilterTabSelected(page: Page, label: string): Promise<void> {
@@ -131,6 +135,7 @@ async function waitForChatFilterTabSelected(page: Page, label: string): Promise<
 export async function ensureChatListReady(
   page: Page,
   filter: 'all' | 'unread' = 'all',
+  category?: 'all' | 'chatting',
 ): Promise<void> {
   traceListStep('确认或进入沟通列表页');
   await ensurePage(page, {
@@ -138,6 +143,8 @@ export async function ensureChatListReady(
     targetUrl: BOSS_CHAT_INDEX_URL,
     matches: isBossChatIndexUrl,
   });
+
+  if (category) await selectChatCategory(page, category);
 
   await page.waitForFunction(
     `(() => {
@@ -150,9 +157,9 @@ export async function ensureChatListReady(
   );
 
   const filterLabel = filter === 'unread' ? '未读' : '全部';
-  traceListStep(`点击列表「${filterLabel}」筛选`);
-  await clickChatFilterTab(page, filterLabel);
-  await sleepRandom(LIST_FILTER_GAP_MS.min, LIST_FILTER_GAP_MS.max);
+  const changed = await clickChatFilterTab(page, filterLabel);
+  traceListStep(changed ? `已点击列表「${filterLabel}」筛选` : `列表「${filterLabel}」已选中`);
+  if (changed) await sleepRandom(LIST_FILTER_GAP_MS.min, LIST_FILTER_GAP_MS.max);
   await waitForChatFilterTabSelected(page, filterLabel);
   await waitForCandidateListSettled(page, {
     timeoutMs: 18_000,

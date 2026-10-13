@@ -40,7 +40,7 @@ function ensureInCandidateChat(page: Page, actionLabel: string): Promise<void> {
 /**
  * 在聊天页右侧操作区执行「不合适」：该入口依赖 hover 后才响应真实点击，先派发 hover 再点一次。
  */
-async function markCandidateNotFitWithoutReason(page: Page): Promise<string> {
+async function markCandidateNotFitWithoutReason(page: Page, json = false): Promise<string> {
   await ensureInCandidateChat(page, '不合适');
 
   const hovered = (await page.evaluate(`(() => {
@@ -93,11 +93,11 @@ async function markCandidateNotFitWithoutReason(page: Page): Promise<string> {
   }
 
   await sleepRandom(320, 780);
-  return '已点击「不合适」。';
+  return json ? JSON.stringify({ action: 'not-fit', status: 'clicked' }) : '已点击「不合适」。';
 }
 
 /** 在聊天页右侧操作区点击「换微信」。 */
-async function runExchangeWechat(page: Page): Promise<string> {
+async function runExchangeWechat(page: Page, json = false): Promise<string> {
   await ensureInCandidateChat(page, '换微信');
 
   const availability = (await page.evaluate(`(() => {
@@ -191,14 +191,14 @@ async function runExchangeWechat(page: Page): Promise<string> {
   }
 
   await sleepRandom(320, 780);
-  return '已点击「换微信」并在弹窗中确认。';
+  return json ? JSON.stringify({ action: 'exchange-wechat', status: 'confirmed' }) : '已点击「换微信」并在弹窗中确认。';
 }
 
 /**
  * 在聊天页左侧工具栏点击「求简历」，并在确认弹窗中点「确定」。
  * 平台规则：双方需各至少发送一条消息后该入口才可点；否则按钮为禁用态。
  */
-export async function runRequestAttachmentResume(page: Page): Promise<string> {
+export async function runRequestAttachmentResume(page: Page, json = false): Promise<string> {
   await ensureInCandidateChat(page, '求简历');
 
   const availability = (await page.evaluate(`(() => {
@@ -294,13 +294,13 @@ export async function runRequestAttachmentResume(page: Page): Promise<string> {
   }
 
   await sleepRandom(320, 780);
-  return '已点击「求简历」并在弹窗中确认（将发送默认话术「方便发一份你的简历过来吗？」）。';
+  return json ? JSON.stringify({ action: 'request-attachment-resume', status: 'confirmed' }) : '已点击「求简历」并在弹窗中确认（将发送默认话术「方便发一份你的简历过来吗？」）。';
 }
 
 /**
  * 在聊天页通过「更多 -> 备注」更新候选人备注，并点击确认保存。
  */
-async function updateCandidateRemark(page: Page, remarkText: string): Promise<string> {
+async function updateCandidateRemark(page: Page, remarkText: string, json = false): Promise<string> {
   const nextRemark = remarkText.trim();
   if (!nextRemark) {
     throw new Error('备注内容不能为空。');
@@ -424,14 +424,14 @@ async function updateCandidateRemark(page: Page, remarkText: string): Promise<st
   }
 
   await sleepRandom(220, 580);
-  return `已更新备注: ${nextRemark}`;
+  return json ? JSON.stringify({ action: 'remark', status: 'saved', remark: nextRemark }) : `已更新备注: ${nextRemark}`;
 }
 
 /**
  * 对方「附件简历」确认卡片上点击「同意」。
  * 对应按钮 disabled 时视为已处理。
  */
-async function runIncomingResumeCardAction(page: Page, which: IncomingCardBtn, target?: ConversationTarget): Promise<string> {
+async function runIncomingResumeCardAction(page: Page, which: IncomingCardBtn, target?: ConversationTarget, json = false): Promise<string> {
   await ensureInCandidateChat(page, '附件简历处理');
   await sleepRandom(200, 550);
 
@@ -510,6 +510,7 @@ async function runIncomingResumeCardAction(page: Page, which: IncomingCardBtn, t
         el.querySelector('.message-card-top-title')?.textContent?.trim()).length > before;
     })()`, { timeout: 30_000 });
   }
+  if (json) return JSON.stringify({ action: 'agree-resume', ...result, target: target ?? null, attachmentReceived: result.which === 'agree' });
   return result.which === 'agree'
     ? '已点击「同意」，接受对方发送的附件简历。'
     : '已点击「拒绝」，拒绝接收对方附件简历。';
@@ -584,14 +585,14 @@ export type ChatPageAction =
 
 export async function runChatActionOnCurrentConversation(
   page: Page,
-  options: { action: ChatPageAction; remark?: string; target?: ConversationTarget },
+  options: { action: ChatPageAction; remark?: string; target?: ConversationTarget; json?: boolean },
 ): Promise<string> {
   const action = options.action;
   switch (action) {
     case 'not-fit':
-      return markCandidateNotFitWithoutReason(page);
+      return markCandidateNotFitWithoutReason(page, options.json);
     case 'remark':
-      return updateCandidateRemark(page, options.remark ?? '');
+      return updateCandidateRemark(page, options.remark ?? '', options.json);
     case 'resume': {
       await ensureInCandidateChat(page, '在线简历');
       const candidateLabel = await getCandidateLabelForResumeShot(page);
@@ -599,16 +600,17 @@ export async function runChatActionOnCurrentConversation(
       if (resumeShotPath === null) {
         throw new Error('未找到在线简历入口，或在线简历弹层未正常出现。');
       }
+      if (options.json) return JSON.stringify({ action: 'resume', name: candidateLabel, path: resumeShotPath, type: 'online-resume-screenshot' });
       return `在线简历操作成功，截图文件：${resumeShotPath}`;
     }
     case 'agree-resume':
-      return runIncomingResumeCardAction(page, 'agree', options.target);
+      return runIncomingResumeCardAction(page, 'agree', options.target, options.json);
     case 'request-attachment-resume':
-      return runRequestAttachmentResume(page);
+      return runRequestAttachmentResume(page, options.json);
     case 'exchange-wechat':
-      return runExchangeWechat(page);
+      return runExchangeWechat(page, options.json);
     case 'history':
-      return runGetCommunicationHistory(page);
+      return runGetCommunicationHistory(page, options.json);
     default: {
       const _x: never = action;
       throw new Error(`未知的 chat action: ${String(_x)}`);

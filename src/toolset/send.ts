@@ -3,9 +3,7 @@ import {
   selectAllModifierKey,
   SEND_AFTER_ENTER_MS,
   SEND_INPUT_CLICK_MS,
-  SEND_TYPING_GAP_MS,
   sleepRandom,
-  typeTextWithRandomKeyDelay,
 } from '../browser/index.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
@@ -17,6 +15,8 @@ export type SendChatMessageOptions = {
   requestResume?: boolean;
   signal?: AbortSignal;
   target?: ConversationTarget;
+  json?: boolean;
+  check?: boolean;
 };
 
 export async function runSendChatMessage(options: SendChatMessageOptions): Promise<string> {
@@ -27,11 +27,12 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
   if (!messageText) {
     throw new Error('请指定 --text <消息> 或 -t <消息>。');
   }
+  if (options.check && !options.target) throw new Error('send --check 必须同时提供 --name 和 --data-id。');
 
   try {
     return await withBossSessionPage(async (page) => {
       if (options.target) {
-        await openConversationByTarget(page, options.target);
+        await openConversationByTarget(page, options.target, options.check);
       }
       const currentUrl = page.url();
       if (!isBossChatIndexUrl(currentUrl)) {
@@ -47,7 +48,7 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
         const text = ${JSON.stringify(messageText)};
         const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
         return Array.from(document.querySelectorAll('.chat-message-list .item-myself .text span'))
-          .filter((el) => norm(el.textContent) === text).length;
+          .filter((el) => norm(el.textContent) === norm(text)).length;
       })()`)) as number;
 
       await input.click({
@@ -55,19 +56,29 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
       });
       await sleepRandom(60, 220, signal);
       const selectAllMod = selectAllModifierKey();
+      signal?.throwIfAborted();
+      const clipboardSession = await page.createCDPSession();
+      try {
+        await clipboardSession.send('Browser.setPermission', {
+          permission: { name: 'clipboard-write', allowWithoutSanitization: false },
+          setting: 'granted', origin: new URL(currentUrl).origin,
+        });
+        await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(messageText)})`);
+      } finally {
+        await clipboardSession.detach();
+      }
+      signal?.throwIfAborted();
+      // Re-focus and select immediately before pasting: clipboard access may change focus.
+      await input.click();
       await page.keyboard.down(selectAllMod);
       await page.keyboard.press('KeyA');
+      await page.keyboard.press('KeyV');
       await page.keyboard.up(selectAllMod);
-      await sleepRandom(45, 180, signal);
-      await page.keyboard.press('Backspace');
-      await sleepRandom(80, 260, signal);
-      await typeTextWithRandomKeyDelay(
-        page,
-        messageText,
-        SEND_TYPING_GAP_MS.min,
-        SEND_TYPING_GAP_MS.max,
-        signal,
-      );
+      await page.waitForFunction(`(() => {
+        const el = document.querySelector('#boss-chat-editor-input');
+        const norm = (v) => (v ?? '').replace(/\\r\\n/g, '\\n').trim();
+        return el && norm(el.value ?? el.innerText) === norm(${JSON.stringify(messageText)});
+      })()`, { timeout: 5_000 });
       await sleepRandom(120, 420, signal);
       if (options.target) await assertSelectedConversation(page, options.target);
       await page.keyboard.press('Enter');
@@ -77,17 +88,19 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
         const before = ${sentBefore};
         const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
         return Array.from(document.querySelectorAll('.chat-message-list .item-myself .text span'))
-          .filter((el) => norm(el.textContent) === text).length > before;
+          .filter((el) => norm(el.textContent) === norm(text)).length > before;
       })()`, { timeout: 15_000 });
       if (options.target) await assertSelectedConversation(page, options.target);
 
       if (!requestResume) {
+        if (options.json) return JSON.stringify({ text: messageText, target: options.target ?? null, status: 'message-visible', requestResume: false });
         return `已发送消息：${messageText}`;
       }
 
       await sleepRandom(1200, 2800, signal);
       if (options.target) await assertSelectedConversation(page, options.target);
-      const resumeResult = await runRequestAttachmentResume(page);
+      const resumeResult = await runRequestAttachmentResume(page, options.json);
+      if (options.json) return JSON.stringify({ text: messageText, target: options.target ?? null, status: 'message-visible', requestResume: true, resumeRequest: JSON.parse(resumeResult) });
       return `已发送消息：${messageText}\n${resumeResult}`;
     });
   } catch (e) {

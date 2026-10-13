@@ -1,8 +1,11 @@
 import type { Page } from 'puppeteer-core';
 import { sleepRandom } from '../browser/index.js';
-import { ensureChatListReady, selectChatCategory } from './list.js';
+import { ensureChatListReady } from './list.js';
+import { isBossChatIndexUrl } from '../common/auth.js';
 
 export type ConversationTarget = { name: string; dataId: string };
+
+export const ATTACHMENT_PREVIEW_CONTENT_SELECTOR = '.resume-detail-chat iframe.attachment-iframe, .resume-detail-chat img';
 
 export function requireConversationTarget(target: ConversationTarget): ConversationTarget {
   const name = target.name.trim();
@@ -11,10 +14,11 @@ export function requireConversationTarget(target: ConversationTarget): Conversat
   return { name, dataId };
 }
 
-/** 每次产生外部效果前核对选中的会话，避免页面焦点被其它操作切走。 */
-export async function assertSelectedConversation(page: Page, input: ConversationTarget): Promise<void> {
-  const target = requireConversationTarget(input);
-  const actual = (await page.evaluate(`(() => {
+type SelectedConversation = { count: number; dataId: string; name: string; detailName: string };
+
+/** 直接读取页面当前会话，不安装全局状态或观察器。 */
+export async function readSelectedConversation(page: Page): Promise<SelectedConversation> {
+  return (await page.evaluate(`(() => {
     const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
     const rows = Array.from(document.querySelectorAll('.geek-item.selected'));
     return {
@@ -23,34 +27,50 @@ export async function assertSelectedConversation(page: Page, input: Conversation
       name: norm(rows[0]?.querySelector('.geek-name')?.textContent),
       detailName: norm(document.querySelector('.base-info-single-container .name-box')?.textContent),
     };
-  })()`)) as { count: number; dataId: string; name: string; detailName: string };
+  })()`)) as SelectedConversation;
+}
+
+function assertConversationIdentity(actual: SelectedConversation, target: ConversationTarget): void {
   if (actual.count !== 1 || actual.dataId !== target.dataId ||
       actual.name !== target.name || actual.detailName !== target.name) {
-    throw new Error(`会话身份校验失败：期望「${target.name} / ${target.dataId}」，当前选中「${actual.name} / ${actual.dataId}」，详情「${actual.detailName}」。`);
+    throw new Error(`会话身份校验失败：期望「${target.name} / ${target.dataId}」，当前选中「${actual.name} / ${actual.dataId}」，详情「${actual.detailName}」，选中行数 ${actual.count}。`);
   }
+}
+
+/** 每次产生外部效果前核对选中的会话，避免页面焦点被其它操作切走。 */
+export async function assertSelectedConversation(page: Page, input: ConversationTarget): Promise<void> {
+  assertConversationIdentity(await readSelectedConversation(page), requireConversationTarget(input));
 }
 
 /** Close only the attachment preview that otherwise intercepts list wheel events. */
 export async function closeAttachmentPreview(page: Page): Promise<void> {
   const closed = await page.evaluate(`(() => {
-    const iframe = document.querySelector('.resume-detail-chat iframe.attachment-iframe');
-    if (!iframe || !iframe.getBoundingClientRect().width || !iframe.getBoundingClientRect().height) return false;
-    const root = iframe.closest('.new-resume-online-main-ui');
+    const previews = Array.from(document.querySelectorAll(${JSON.stringify(ATTACHMENT_PREVIEW_CONTENT_SELECTOR)}))
+      .filter((el) => el.getBoundingClientRect().width && el.getBoundingClientRect().height);
+    if (previews.length === 0) return false;
+    if (previews.length !== 1) throw new Error('可见附件预览数量异常：' + previews.length);
+    const root = previews[0].closest('.new-resume-online-main-ui');
     const close = root?.querySelector('.close-btn');
     if (!(close instanceof HTMLElement)) throw new Error('附件预览缺少关闭按钮，不能定位会话。');
     close.click();
     return true;
   })()`);
-  if (closed) await page.waitForSelector('.resume-detail-chat iframe.attachment-iframe', { hidden: true, timeout: 10_000 });
+  if (closed) await page.waitForSelector(ATTACHMENT_PREVIEW_CONTENT_SELECTOR, { hidden: true, timeout: 10_000 });
 }
 
 /** 在顶部「全部」会话中用联合键查找，禁止按同名首项隐式选择。 */
-export async function openConversationByTarget(page: Page, input: ConversationTarget): Promise<void> {
+export async function openConversationByTarget(page: Page, input: ConversationTarget, check = false): Promise<void> {
   const target = requireConversationTarget(input);
+  if (check && isBossChatIndexUrl(page.url())) {
+    const actual = await readSelectedConversation(page);
+    if (actual.count > 1) throw new Error(`当前会话选中行数量异常：${actual.count}；目标「${target.name} / ${target.dataId}」。`);
+    if (actual.count === 1 && actual.dataId === target.dataId) {
+      assertConversationIdentity(actual, target);
+      return;
+    }
+  }
   await closeAttachmentPreview(page);
-  await ensureChatListReady(page, 'all');
-  await selectChatCategory(page, 'all');
-  await ensureChatListReady(page, 'all');
+  await ensureChatListReady(page, 'all', 'all');
 
   for (let round = 0; round < 120; round++) {
     const state = (await page.evaluate(`(() => {
