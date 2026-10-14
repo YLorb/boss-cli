@@ -72,24 +72,27 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
   await closeAttachmentPreview(page);
   await ensureChatListReady(page, 'all', 'all');
 
-  // A preceding full inventory can leave the virtual list at its bottom.
-  const origin = await page.evaluate(`(() => {
-    const list = document.querySelector('.user-list');
-    if (!list) throw new Error('找不到会话列表容器，无法从顶部定位。');
-    const r = list.getBoundingClientRect();
-    if (!r.width || !r.height) throw new Error('会话列表容器不可见。');
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
-  })()`) as { x: number; y: number };
-  await page.mouse.move(origin.x, origin.y);
-  await page.mouse.wheel({ deltaY: -10_000_000 });
-  await sleepRandom(350, 550);
-
+  // Search from the current viewport, down then up. No unconditional jump to the top.
+  let direction = 1;
+  let previousSignature: string | undefined;
+  let unchanged = 0;
   for (let round = 0; round < 120; round++) {
     const state = (await page.evaluate(`(() => {
       const id = ${JSON.stringify(target.dataId)};
       const name = ${JSON.stringify(target.name)};
       const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
       const rows = Array.from(document.querySelectorAll('.geek-item'));
+      const container = document.querySelector('.user-list');
+      if (!container) throw new Error('找不到会话列表容器');
+      const viewport = container.getBoundingClientRect();
+      if (!viewport.width || !viewport.height) throw new Error('会话列表容器不可见');
+      const step = Math.max(1, Math.min(500, Math.floor(viewport.height * 0.65)));
+      const visible = rows.map(row => {
+        const r = row.getBoundingClientRect();
+        return { id: row.getAttribute('data-id'), top: Math.round(r.top - viewport.top), bottom: Math.round(r.bottom - viewport.top), visible: r.height > 0 && r.bottom > viewport.top && r.top < viewport.bottom };
+      }).filter(row => row.visible);
+      const scan = { x: viewport.left + viewport.width / 2, y: viewport.top + viewport.height / 2,
+        step, signature: JSON.stringify(visible) };
       const matches = rows.filter((el) => el.getAttribute('data-id') === id);
       if (matches.length > 1) return { kind: 'duplicate', foundName: '', x: 0, y: 0 };
       if (matches.length === 1) {
@@ -97,23 +100,18 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
         const foundName = norm(row.querySelector('.geek-name')?.textContent);
         if (foundName !== name) return { kind: 'name_mismatch', foundName, x: 0, y: 0 };
         const r = row.getBoundingClientRect();
-        const container = row.closest('.user-list');
-        if (!container) return { kind: 'no_scroller', foundName: '', x: 0, y: 0 };
-        const viewport = container.getBoundingClientRect();
+        if (row.closest('.user-list') !== container) throw new Error('候选人不在当前会话列表中');
+        if (r.height > viewport.height) throw new Error('候选人卡片高度超过列表视口，无法完整定位');
         if (r.top < viewport.top || r.bottom > viewport.bottom) {
-          return { kind: 'next', foundName, x: viewport.left + viewport.width / 2,
-            y: viewport.top + viewport.height / 2, deltaY: r.top < viewport.top ? -350 : 350 };
+          const distance = (r.top + r.bottom - viewport.top - viewport.bottom) / 2;
+          return { kind: 'next', foundName, ...scan,
+            deltaY: Math.sign(distance) * Math.min(step, Math.abs(distance)) };
         }
         return { kind: 'found', foundName, x: r.left + r.width / 2, y: r.top + r.height / 2 };
       }
-      const first = rows[0];
-      if (!first) return { kind: 'empty', foundName: '', x: 0, y: 0 };
-      // BOSS uses BetterScroll with overflow:hidden; scrollTop does not drive its virtual list.
-      const node = first.closest('.user-list');
-      if (!node) return { kind: 'no_scroller', foundName: '', x: 0, y: 0 };
-      const r = node.getBoundingClientRect();
-      return { kind: 'next', foundName: '', x: r.left + r.width / 2, y: r.top + r.height / 2 };
-    })()`)) as { kind: string; foundName: string; x: number; y: number; deltaY?: number };
+      if (!visible.length) throw new Error('当前会话列表没有可见候选人，无法确认加载或滚动状态');
+      return { kind: 'next', foundName: '', ...scan };
+    })()`)) as { kind: string; foundName: string; x: number; y: number; deltaY?: number; step: number; signature: string };
     if (state.kind === 'found') {
       await page.mouse.click(state.x, state.y, { delay: 40 });
       await page.waitForFunction(`(() => {
@@ -132,8 +130,17 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
       throw new Error(`data-id「${target.dataId}」的显示名称已变为「${state.foundName}」，与「${target.name}」不一致。`);
     }
     if (state.kind !== 'next') throw new Error(`未找到会话「${target.name} / ${target.dataId}」：${state.kind}。`);
+    unchanged = state.signature === previousSignature ? unchanged + 1 : 0;
+    previousSignature = state.signature;
+    if (unchanged >= 3) {
+      if (state.deltaY !== undefined) throw new Error(`会话列表滚轮无响应，无法显示目标「${target.name} / ${target.dataId}」。`);
+      if (direction === -1) throw new Error(`双向分段扫描未定位「${target.name} / ${target.dataId}」，列表不再移动；不能据此确认候选人不存在。`);
+      direction = -1;
+      unchanged = 0;
+      previousSignature = undefined;
+    }
     await page.mouse.move(state.x, state.y);
-    await page.mouse.wheel({ deltaY: state.deltaY ?? 500 });
+    await page.mouse.wheel({ deltaY: state.deltaY ?? direction * state.step });
     await sleepRandom(350, 550);
   }
   throw new Error(`扫描会话列表超过 120 轮，仍未找到「${target.name} / ${target.dataId}」。`);

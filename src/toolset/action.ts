@@ -4,7 +4,6 @@ import {
   ONLINE_RESUME_IFRAME_WAIT_MAX_MS,
   selectAllModifierKey,
   sleepRandom,
-  snapshotBossPageViewport,
 } from '../browser/index.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
 import {
@@ -525,16 +524,9 @@ async function getCandidateLabelForResumeShot(page: Page): Promise<string> {
   return name || 'candidate';
 }
 
-/**
- * 点击「在线简历」，对 `iframe` 元素整框截图（含视口外部分，见 `captureBeyondViewport`）。
- * 不依赖 `contentFrame()`，与内页是否 canvas / 跨域无关。
- *
- * 进入前记录视口（`snapshotBossPageViewport`，见 {@link captureCResumeIframeToFile}）。
- */
+/** 点击在线简历，保持视口，通过滚轮逐屏截图并校验拼接。 */
 async function captureOnlineResumeScreenshot(page: Page, candidateLabel: string): Promise<string | null> {
   ensureAppDataLayout();
-
-  const savedViewport = await snapshotBossPageViewport(page);
 
   const opened = await page.evaluate(() => {
     const a = document.querySelector('a.resume-btn-online') as HTMLAnchorElement | null;
@@ -566,7 +558,7 @@ async function captureOnlineResumeScreenshot(page: Page, candidateLabel: string)
   const fileName = `online-resume-${safeResumeScreenshotFileBase(candidateLabel)}-${Date.now()}.png`;
   const absPath = join(RESUME_SCREENSHOTS_DIR, fileName);
 
-  const ok = await captureCResumeIframeToFile(page, savedViewport, absPath);
+  const ok = await captureCResumeIframeToFile(page, absPath);
   if (!ok) {
     await closeCResumePanel(page);
     return null;

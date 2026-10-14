@@ -7,6 +7,8 @@ scope: "startup"
 
 # 启动与使用
 
+操作真实 BOSS 前必须读取[工具使用边界](tool-boundary.md)。限制覆盖启动、登录和全部业务阶段；不得用直接 CDP、内部模块或自写脚本代替 CLI，即使只是截图、监测或验收。命令缺失时停止并报告，不自行换工具。
+
 ## 配置
 
 首次部署先读取[环境配置](environment.md)完成Node.js、Chrome、PATH、CDP端口与数据目录设置。无需Git的下载及解压步骤见[安装说明](install.md)。
@@ -54,6 +56,8 @@ node .\dist\cli\index.js collect --job '目标岗位完整名称' --ledger-dir '
 仅查看评估的验收不启动正式账本写会话；保存独立运行记录即可。现存恢复状态若影响本轮去重，仍需读出并说明，不能跳过未决身份。
 
 ## 启动 prompt
+
+以下业务 prompt 须同时带上[严格工具约束 prompt](tool-boundary.md#可复用执行-prompt)；“仅查看”或“验收”不构成非 CLI 工具例外。
 
 推荐：
 > 使用 boss-recruitment Skill 执行推荐 SOP。目标岗位及 JD：……；评分标准：……；否决项：无；观察上限：5；触达门槛：……；允许查看、评估并对符合条件者发送已确认的消息3。运行目录：……。

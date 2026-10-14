@@ -1,6 +1,6 @@
 import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 import { sleepRandom } from '../browser/timing.js';
-import { resumeHeight, setTempHeight } from '../browser/viewport_temp.js';
+import { captureResumeByWheel } from './resume_scroll_capture.js';
 
 /** 在线简历 iframe：`src` 常为相对路径 `/web/frame/c-resume/...`，故用子串匹配 */
 export const C_RESUME_IFRAME_SELECTOR =
@@ -154,50 +154,18 @@ export async function waitForVisibleCResumeIframeReady(
 }
 
 /**
- * 在已出现 `c-resume` iframe 的页面上，对 iframe 整框截图并关闭弹层。
- * `preOpenViewport` 为打开弹层前的视口快照，请用 `snapshotBossPageViewport(page)`（`page.viewport()` 常为 null 时勿直接用默认尺寸）。
+ * 保持视口尺寸，通过简历区域内滚轮逐屏截图、校验并拼接，然后关闭弹层。
  */
 export async function captureCResumeIframeToFile(
   page: Page,
-  preOpenViewport: Awaited<ReturnType<Page['viewport']>>,
   absPath: string,
 ): Promise<boolean> {
-  try {
-    await setTempHeight(page, preOpenViewport);
-    await waitForVisibleCResumeIframeReady(page, 2_000);
-
-    const iframe = await findVisibleCResumeIframeHandle(page);
-    if (!iframe) {
-      return false;
-    }
-
-    await iframe.evaluate(`((el) => {
-      el.scrollIntoView({ block: "start", inline: "nearest" });
-    })`);
-
-    const box = await iframe.boundingBox();
-    if (!box) {
-      await iframe.dispose();
-      return false;
-    }
-
-    try {
-      await iframe.screenshot({
-        path: absPath,
-        type: 'png',
-        captureBeyondViewport: true,
-      });
-    } finally {
-      await iframe.dispose();
-    }
-
-    await sleepRandom(
-      C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS,
-      C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS,
-    );
-    await closeCResumePanel(page);
-    return true;
-  } finally {
-    await resumeHeight(page, preOpenViewport);
-  }
+  if (!(await waitForVisibleCResumeIframeReady(page, 2_000))) throw new Error('在线简历未就绪');
+  const iframe = await findVisibleCResumeIframeHandle(page);
+  if (!iframe) throw new Error('未找到可见在线简历 iframe');
+  try { await captureResumeByWheel(page, iframe, absPath); }
+  finally { await iframe.dispose(); }
+  await sleepRandom(C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS, C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS);
+  await closeCResumePanel(page);
+  return true;
 }

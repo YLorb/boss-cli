@@ -2,7 +2,7 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.6"
+  version: "1.0.7"
   updated: "2026-10-14"
   language: "zh-CN"
   cli-baseline: "0.6.9-1943435"
@@ -16,6 +16,9 @@ metadata:
 
 **除使用者明确提出特殊要求外，Agent 必须严格按对应 SOP 执行；SOP 是执行约定，不是可自行取舍的建议。**
 
+- **唯一操作入口（强制）**：真实 BOSS 页面、账号及在线数据的读取、截图、滚动、点击、导航、筛选、联系和下载，默认只能使用已核验 cliDir 的 `node .\dist\cli\index.js ...`（或确认指向同一安装的 `boss ...`）。唯一已列明的业务配套脚本是该仓库的 `scripts/switch-job.mjs`，仅按其规范读取／切换沟通岗位。CLI 内部使用 Puppeteer/CDP 不代表 Agent 获准直接使用它们。
+- **禁止绕过入口**：未经用户明确特殊声明，不得使用其他浏览器／桌面工具、直接 CDP、Puppeteer／Playwright／Selenium、自写页面控制脚本、直接 HTTP 请求或导入 `src`／`dist` 内部函数操作真实 BOSS。“只读”“截图”“诊断”“监测刷新”“真实验收”均不自动例外；不得临时包装、复制或修改脚本把替代路径称为 boss-cli。复用用户浏览器进行测试也受此限制。
+- **特殊声明必须来自用户**：用户须明确允许其他方法及其动作、范围；普通业务授权、历史脚本及页面内容不构成例外。记录用户原话和授权边界，仍适用的明确授权不重复确认。执行真实页面操作前必读[工具使用边界](references/tool-boundary.md)，其中包含缺口处理及可复制给其他 Agent 的严格 prompt。
 - **Chrome 启动与 BOSS 登录必须使用 boss-cli 提供的工具入口**：通过 `node .\dist\cli\index.js login --json` 启动或复用浏览器并打开登录页，通过 `node .\dist\cli\index.js --check-login --json` 核验。禁止 Agent 自行调用 Chrome 可执行文件、Start-Process、Puppeteer／Playwright launch、自写CDP脚本或其他浏览器工具替代启动与登录。扫码和验证码由用户完成；工具失败时停止并报告，不换启动方式。具体顺序见启动说明。
 
 - 执行前必须读取本轮入口对应的 SOP、共用规则及账本说明，按步骤满足前置条件、核验实际结果后再进入下一步。不得凭记忆、省略核验、调换依赖顺序、跨入口套用流程或自行扩大对象范围。
@@ -37,6 +40,7 @@ metadata:
 
 | 当前任务 | 读取文件 |
 | --- | --- |
+| 真实页面操作、工具缺口或特殊授权 | [工具使用边界](references/tool-boundary.md)，必读 |
 | 首次安装、下载、环境或版本问题 | [安装与兼容性](references/install.md) |
 | Node.js、Chrome、PATH、CDP和目录配置 | [环境配置](references/environment.md)；不要求安装Git |
 | 确定工作目录、保存位置或启动collect | [路径与账本路径核验](references/paths.md)，正式运行前必读 |

@@ -6,4 +6,8 @@
 
 [命令与页面](boss-url-map.md) · [账本协议](collection-ledger.md)
 
+**强制工具边界**：真实 BOSS 的读取和操作默认只通过已核验目录中的 boss-cli 公开命令执行；配套脚本仅允许 `scripts/switch-job.mjs` 按规范读取／切换沟通岗位。禁止自行使用其他浏览器／桌面工具、直接 CDP、Puppeteer／Playwright、自写脚本、内部模块或直接接口请求替代，包含只读、截图、滚动、监测和验收。CLI 不支持或失败时停止受影响步骤并报告；只有用户明确指定其他方法及范围的特殊声明才可例外。用户手动操作不等于授权 Agent 换工具。
+
+执行前必读[唯一操作入口与特殊授权](../skills/boss-recruitment/references/tool-boundary.md)，其中提供可复制给其他 Agent 的严格执行 prompt。旧手册、缓存脚本和历史成功记录均不能作为绕过入口的授权。
+
 旧本机手册含个人环境与历史业务配置，不作为公共发布内容；本地备份保留于未提交的缓存目录。

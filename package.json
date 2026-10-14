@@ -63,10 +63,12 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
+    "pngjs": "^7.0.0",
     "puppeteer-core": "^24.29.1"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
+    "@types/pngjs": "^6.0.5",
     "typescript": "^5.3.3"
   },
   "author": "Joo <1546635571@qq.com>",

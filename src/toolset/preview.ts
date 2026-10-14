@@ -2,7 +2,7 @@
  * 在线简历预览：须在「推荐」页、「深度搜索 aiform」页或「常规搜索」页且列表已加载；不自动跳转，否则报错。
  */
 import { join } from 'node:path';
-import { ONLINE_RESUME_IFRAME_WAIT_MAX_MS, snapshotBossPageViewport } from '../browser/index.js';
+import { ONLINE_RESUME_IFRAME_WAIT_MAX_MS } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import {
   closeBossPaywallPopupIfPresent,
@@ -50,7 +50,6 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const url = page.url();
       let jobLine: string;
       let job: string;
-      let savedOriginal: Awaited<ReturnType<typeof snapshotBossPageViewport>>;
       let opened: boolean;
 
       if (isBossChatAiFormUrl(url)) {
@@ -58,20 +57,17 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         const label = await readAiFormSelectedJobLabel(page);
         job = label;
         jobLine = `当前岗位：${label}`;
-        savedOriginal = await snapshotBossPageViewport(page);
         opened = await openDeepSearchResumePreview(page, target);
       } else if (isBossChatRecommendUrl(url)) {
         const frame = await assertRecommendPageReadyForPreview(page);
         job = options.json ? await readCurrentRecommendJobLabel(frame) : '';
         jobLine = '当前岗位：当前推荐列表';
-        savedOriginal = await snapshotBossPageViewport(page);
         opened = await openRecommendResumePreview(frame, target);
       } else if (isBossChatSearchUrl(url)) {
         const frame = await assertNormalSearchPageReadyForPreview(page);
         const label = await readNormalSearchSelectedJobLabel(frame);
         job = label;
         jobLine = `当前岗位：${label}`;
-        savedOriginal = await snapshotBossPageViewport(page);
         opened = await openNormalSearchResumePreview(frame, target);
       } else {
         throw new Error('当前不在推荐列表页、深度搜索页或常规搜索页，无法预览候选人。');
@@ -98,7 +94,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const fileName = `preview-${safeResumeScreenshotFileBase(target)}-${Date.now()}.png`;
       const absPath = join(RESUME_SCREENSHOTS_DIR, fileName);
 
-      const ok = await captureCResumeIframeToFile(page, savedOriginal, absPath);
+      const ok = await captureCResumeIframeToFile(page, absPath);
       if (!ok) {
         await closeCResumePanel(page);
         throw new Error('在线简历 iframe 截图失败。');
