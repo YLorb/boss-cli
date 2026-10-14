@@ -9,6 +9,7 @@ import { isBossChatIndexUrl } from '../common/auth.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { runRequestAttachmentResume } from './action.js';
 import { assertSelectedConversation, openConversationByTarget, type ConversationTarget } from './target_chat.js';
+import { CHAT_INPUT_TEXT_READER } from '../common/chat_input_text.js';
 
 export type SendChatMessageOptions = {
   text?: string;
@@ -77,7 +78,8 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
       await page.waitForFunction(`(() => {
         const el = document.querySelector('#boss-chat-editor-input');
         const norm = (v) => (v ?? '').replace(/\\r\\n/g, '\\n').trim();
-        return el && norm(el.value ?? el.innerText) === norm(${JSON.stringify(messageText)});
+        const readText = ${CHAT_INPUT_TEXT_READER};
+        return el && norm(readText(el)) === norm(${JSON.stringify(messageText)});
       })()`, { timeout: 5_000 });
       await sleepRandom(120, 420, signal);
       if (options.target) await assertSelectedConversation(page, options.target);
