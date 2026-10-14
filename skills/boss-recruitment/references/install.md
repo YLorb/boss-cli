@@ -25,25 +25,25 @@ npm run build
 node .\dist\cli\index.js help
 ```
 
-这是已推送的 CLI 0.6.9 源码，功能基线为 `1943435`，仓库为 `YLorb/boss-cli`。`source-manifest.json` 记录 commit 与文件哈希；不表示同名 npm 包已发布此版本。构建失败直接处理错误，不换用其他版本掩盖。
+这是已推送的 CLI 0.6.9 源码，功能基线为 `702c224`，仓库为 `YLorb/boss-cli`。`source-manifest.json` 记录 commit 与文件哈希；不表示同名 npm 包已发布此版本。构建失败直接处理错误，不换用其他版本掩盖。
 
 ## 路径二：GitHub ZIP下载（无需Git，推荐固定提交）
 
 固定功能基线0.6.9的下载地址：
 
-[下载CLI源码ZIP：1943435](https://github.com/YLorb/boss-cli/archive/19434352bee005755880c8f70c78851112318fc5.zip)
+[下载CLI源码ZIP：702c224](https://github.com/YLorb/boss-cli/archive/702c224a105e3958cf809e2bd7301e13ab115b99.zip)
 
 可在浏览器中直接下载，也可使用PowerShell；下面目标目录须尚不存在，避免覆盖现有安装：
 
 ```powershell
 $installRoot = 'C:\Recruitment'
-$archive = Join-Path $installRoot 'boss-cli-1943435.zip'
-$extractDir = Join-Path $installRoot 'boss-cli-1943435'
+$archive = Join-Path $installRoot 'boss-cli-702c224.zip'
+$extractDir = Join-Path $installRoot 'boss-cli-702c224'
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 if ((Test-Path -LiteralPath $archive) -or (Test-Path -LiteralPath $extractDir)) { throw '下载目标已存在，请选择新的目录或核验现有文件' }
-Invoke-WebRequest -Uri 'https://github.com/YLorb/boss-cli/archive/19434352bee005755880c8f70c78851112318fc5.zip' -OutFile $archive
+Invoke-WebRequest -Uri 'https://github.com/YLorb/boss-cli/archive/702c224a105e3958cf809e2bd7301e13ab115b99.zip' -OutFile $archive
 Expand-Archive -LiteralPath $archive -DestinationPath $extractDir
-Set-Location (Join-Path $extractDir 'boss-cli-19434352bee005755880c8f70c78851112318fc5')
+Set-Location (Join-Path $extractDir 'boss-cli-702c224a105e3958cf809e2bd7301e13ab115b99')
 npm.cmd ci
 if ($LASTEXITCODE -ne 0) { throw '依赖安装失败，停止' }
 npm.cmd run build
@@ -62,7 +62,7 @@ GitHub归档格式与固定提交下载依据：[GitHub官方文档](https://doc
 ```powershell
 git clone --branch dev https://github.com/YLorb/boss-cli.git
 Set-Location boss-cli
-git checkout 1943435
+git checkout 702c224
 git rev-parse HEAD
 npm ci
 npm run build

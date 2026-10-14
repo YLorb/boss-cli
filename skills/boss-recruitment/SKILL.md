@@ -5,7 +5,7 @@ metadata:
   version: "1.0.7"
   updated: "2026-10-14"
   language: "zh-CN"
-  cli-baseline: "0.6.9-1943435"
+  cli-baseline: "0.6.9-702c224"
 ---
 
 # BOSS 招聘流程
