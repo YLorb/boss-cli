@@ -11,7 +11,7 @@ scope: "local-installation"
 
 需要 Node.js（本包按 Node 24 验证；上游 README 声明最低20）、npm、Chrome／Chromium，以及允许调用本机 shell 的 Agent。**ZIP下载及安装不需要Git**；仅选择git clone时需要Git。Windows PowerShell 是本包主要示例环境；不宣称其他系统已实测。具体安装、PATH、端口和目录配置见[环境配置](environment.md)。
 
-官方工具下载：Node.js https://nodejs.org/ ，Git https://git-scm.com/ ，Chrome https://www.google.com/chrome/ 。版本要求以交付源码的 package.json、构建结果及命令核验为准。
+Node.js/npm缺失时，先按[环境配置的授权安装流程](environment.md#nodejsnpm缺失时的授权安装流程)告知用户，取得明确同意后再由Agent从 https://nodejs.org/ 下载并配置。Chrome仅作浏览器推荐，Agent不下载、不安装；缺少兼容浏览器时由用户自行准备。版本要求以交付源码的package.json、构建结果及命令核验为准。
 
 ## 路径一：使用随包源码快照（对应本文档）
 
