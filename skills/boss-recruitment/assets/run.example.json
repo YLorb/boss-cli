@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "runId": null,
+  "mode": null,
+  "job": null,
+  "jd": null,
+  "evaluationCriteria": null,
+  "gateRules": [],
+  "unknownGatePolicy": "manual_review",
+  "keyword": null,
+  "observationLimit": null,
+  "contactThreshold": null,
+  "allowedActions": [],
+  "excludedCandidates": [],
+  "observedCount": 0,
+  "initialSnapshot": [],
+  "records": [],
+  "pendingActions": [],
+  "stopReason": null,
+  "note": "由使用者填写必需输入；null不是默认授权。records保存身份依据、证据、分数、动作及结果，不能伪造正式dataId。"
+}

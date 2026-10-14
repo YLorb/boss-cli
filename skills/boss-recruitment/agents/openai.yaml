@@ -1,0 +1,4 @@
+interface:
+  display_name: "BOSS 招聘流程"
+  short_description: "按用户标准执行BOSS推荐、搜索与未读简历收集，核验身份并维护账本"
+  default_prompt: "使用 $boss-recruitment，按我提供的岗位、评估标准和授权范围执行本轮招聘流程。"

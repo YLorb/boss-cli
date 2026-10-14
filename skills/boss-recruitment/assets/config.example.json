@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "cliDir": "C:/Recruitment/boss-cli",
+  "cdpUrl": "http://127.0.0.1:53470",
+  "resumeDir": "C:/Recruitment/runtime/resumes",
+  "ledgerDir": "C:/Recruitment/runtime/ledgers",
+  "runDir": "C:/Recruitment/runtime/runs",
+  "timeoutBudgetSec": 15,
+  "note": "仅供Agent编排读取；CLI不自动加载此配置。timeoutBudgetSec不覆盖CLI内置超时。"
+}
