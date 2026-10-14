@@ -9,7 +9,7 @@ scope: "local-installation"
 
 ## 环境
 
-需要 Node.js（本包按 Node 24 验证；上游 README 声明最低20）、npm、Chrome／Chromium，以及允许调用本机 shell 的 Agent。源码从 GitHub 获取时还需 Git。Windows PowerShell 是本包主要示例环境；不宣称其他系统已实测。
+需要 Node.js（本包按 Node 24 验证；上游 README 声明最低20）、npm、Chrome／Chromium，以及允许调用本机 shell 的 Agent。**ZIP下载及安装不需要Git**；仅选择git clone时需要Git。Windows PowerShell 是本包主要示例环境；不宣称其他系统已实测。具体安装、PATH、端口和目录配置见[环境配置](environment.md)。
 
 官方工具下载：Node.js https://nodejs.org/ ，Git https://git-scm.com/ ，Chrome https://www.google.com/chrome/ 。版本要求以交付源码的 package.json、构建结果及命令核验为准。
 
@@ -27,7 +27,37 @@ node .\dist\cli\index.js help
 
 这是已推送的 CLI 0.6.8 源码，功能基线为 `4b8bb63`，仓库为 `YLorb/boss-cli`。`source-manifest.json` 记录 commit 与文件哈希；不表示同名 npm 包已发布此版本。构建失败直接处理错误，不换用其他版本掩盖。
 
-## 路径二：从 GitHub 下载源码
+## 路径二：GitHub ZIP下载（无需Git，推荐固定提交）
+
+固定功能基线0.6.8的下载地址：
+
+[下载CLI源码ZIP：4b8bb63](https://github.com/YLorb/boss-cli/archive/4b8bb639df664ab02c4d8f1ce0f28fc55dc98275.zip)
+
+可在浏览器中直接下载，也可使用PowerShell；下面目标目录须尚不存在，避免覆盖现有安装：
+
+```powershell
+$installRoot = 'C:\Recruitment'
+$archive = Join-Path $installRoot 'boss-cli-4b8bb63.zip'
+$extractDir = Join-Path $installRoot 'boss-cli-4b8bb63'
+New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+if ((Test-Path -LiteralPath $archive) -or (Test-Path -LiteralPath $extractDir)) { throw '下载目标已存在，请选择新的目录或核验现有文件' }
+Invoke-WebRequest -Uri 'https://github.com/YLorb/boss-cli/archive/4b8bb639df664ab02c4d8f1ce0f28fc55dc98275.zip' -OutFile $archive
+Expand-Archive -LiteralPath $archive -DestinationPath $extractDir
+Set-Location (Join-Path $extractDir 'boss-cli-4b8bb639df664ab02c4d8f1ce0f28fc55dc98275')
+npm.cmd ci
+if ($LASTEXITCODE -ne 0) { throw '依赖安装失败，停止' }
+npm.cmd run build
+if ($LASTEXITCODE -ne 0) { throw '构建失败，停止' }
+node .\dist\cli\index.js help
+```
+
+GitHub ZIP带顶层目录，进入含package.json的目录后才执行npm；下载的基线CLI与最新Skill分别安装。ZIP无.git，不能运行git pull或git rev-parse；记录下载URL和commit即可。
+
+也可访问[dev分支页面](https://github.com/YLorb/boss-cli/tree/dev)，选择 **Code → Download ZIP**，或下载[dev ZIP](https://github.com/YLorb/boss-cli/archive/refs/heads/dev.zip)。解压后进入boss-cli-dev。dev持续变化，不保证等于本Skill已验证版本；优先使用固定提交或随包源码。若仓库访问需要权限，由使用者正常登录获取，不把下载错误网页当ZIP解压。
+
+GitHub归档格式与固定提交下载依据：[GitHub官方文档](https://docs.github.com/en/repositories/working-with-files/using-files/downloading-source-code-archives)。
+
+## Git方式（可选，已有方法保留）
 
 ```powershell
 git clone --branch dev https://github.com/YLorb/boss-cli.git

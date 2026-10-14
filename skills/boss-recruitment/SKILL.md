@@ -2,7 +2,7 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.3"
+  version: "1.0.4"
   updated: "2026-10-14"
   language: "zh-CN"
   cli-baseline: "0.6.8-4b8bb63"
@@ -36,6 +36,7 @@ metadata:
 | 当前任务 | 读取文件 |
 | --- | --- |
 | 首次安装、下载、环境或版本问题 | [安装与兼容性](references/install.md) |
+| Node.js、Chrome、PATH、CDP和目录配置 | [环境配置](references/environment.md)；不要求安装Git |
 | 启动、登录、配置、调用模板 | [启动与使用](references/start-and-use.md) |
 | 确定命令参数、示例、页面要求 | [命令与 URL 对照](references/cli-reference.md)；只读所需命令小节 |
 | 未读简历收集 | [收集 SOP](references/collect-sop.md) |

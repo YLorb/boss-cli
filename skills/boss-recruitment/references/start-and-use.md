@@ -9,6 +9,8 @@ scope: "startup"
 
 ## 配置
 
+首次部署先读取[环境配置](environment.md)完成Node.js、Chrome、PATH、CDP端口与数据目录设置。无需Git的下载及解压步骤见[安装说明](install.md)。
+
 复制 [配置模板](../assets/config.example.json) 到自己的工作目录，填入绝对路径。**此 JSON 是 Agent 编排配置，CLI 不会自动读取它。** `resumeDir` 映射 download-resume 的 `--output-dir`，`ledgerDir` 映射 collect 的 `--ledger-dir`。`cdpUrl` 应与浏览器调试端口一致；CLI 原生支持的是端口环境变量，不是 `--cdpUrl` 参数。
 
 `timeoutBudgetSec:15` 表示当前附件命令的内置预算，改 JSON 不会改变 CLI 超时。其他命令没有同样的整命令预算。`messages.example.json` 为话术模板；消息3保留用户给定两段，但含公司信息，交付其他公司时须先由使用者修改确认。
