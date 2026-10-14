@@ -1,6 +1,7 @@
 import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 import { sleepRandom } from '../browser/timing.js';
 import { captureResumeByWheel } from './resume_scroll_capture.js';
+import { traceResumeCapture } from './resume_capture_trace.js';
 
 /** 在线简历 iframe：`src` 常为相对路径 `/web/frame/c-resume/...`，故用子串匹配 */
 export const C_RESUME_IFRAME_SELECTOR =
@@ -46,7 +47,7 @@ const CLOSE_C_RESUME_PANEL_SCRIPT = `(() => {
   return false;
 })()`;
 
-const C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS = 3_000;
+export const C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS = { min: 1_000, max: 5_050 } as const;
 
 const VISIBLE_C_RESUME_IN_FRAME_SCRIPT = `(() => {
   var iframe = document.querySelector(${JSON.stringify(C_RESUME_IFRAME_SELECTOR)});
@@ -165,7 +166,17 @@ export async function captureCResumeIframeToFile(
   if (!iframe) throw new Error('未找到可见在线简历 iframe');
   try { await captureResumeByWheel(page, iframe, absPath); }
   finally { await iframe.dispose(); }
-  await sleepRandom(C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS, C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS);
+  const started = performance.now();
+  traceResumeCapture('close-wait-start', C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS);
+  await sleepRandom(C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS.min, C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS.max);
+  traceResumeCapture('close-wait-end', { elapsedMs: Math.round(performance.now() - started) });
+  traceResumeCapture('close-start');
   await closeCResumePanel(page);
+  const remaining = await findVisibleCResumeIframeHandle(page);
+  if (remaining) {
+    await remaining.dispose();
+    throw new Error('简历截图已保存，但关闭后在线简历弹层仍可见');
+  }
+  traceResumeCapture('close-end', { visiblePanel: false });
   return true;
 }

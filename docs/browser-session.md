@@ -136,6 +136,14 @@ boss chat 李四
 
 ## 调试注意事项
 
+### 2026-10-14 CLI 退出后的浏览器存活验证
+
+在沙箱外执行源码公开入口 `node dist/cli/index.js login --json`，设置独立 `BOSS_BROWSER_REMOTE_DEBUGGING_PORT=53471` 和 `BOSS_BROWSER_USER_DATA_DIR=D:\document\boss-cli\output\todo-chrome-lifecycle\profile`，与原浏览器隔离。CLI PID 16884 正常退出（0），未使用持续运行的 CLI 或 sleep 保活。
+
+退出后的 22:16:49、22:16:57、22:17:15（北京时间）检查均显示监听 PID 22300，启动时间为 22:16:37，启动参数包含该独立目录和 `--remote-debugging-port=53471`，`/json/version` 返回同一个有效 CDP WebSocket 地址。Chrome 154.0.8037.98、Node 22.17.0、Windows；说明此环境下 CLI 退出后 Chrome/CDP 至少持续存活至最后一次检查，不保证所有启动环境的行为。
+
+本地证据保存在 `output/todo-chrome-lifecycle/{stdout.log,stderr.log,snapshots.json}`（忽略提交）。复现时使用未占用端口及独立目录，通过公开 login 命令启动，命令退出后以监听 PID、进程创建时间、参数和 `/json/version` 联合核验；仅有窗口不能证明 CDP 存活。实验观察结束后仅清理该独立测试进程。
+
 Boss 主包中存在反 DevTools / 反篡改逻辑，可能通过 `console.log` / `console.table` 副作用、`console.clear()`、快捷键拦截、打印大对象耗时、原生对象完整性检查等方式判断 DevTools 是否打开。
 
 自动化命令执行时，不建议手动打开页面 DevTools。需要排查页面行为时，优先使用 CDP 事件、Network initiator、外部日志或截图；如果必须打开 DevTools，应预期页面可能触发检测上报、清空控制台、跳转、隐藏页面或关闭/回退页面。

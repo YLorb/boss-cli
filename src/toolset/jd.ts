@@ -154,24 +154,27 @@ async function readJobsFromFrame(frame: Frame): Promise<JobReadResult> {
   return (await frame.evaluate(
     `(() => {
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-      const rows = Array.from(document.querySelectorAll(".job-jobInfo-warp"));
+      const rows = Array.from(document.querySelectorAll(".job-item-container"));
       const jobs = rows.map((el) => {
         const statusText = norm(el.querySelector(".job-status-wrapper .status-box")?.textContent);
-        const labelText = norm(el.querySelector(".job-title .label-common")?.textContent);
+        const labelText = norm(el.querySelector(".job-title .job-labels")?.textContent);
         const meta = Array.from(el.querySelectorAll(".job-main-info-wrapper .info-labels span"))
           .map((x) => norm(x.textContent))
           .filter(Boolean);
         const nums = Array.from(el.querySelectorAll(".job-about-num-wrapper .inner-box .num"))
           .map((x) => norm(x.textContent));
+        if (!statusText || nums.length !== 3 || nums.some(value => !value)) {
+          throw new Error('职位字段解析失败：状态或三项统计缺失/无效；title=' + norm(el.querySelector('.job-title .job-name')?.textContent) + '；url=' + location.href);
+        }
         return {
           id: norm(el.getAttribute("data-id")),
-          title: norm(el.querySelector(".job-title a")?.textContent),
+          title: norm(el.querySelector(".job-title .job-name")?.textContent),
           label: labelText,
           status: statusText,
           meta,
-          viewed: nums[0] || "0",
-          chatted: nums[1] || "0",
-          interested: nums[2] || "0",
+          viewed: nums[0],
+          chatted: nums[1],
+          interested: nums[2],
         };
       });
       const totalText = norm(document.querySelector(".total-num")?.textContent);
@@ -192,7 +195,7 @@ async function readJobsFromPageAnyFrame(
   page: Page,
 ): Promise<JobListContext> {
   const main = await readJobsFromFrame(page.mainFrame());
-  if (main.rows > 0 || main.totalText.length > 0) {
+  if (main.rows > 0) {
     return {
       frame: page.mainFrame(),
       data: main,
@@ -207,19 +210,15 @@ async function readJobsFromPageAnyFrame(
     if (frame === page.mainFrame()) {
       continue;
     }
-    try {
-      const state = await readJobsFromFrame(frame);
-      if (state.rows > 0 || state.totalText.length > 0) {
-        return {
-          frame,
-          data: state,
-          fromFrame: true,
-          frameUrl: state.url,
-          mainState: main,
-        };
-      }
-    } catch {
-      // ignore cross-origin / detached frames
+    const state = await readJobsFromFrame(frame);
+    if (state.rows > 0) {
+      return {
+        frame,
+        data: state,
+        fromFrame: true,
+        frameUrl: state.url,
+        mainState: main,
+      };
     }
   }
 
@@ -232,14 +231,14 @@ async function readJobsFromPageAnyFrame(
   };
 }
 
-async function waitForJobRowsReady(
+export async function waitForJobRowsReady(
   page: Page,
   timeoutMs: number,
 ): Promise<JobListContext> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const state = await readJobsFromPageAnyFrame(page);
-    if (state.data.rows > 0 || state.data.totalText.length > 0) {
+    if (state.data.rows > 0) {
       return state;
     }
     await sleepRandom(260, 520);
@@ -248,6 +247,7 @@ async function waitForJobRowsReady(
   throw new Error(
     [
       '等待职位列表超时',
+      '未识别职位行，不能据此判定无职位；selector=.job-item-container',
       `main.rows=${last.mainState.rows}`,
       `main.total="${last.mainState.totalText}"`,
       `main.title="${last.mainState.title}"`,
@@ -267,21 +267,23 @@ async function clickEditForJob(frame: Frame, job: JobListItem): Promise<void> {
       const jobId = ${targetId};
       const title = ${targetTitle};
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-      const rows = Array.from(document.querySelectorAll(".job-jobInfo-warp"));
+      const rows = Array.from(document.querySelectorAll(".job-item-container"));
       let row = null;
       if (jobId) {
         row = rows.find((el) => norm(el.getAttribute("data-id")) === jobId) ?? null;
       }
       if (!row && title) {
         row = rows.find((el) => {
-          const t = norm(el.querySelector(".job-title a")?.textContent);
+          const t = norm(el.querySelector(".job-title .job-name")?.textContent);
           return t === title;
         }) ?? null;
       }
       if (!row) return false;
-      const editBtn = row.querySelector(".position-edit");
+      const buttons = Array.from(row.querySelectorAll('.operation-container .operate-btn'))
+        .filter(el => norm(el.textContent) === '编辑');
+      if (buttons.length !== 1) throw new Error('职位编辑入口数量异常：' + buttons.length + '；title=' + title);
+      const editBtn = buttons[0];
       if (!(editBtn instanceof HTMLElement)) return false;
-      editBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
       editBtn.click();
       return true;
     })()`,
@@ -445,7 +447,10 @@ export async function runListOpenPositions(
       const ready = await waitForJobRowsReady(page, 16_000);
       await sleepRandom(350, 920);
 
-      const jobs = ready.data.jobs.filter((it) => it.title.length > 0);
+      const jobs = ready.data.jobs;
+      for (const [index, job] of jobs.entries()) {
+        if (!job.title) throw new Error(`职位字段解析失败：第 ${index + 1} 行缺少标题；id=${job.id}；url=${ready.frameUrl}；selector=.job-title .job-name；不能丢弃该行。`);
+      }
       const jobLines = jobs.map((it, idx) => {
         const info = it.meta.length > 0 ? it.meta.join('｜') : '信息缺失';
         const stats = `看过我:${it.viewed}｜沟通过:${it.chatted}｜感兴趣:${it.interested}`;

@@ -2,6 +2,7 @@ import type { ElementHandle, Page } from 'puppeteer-core';
 import { PNG } from 'pngjs';
 import { writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { traceResumeCapture } from './resume_capture_trace.js';
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const MAX_PIXELS = 80_000_000;
@@ -9,6 +10,11 @@ const MAX_PIXELS = 80_000_000;
 /** One reading pause after opening the resume, before any capture scrolling. */
 export function resumeReadingDelayMs(random = Math.random): number {
   return 2_000 + Math.floor(random() * 8_001);
+}
+
+/** Reading interval between complete scroll segments, not between wheel pulses. */
+export function resumeScrollIntervalMs(random = Math.random): number {
+  return 500 + Math.floor(random() * 2_501);
 }
 
 // One scroll surface only. Ambiguous/nested scrolling must be diagnosed, not guessed.
@@ -44,7 +50,7 @@ const METRICS_SCRIPT = `((el) => {
       const hit = document.elementFromPoint((Math.max(x,b.left)+Math.min(x+width,b.right))/2,
         (Math.max(y,b.top)+Math.min(y+height,b.bottom))/2);
       if (hit && (node === hit || node.contains(hit)))
-        throw new Error('在线简历有固定/吸顶元素遮挡截图区域，停止拼接');
+        throw new Error('在线简历有固定/吸顶元素遮挡截图区域，停止拼接；element=' + node.tagName + '.' + node.className + '；position=' + s.position + '；rect=' + JSON.stringify({x:b.x,y:b.y,width:b.width,height:b.height}));
     }
   }
   return { x, y, width, height, top: el.scrollTop, total: el.scrollHeight };
@@ -65,10 +71,16 @@ export function wheelDeltas(distance: number, random = Math.random): number[] {
 }
 
 /** Verify overlapping pixels before removing duplicates; never silently bridge a gap. */
-export function stitchResumeTiles(tiles: ResumeTile[], cssWidth: number, cssHeight: number, total: number): Buffer {
+export function stitchResumeTiles(tiles: ResumeTile[], cssWidth: number, cssHeight: number, total: number, scale: number): Buffer {
   if (!tiles.length || Math.abs(tiles[0].top) > 0.5) throw new Error('简历截图缺少顶部');
-  const width = tiles[0].image.width, scale = width / cssWidth;
-  const height = Math.round(total * scale);
+  if (!Number.isFinite(scale) || scale <= 0) throw new Error('简历截图像素缩放比例无效');
+  const width = tiles[0].image.width;
+  if (Math.abs(width - cssWidth * scale) > 1) throw new Error('简历截图宽度与实际像素缩放不一致');
+  const last = tiles[tiles.length - 1];
+  if (Math.abs(last.top + cssHeight - total) > 1) throw new Error('简历截图未覆盖到底部');
+  // clientHeight/scrollHeight are integer CSS pixels. Use the measured final tile
+  // extent once the bottom is verified, rather than inventing a rounded extra row.
+  const height = Math.round(last.top * scale) + last.image.height;
   if (width * height > MAX_PIXELS) throw new Error('简历截图超过像素上限');
   const output = new PNG({ width, height });
   let covered = 0;
@@ -96,7 +108,8 @@ export function stitchResumeTiles(tiles: ResumeTile[], cssWidth: number, cssHeig
           samples++; absoluteDifference += difference; if (difference > 20) different++;
         }
       }
-      if (samples && (different / samples > 0.015 || absoluteDifference / samples > 2)) throw new Error('简历截图重叠校验失败：内容变化、遮挡或位置不一致');
+      traceResumeCapture('overlap', { top, start, overlap, scale, differentRatio: different / samples, meanDifference: absoluteDifference / samples });
+      if (samples && (different / samples > 0.015 || absoluteDifference / samples > 2)) throw new Error(`简历截图重叠校验失败：内容变化、遮挡或位置不一致；top=${top}；scale=${scale}；differentRatio=${different / samples}；meanDifference=${absoluteDifference / samples}`);
     }
     const end = Math.min(height, start + image.height);
     image.data.copy(output.data, covered * width * 4, overlap * width * 4, (end - start) * width * 4);
@@ -186,11 +199,25 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
     }
     return stable();
   };
+  let hasScrolled = false;
+  const scrollSegment = async (distance: number, m: Metrics) => {
+    if (hasScrolled) {
+      const waitMs = resumeScrollIntervalMs(), started = performance.now();
+      traceResumeCapture('segment-wait-start', { waitMs });
+      await pause(waitMs);
+      traceResumeCapture('segment-wait-end', { elapsedMs: Math.round(performance.now() - started) });
+    }
+    hasScrolled = true;
+    traceResumeCapture('segment-start', { top: m.top, distance });
+    const result = await wheel(distance, m);
+    traceResumeCapture('segment-end', { top: result.top });
+    return result;
+  };
   const moveTo = async (target: number) => {
     let m = await stable();
     for (let i = 0; Math.abs(m.top - target) > 0.5 && i < 100; i++) {
       const before = m.top;
-      m = await wheel(Math.sign(target - m.top) * Math.min(Math.abs(target - m.top), m.height * 0.65), m);
+      m = await scrollSegment(Math.sign(target - m.top) * Math.min(Math.abs(target - m.top), m.height * 0.65), m);
       if (Math.abs(m.top - before) < 0.5) throw new Error(`在线简历滚轮无响应：当前位置=${m.top}，目标=${target}`);
     }
     if (Math.abs(m.top - target) > 0.5) throw new Error(`在线简历未滚动至目标位置：${target}`);
@@ -200,7 +227,10 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
   let result: Buffer | undefined;
   try {
     original = await stable();
-    await pause(resumeReadingDelayMs());
+    const waitMs = resumeReadingDelayMs(), started = performance.now();
+    traceResumeCapture('reading-wait-start', { waitMs, scrollSurface: outer ? 'outer' : 'iframe' });
+    await pause(waitMs);
+    traceResumeCapture('reading-wait-end', { elapsedMs: Math.round(performance.now() - started) });
     let m = await moveTo(0);
     const bodyClip = await geometry(m);
     const frameBox = await iframe.boundingBox();
@@ -211,12 +241,15 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
           Math.abs(frameBox.width - bodyClip.width) > 1 || Math.abs(frameBox.height - m.total) > 1)
         throw new Error('在线简历外层滚动区域与完整 iframe 边界不一致');
     }
-    const viewport = await page.evaluate('({ width: innerWidth, height: innerHeight })') as { width: number; height: number };
+    const viewport = await page.evaluate('({ width: innerWidth, height: innerHeight, pixelRatio: devicePixelRatio })') as { width: number; height: number; pixelRatio: number };
     if (!outer && (frameBox.x < 0 || frameBox.y < 0 || frameBox.x + frameBox.width > viewport.width || frameBox.y + frameBox.height > viewport.height))
       throw new Error('在线简历 iframe 未完整显示，无法保留顶部和底部信息');
     const shellBox = outer ? bodyClip : frameBox;
     const shell = PNG.sync.read(Buffer.from(await page.screenshot({ type: 'png', clip: shellBox, captureBeyondViewport: false })));
-    const scale = shell.width / shellBox.width;
+    const scale = viewport.pixelRatio;
+    if (!Number.isFinite(scale) || scale <= 0 || Math.abs(shell.width - shellBox.width * scale) > 1 || Math.abs(shell.height - shellBox.height * scale) > 1)
+      throw new Error('简历截图尺寸与浏览器像素缩放不一致');
+    traceResumeCapture('pixel-scale', { scale, cssWidth: shellBox.width, imageWidth: shell.width });
     const insetX = Math.round((bodyClip.x - shellBox.x) * scale), insetY = Math.round((bodyClip.y - shellBox.y) * scale);
     const tiles: ResumeTile[] = [];
     let complete = false, pixels = 0;
@@ -228,6 +261,7 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
       pixels += image.width * image.height;
       if (pixels > MAX_PIXELS) throw new Error('简历分屏截图超过像素预算');
       tiles.push({ top: m.top, image });
+      traceResumeCapture('tile', { index: i, top: m.top, height: m.height, total: m.total });
       if (Math.abs(m.top + m.height - m.total) <= 1) {
         await pause(750);
         const bottom = await stable();
@@ -235,12 +269,12 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
         throw new Error('到达底部后简历内容仍在变化，请待加载完成后重试');
       }
       const before = m;
-      m = await wheel(Math.min(m.height * 0.65, m.total - m.height - m.top), m);
+      m = await scrollSegment(Math.min(m.height * 0.65, m.total - m.height - m.top), m);
       if (m.top <= before.top + 0.5) throw new Error('在线简历滚轮无响应，停止截图');
       if (m.total !== before.total) throw new Error('简历高度在滚动时变化，请待加载完成后重试');
     }
     if (!complete) throw new Error('在线简历超过 100 屏，未确认到底，停止截图');
-    const body = PNG.sync.read(stitchResumeTiles(tiles, m.width, m.height, m.total));
+    const body = PNG.sync.read(stitchResumeTiles(tiles, m.width, m.height, m.total, scale));
     result = composeResumeFrame(shell, body, insetX, insetY, tiles[0].image.height);
   } catch (error) { failure = error; }
   try {
@@ -252,4 +286,5 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
   if (!result) throw new Error('简历截图没有生成有效拼接结果');
   // Restore before writing: failures must not leave a purportedly complete result.
   await writeFile(path, result, { flag: 'wx' });
+  traceResumeCapture('file-written', { bytes: result.length, restoredTop: original?.top });
 }
