@@ -29,8 +29,7 @@ export async function clickBossSidebarMenuToPath(
       target.scrollIntoView({ block: "center", inline: "nearest" });
       target.click();
       return true;
-    })`,
-    { label: menuLabel, path: targetPath },
+    })(${JSON.stringify({ label: menuLabel, path: targetPath })})`,
   )) as boolean;
 
   if (!clicked) {
@@ -47,8 +46,7 @@ export async function clickBossSidebarMenuToPath(
       } catch {
         return false;
       }
-    })`,
+    })(${JSON.stringify(targetPath)})`,
     { timeout: SIDEBAR_NAV_WAIT_MS },
-    targetPath,
   );
 }

@@ -98,6 +98,9 @@ function isSessionHealthy(): boolean {
 }
 
 async function establishSession(): Promise<void> {
+  const trace = (stage: string) => {
+    if (process.env.BOSS_CLI_TRACE === 'true' || process.env.BOSS_CLI_TRACE === '1') console.error(`[boss-cli][session] ${stage}`);
+  };
   const prev = browserRef;
   if (prev) {
     try {
@@ -110,13 +113,23 @@ async function establishSession(): Promise<void> {
     pageRef = null;
   }
 
+  trace('连接 CDP');
   const b = await connectBrowser();
   browserRef = b;
   attachDisconnectedHandler(b);
+  // Chrome can announce browser_ui targets before its existing page target.
+  // Wait for a usable page before enumerating, otherwise an empty early snapshot creates a duplicate tab.
+  trace('等待现有页面就绪');
+  const initialPageTarget = await b.waitForTarget((target) => target.type() === 'page', { timeout: 30_000 });
+  await initialPageTarget.page();
+  trace('安装浏览器页面守卫');
   await installBossBrowserPageGuards(b);
+  trace('选择 BOSS 标签页');
   pageRef = await pickOrCreatePage(b);
+  trace(`初始化标签页：${pageRef.url()}`);
   await installBossPageGuards(pageRef);
   await closeRedundantBlankPages(b, pageRef);
+  trace('浏览器会话已就绪');
 }
 
 /**

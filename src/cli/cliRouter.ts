@@ -28,6 +28,12 @@ import {
 } from '../toolset/index.js';
 import { printBossInteractiveBanner } from './banner.js';
 import { jsonError, splitJsonFlag } from './output.js';
+import { isAttachmentCommand, runCommandProcess } from './command_process.js';
+import { runProbeTargetResume } from '../toolset/attachment.js';
+import { runCollectionSession } from '../collection/session.js';
+import { runCheckLogin } from '../toolset/check_login.js';
+import { APP_HOME } from '../config.js';
+import { join } from 'node:path';
 import {
   printPackageUpdateNoticeIfDue,
   printVersionInfo,
@@ -141,16 +147,22 @@ function printHelp(): void {
       进入交互模式；提示符 boss> ，exit / quit 退出；Ctrl+C 正常结束
   boss help
       显示本帮助
+  boss collect --job <岗位完整名称> [--ledger-dir <目录>]
+      一岗一账的常驻会话；stdin 每行一个 JSON 命令，stdout 每行一个 JSON 结果
+      op: add / decision / round / recheck / reconcile / show / stop；仅 stop 或 Ctrl+C 正常写回
+      recheck 必须显式发出；发现 reading 残留时，必须 reconcile 全量逐项对账
   boss version | ver（或 -v / --version）
       显示当前版本并检查 npm 是否有更新
   boss update
       使用 npm 安装最新版 boss-cli
-  业务命令均支持 --json（login/list/chat/action/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet）
+  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet）
       输出各命令的原始字段；JSON 模式 stdout 仅输出结果，诊断日志写 stderr
       失败输出 {ok:false,command,error:{name,message}} 并返回非零退出码
       jd --json 返回 Markdown 正文与缓存路径；download-resume 默认已输出 JSON
   boss login
       打开登录页（需要用户在浏览器中自行完成登录，这个命令会直接返回）
+  boss --check-login [--json]
+      只读检查现有浏览器中的首个 BOSS 标签页；返回已登录/未登录/无法判定，不打开或跳转页面
   boss list [--unread] [--chatting] [--json]
       --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
   boss chat <姓名> [--strict]
@@ -163,6 +175,9 @@ function printHelp(): void {
       在顶部「全部」会话中按姓名 + data-id 精确定位并核对详情
   boss accept-resume <姓名> --data-id <会话ID> [--check]
       在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
+  boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]
+      沟通-全部定位后，依次检查附件、已发送求简历消息；--download 同时下载已收到附件
+      probe-resume / accept-resume / download-resume 整条命令限时 15 秒，超时终止子进程并返回错误
   boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]
       下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
       --check：检查当前会话，同一 data-id 时跳过列表定位；仍核对姓名与详情
@@ -392,10 +407,15 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['login', 'list', 'chat', 'action', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet'].includes(cmd)) {
+  if (json && !['--check-login', 'login', 'list', 'chat', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   configureHeadlessForCommand(cmd);
+
+  if (cmd === '--check-login') {
+    if (tail.length) die('❌ 用法: boss --check-login [--json]');
+    return runCheckLogin(json);
+  }
 
   if (cmd === '_baidu-keys') {
     const { rest, opts } = parseOpts(tail);
@@ -510,6 +530,18 @@ export async function executeCommand(argv: string[]): Promise<string> {
       die('❌ 当操作为 remark 时，必须提供 --remark <备注内容>。');
     }
     return implChatAction({ action, remark, json });
+  }
+
+  if (cmd === 'probe-resume') {
+    const { rest, opts, flags } = parseOpts(tail, new Set(['download']));
+    const name = rest.join(' ').trim();
+    const dataId = (opts['data-id'] ?? '').trim();
+    if (!name || !dataId || Array.from(flags).some(flag => flag !== 'download') ||
+        Object.keys(opts).some(key => !['data-id', 'output-dir'].includes(key)) ||
+        ('output-dir' in opts && !flags.has('download'))) {
+      die('❌ 用法: probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]');
+    }
+    return runProbeTargetResume({ name, dataId }, flags.has('download'), opts['output-dir']);
   }
 
   if (cmd === 'accept-resume' || cmd === 'download-resume') {
@@ -642,13 +674,17 @@ export async function runOneCommand(argv: string[]): Promise<void> {
     return;
   }
   try {
-    const text = await executeCommand(argv);
+    const text = await executeManagedCommand(argv);
     printStdout(text);
   } catch (e) {
     if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
     else console.error(e instanceof Error ? e.message : String(e));
     process.exitCode = 1;
   }
+}
+
+async function executeManagedCommand(argv: string[]): Promise<string> {
+  return isAttachmentCommand(argv) ? runCommandProcess(argv) : executeCommand(argv);
 }
 
 async function runInteractiveLoop(): Promise<void> {
@@ -684,7 +720,7 @@ async function runInteractiveLoop(): Promise<void> {
       const argv = splitShellLine(trimmed);
       try {
         const stopSpinner = startProcessingSpinner();
-        const text = await executeCommand(argv).finally(() => {
+        const text = await executeManagedCommand(argv).finally(() => {
           stopSpinner();
         });
         printStdout(text);
@@ -701,6 +737,16 @@ async function runInteractiveLoop(): Promise<void> {
 }
 
 export async function runCli(argv: string[]): Promise<void> {
+  if (argv[0] === 'collect') {
+    const { rest, opts, flags } = parseOpts(argv.slice(1));
+    if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir'].includes(key))) {
+      die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>]');
+    }
+    try {
+      await runCollectionSession(opts['ledger-dir'] || join(APP_HOME, 'ledgers'), opts.job.trim());
+    } finally { await cleanupAfterCommand('collect', true); }
+    return;
+  }
   if (argv.length === 0) {
     if (process.env.npm_lifecycle_event === 'dev') {
       await runInteractiveLoop();
@@ -721,7 +767,7 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
-  if (normalizeSubcommand(argv[0] ?? '') !== 'update' && !splitJsonFlag(argv.slice(1)).json) {
+  if (!isAttachmentCommand(argv) && !['update', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
     await printPackageUpdateNoticeIfDue();
   }
 

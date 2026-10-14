@@ -48,7 +48,7 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
         const text = ${JSON.stringify(messageText)};
         const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
         return Array.from(document.querySelectorAll('.chat-message-list .item-myself .text span'))
-          .filter((el) => norm(el.textContent) === norm(text)).length;
+          .filter((el) => norm(el.innerText) === norm(text)).length;
       })()`)) as number;
 
       await input.click({
@@ -88,7 +88,7 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
         const before = ${sentBefore};
         const norm = (v) => (v ?? '').replace(/\\s+/g, ' ').trim();
         return Array.from(document.querySelectorAll('.chat-message-list .item-myself .text span'))
-          .filter((el) => norm(el.textContent) === norm(text)).length > before;
+          .filter((el) => norm(el.innerText) === norm(text)).length > before;
       })()`, { timeout: 15_000 });
       if (options.target) await assertSelectedConversation(page, options.target);
 

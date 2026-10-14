@@ -30,7 +30,11 @@ test('real Chrome paste handles Unicode and multiline text; rejected paste never
         event.preventDefault(); window.enters++;
         const row = document.createElement('div'); row.className = 'item-myself';
         const text = document.createElement('div'); text.className = 'text';
-        const span = document.createElement('span'); span.textContent = editor.value;
+        const span = document.createElement('span');
+        editor.value.split('\\n').forEach((line, index) => {
+          if (index) span.append(document.createElement('br'));
+          span.append(document.createTextNode(line));
+        });
         text.append(span); row.append(text); document.querySelector('.chat-message-list').append(row);
       });
     })()`);
@@ -43,10 +47,15 @@ test('real Chrome paste handles Unicode and multiline text; rejected paste never
       throw error;
     }
     assert.equal(result.text, message);
+    assert.equal(result.status, 'message-visible');
     assert.deepEqual(await page.evaluate(`({text: document.querySelector('#boss-chat-editor-input').value,
       pastes: window.pastes, enters: window.enters})`), { text: message, pastes: 1, enters: 1 });
+    // An existing identical message must not satisfy confirmation for a new send.
+    const second = JSON.parse(await runSendChatMessage({ text: message, json: true }));
+    assert.equal(second.status, 'message-visible');
+    assert.equal(await page.evaluate("document.querySelectorAll('.item-myself').length"), 2);
     await page.evaluate('window.rejectPaste = true');
     await assert.rejects(runSendChatMessage({ text: '粘贴失败必须停止' }), /Waiting failed|timeout/i);
-    assert.equal(await page.evaluate('window.enters'), 1);
+    assert.equal(await page.evaluate('window.enters'), 2);
   } finally { await browser.close(); }
 });

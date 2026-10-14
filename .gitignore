@@ -12,3 +12,10 @@ dist/
 /src/sop/
 /scripts/test-resume-sop.mjs
 /scripts/local-resume-collection/
+
+# Private candidate evidence and import receipts
+/.cache/collection-runs/
+
+# Local runtime evidence and delivery archives
+/.cache/
+/output/

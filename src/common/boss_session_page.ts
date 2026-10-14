@@ -56,6 +56,7 @@ type MenuListSnapshot = {
 type BossSessionPageOptions = {
   ensureChatShell?: boolean;
   ensureMenuList?: boolean;
+  retryOnContextDestroyed?: boolean;
 };
 
 function normalizeMenuText(raw: string | null | undefined): string {
@@ -147,7 +148,7 @@ export async function withBossSessionPage<T>(
     );
   };
 
-    const maxAttempts = 2;
+    const maxAttempts = options.retryOnContextDestroyed === false ? 1 : 2;
     let lastErr: unknown;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {

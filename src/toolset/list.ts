@@ -8,6 +8,7 @@ import {
 import { BOSS_CHAT_INDEX_URL, isBossChatIndexUrl } from '../common/auth.js';
 import { ensurePage } from '../common/ensure_page.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
+import { closeAttachmentPreview } from './target_chat.js';
 
 type CandidateItem = {
   dataId: string;
@@ -23,6 +24,54 @@ export type CandidateListOptions = {
   chattingOnly?: boolean;
   json?: boolean;
 };
+
+/** Full inventory for crash reconciliation, including read conversations. */
+export async function runFullCandidateInventory(shouldStop: () => boolean = () => false): Promise<string> {
+  return withBossSessionPage(async page => {
+    await closeAttachmentPreview(page);
+    await ensureChatListReady(page, 'all', 'all');
+    const found = new Map<string, CandidateItem>();
+    let resetToTop = false;
+    for (let round = 0; round < 400; round++) {
+      if (shouldStop()) throw new Error('全量列表扫描已停止，尚未完成对账。');
+      const state = await page.evaluate(`(() => {
+        const list = document.querySelector('.chat-global-list .user-list');
+        if (!list) {
+          const empty = Array.from(document.querySelectorAll('.common-no-data')).some(el =>
+            el.getBoundingClientRect().width && el.getBoundingClientRect().height && el.textContent.trim() === '暂无牛人');
+          if (!empty) throw new Error('完整列表容器缺失，不能确认全量候选人。');
+          return { empty: true };
+        }
+        const rect = list.getBoundingClientRect();
+        if (!rect.width || !rect.height) throw new Error('完整列表容器不可见。');
+        const footer = list.querySelector('.bottom-text');
+        if (!footer) throw new Error('完整列表缺少 bottom-text 结束标志。');
+        const footerRect = footer.getBoundingClientRect();
+        const end = !footer.classList.contains('active') && footer.textContent.trim().length > 0 &&
+          footerRect.height > 0 && footerRect.top >= rect.top && footerRect.bottom <= rect.bottom + 2;
+        return { empty: false, end, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      })()`) as { empty: boolean; end?: boolean; x: number; y: number };
+      if (state.empty) return JSON.stringify({ category: 'all', filter: 'all', candidates: [] });
+      await page.mouse.move(state.x, state.y);
+      if (!resetToTop) {
+        await page.mouse.wheel({ deltaY: -10_000_000 });
+        await sleepRandom(500, 650);
+        resetToTop = true;
+        continue;
+      }
+      for (const item of await readCandidateItems(page)) {
+        if (!item.dataId || !item.name || !item.job) throw new Error(`全量候选人缺少身份或岗位：${JSON.stringify(item)}`);
+        const previous = found.get(item.dataId);
+        if (previous && (previous.name !== item.name || previous.job !== item.job)) throw new Error(`扫描期间候选人身份发生变化：${item.dataId}`);
+        found.set(item.dataId, item);
+      }
+      if (state.end) return JSON.stringify({ category: 'all', filter: 'all', candidates: [...found.values()] });
+      await page.mouse.wheel({ deltaY: 400 });
+      await sleepRandom(450, 650);
+    }
+    throw new Error('全量扫描超过 400 轮仍未见列表结束标志，对账未完成。');
+  }, { retryOnContextDestroyed: false });
+}
 
 function traceListStep(message: string): void {
   if (process.env.BOSS_CLI_TRACE === 'true' || process.env.BOSS_CLI_TRACE === '1') {

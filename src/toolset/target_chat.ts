@@ -72,6 +72,18 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
   await closeAttachmentPreview(page);
   await ensureChatListReady(page, 'all', 'all');
 
+  // A preceding full inventory can leave the virtual list at its bottom.
+  const origin = await page.evaluate(`(() => {
+    const list = document.querySelector('.user-list');
+    if (!list) throw new Error('找不到会话列表容器，无法从顶部定位。');
+    const r = list.getBoundingClientRect();
+    if (!r.width || !r.height) throw new Error('会话列表容器不可见。');
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  })()`) as { x: number; y: number };
+  await page.mouse.move(origin.x, origin.y);
+  await page.mouse.wheel({ deltaY: -10_000_000 });
+  await sleepRandom(350, 550);
+
   for (let round = 0; round < 120; round++) {
     const state = (await page.evaluate(`(() => {
       const id = ${JSON.stringify(target.dataId)};

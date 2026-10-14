@@ -58,6 +58,7 @@ ensureBrowserSession()
        └── establishSession()
             ├── 关闭旧 browser 连接
             ├── connectBrowser()
+            ├── 等待首个 page target 就绪（不把 browser_ui 当作页面），再枚举现有标签
             ├── pickOrCreatePage(browser)
             │    ├── 优先 zhipin.com 页面
             │    ├── 其次任何非 about:blank 页面

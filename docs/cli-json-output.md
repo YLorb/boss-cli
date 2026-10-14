@@ -26,6 +26,7 @@ boss jd "模型评估工程师" --json
 | 命令 | 顶层字段 | 说明 |
 | --- | --- | --- |
 | `login` | `url,status` | status 为 `awaiting-manual-login`，不代表已登录 |
+| `--check-login` | `url,status,loggedIn` | status 为 logged-in/logged-out/unknown，对应 loggedIn 为 true/false/null；正常检查退出 0，连接/页面错误退出 1。只读页面信号，不验证服务端会话有效期 |
 | `list` | `category,filter,candidates` | 每行 `dataId,name,job,time,message,unreadCount` |
 | `chat`（姓名、序号或 data-id） | `name,dataId,summary,messages,hasFriendResumeAttachment` | summary 保留摘要数组；messages 含 `text,time,from`；仅页面已加载内容 |
 | `recommend` | `job,candidates` | 保留 `geekId,name,salary,baseInfo,expect,experience,advantage,highlights,canGreet,hasHistoryChat,hasViewed` |
@@ -36,6 +37,7 @@ boss jd "模型评估工程师" --json
 | `jd` | `name,path,markdown,source` | 继续保存和复用 `.md`；source 为 `cache` 或 `page` |
 | `accept-resume` / `action agree-resume` | `action,kind,which,target,attachmentReceived` | 返回 clicked，且已等到新附件卡片；已处理请求仍报错 |
 | `download-resume` | `name,dataId,geekId,attachmentName,fileName,path,bytes,sha256` | 默认即 JSON；`--json` 同样接受；图片 geekId 为 null |
+| `probe-resume` | `name,dataId,attachment,attachmentName,request,requestEvidence,scope,download` | 默认即 JSON；scope=loaded-messages；未观察到为 NOT_OBSERVED，不代表无附件或未发送；`--download` 才返回下载详情 |
 | `preview` | `name,sourceUrl,job,path,type` | type 为 `online-resume-screenshot`，不是原附件或 OCR 结果 |
 | `action resume` | `action,name,path,type` | 同上，为在线简历截图 |
 | `greet` | `source,name,message,status,candidates`，推荐页另含 `geekId,job`；深度搜索另含 `jobKeyword` | status 为 clicked，只确认点击，不代表回复；jobKeyword 是输入关键字 |
@@ -46,6 +48,8 @@ boss jd "模型评估工程师" --json
 | `action history` | `action,status,colleague,mine` | read 时两个数组，每行 `action,operat`；入口缺失时 unavailable 且数组为 null；JSON 模式弹窗超时报错 |
 
 ## 字段边界
+
+`probe-resume/accept-resume/download-resume` 总超时错误名为 AttachmentTimeoutError，退出码 1，已确认子进程退出。collect 使用独立逐行 JSON 协议，无需 --json，参见 [岗位账本](collection-ledger.md)。
 
 `download-resume`、`accept-resume`、定向 `send` 可同时加 `--check --json`。`--check` 是无值开关：当前沟通页选中行的 `data-id` 等于目标 `data-id` 时跳过再次定位，仍核对会话身份；不相等时正常定位。不会新增或改变 JSON 输出字段。`send --check` 必须同时提供姓名和 `data-id`。
 

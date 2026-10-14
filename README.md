@@ -7,6 +7,8 @@
 
 官网主页：[boss-cli.com](https://boss-cli.com)
 
+本机 WorkBuddy 招聘流程交接：[执行手册与逐步命令](docs/workbuddy-recruitment-runbook.md)。
+
 **boss-cli**（`@joohw/boss-cli`）是开源的 **Boss直聘自动化命令行工具**。基于 Puppeteer / CDP 协议驱动本机 Chrome，无需 Selenium，把 Boss直聘 B 端的核心 HR 操作搬进终端：**候选人列表**、**批量发消息**、**自动打招呼**、**在线简历预览**、**深度搜索**、**职位管理**。
 
 适合 HR 日常提效，也适合 Claude / GPT / Gemini 等 **AI Agent** 通过子进程调用，搭建全自动化招聘流水线。
@@ -73,6 +75,7 @@ node dist/cli/index.js help
 | 命令 | 说明 |
 | --- | --- |
 | `boss login` | 打开 Boss直聘登录页（扫码/验证后手动完成） |
+| `boss collect --job <岗位完整名称> [--ledger-dir <目录>]` | 候选人处理流程的起点：启动常驻岗位账本，检查恢复状态；停止时发送 stop 写回 |
 | `boss update` | 通过 npm 安装最新版 boss-cli |
 | `boss list [--unread] [--chatting] [--json]` | 读取聊天列表；`--chatting` 选“沟通中”，`--json` 包含显示名称、`data-id` 和当前沟通职位 |
 | `boss chat <姓名> [--strict]` | 打开指定候选人会话 |
@@ -96,14 +99,23 @@ node dist/cli/index.js help
 
 ## 快速上手
 
+完成登录、确认岗位后，先启动岗位账本会话：
+
 ```bash
 # 1. 登录
 boss login
 
-# 2. 查看未读候选人
+# 2. 启动 collect，保持进程及 stdin 打开
+boss collect --job "前端工程师"
+```
+
+等待 collect 返回 `ok:true,event:started`，核对岗位及 recoveryRequired，再发送 `{"op":"show"}`。若需要恢复，先等待人工触发 reconcile 并完成全量逐项对账。以下独立 CLI 命令由另一个终端或外部编排器串行调用；与 collect 的轮次不得并发操作页面。读取的新候选人需先 add 到该账本，再按流程处理，结束时向 collect 发送 `{"op":"stop"}` 并等待 stopped。完整协议见 [岗位账本](docs/collection-ledger.md)。
+
+```bash
+# 3. 查看未读候选人，并将本岗位新候选人加入 collect 账本
 boss list --unread
 
-# 3. 打开会话并发送消息
+# 4. 根据流程核对发送条件后，打开会话并发送消息
 boss chat 张三
 boss send --text "您好，请问方便发一下简历吗？"
 
@@ -111,14 +123,14 @@ boss send --text "您好，请问方便发一下简历吗？"
 boss chat --index 2 --unread
 boss chat 张三 --index 2 --unread --strict
 
-# 4. 先进入推荐页，再在当前页打招呼
+# 5. 先进入推荐页，再在当前页打招呼
 boss recommend 前端工程师
 boss greet 张三 --job 前端工程师
 
-# 5. 常规搜索牛人
+# 6. 常规搜索牛人
 boss search "langgraph"
 
-# 6. 深度搜索：按传入列表同步分组条件，但不消耗匹配次数
+# 7. 深度搜索：按传入列表同步分组条件，但不消耗匹配次数
 boss deep-search --core "AI产品经理" --core "做过 RAG 或 Agent 产品落地" --bonus "有 ToB 平台经验"
 
 # 只有明确添加 --match 才会点击「立即匹配」，会消耗今日匹配次数，并只输出最新 20 条
@@ -129,16 +141,18 @@ boss deep-search --match
 
 ## 与 AI Agent 集成
 
-boss-cli 可由外部 Agent 通过子进程编排。采集附件时使用会话联合键，并根据列表里的当前沟通职位决定是否继续：
+boss-cli 可由外部 Agent 通过子进程编排。首先启动并保持 collect 会话，检查账本恢复状态后才进入候选人流程。采集附件使用会话联合键，并核对列表中的当前沟通职位：
 
 ```
-1. boss list --chatting --json                         → 获取显示名称、data-id、当前沟通职位
-2. boss accept-resume <姓名> --data-id <会话ID>          → 同意接收候选人附件
-3. boss download-resume <姓名> --data-id <会话ID>        → 下载原附件并获取文件信息
-4. boss send --text "..." --name <姓名> --data-id <会话ID> → 按联合键核对后发送
+1. boss collect --job <岗位完整名称>                  → 保持常驻进程，等待 started，核对 recoveryRequired
+2. 向 collect 发送 show                              → 读取账本；需要恢复时等待人工 reconcile 完成
+3. boss list --chatting --json                       → 获取姓名、data-id、沟通职位，将本岗位新候选人 add 入账
+4. 向 collect 逐条发送 round / decision              → 按已有进度探测、记录筛选结果并下载；FAIL 直接移出账本
+5. 按监督流程执行获准的后续动作                       → 核对附件与发送证据；RECHECK 候选人暂停，等待人工复查
+6. 向同一 collect 发送 stop                          → 等待 stopped，确认账本写回后结束
 ```
 
-详见 [AGENTS.md](./AGENTS.md)。
+详见 [岗位账本与流程起点](docs/collection-ledger.md) 和 [AGENTS.md](./AGENTS.md)。
 
 ---
 

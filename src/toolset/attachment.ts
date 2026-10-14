@@ -15,7 +15,7 @@ export async function runAcceptTargetResume(target: ConversationTarget, json = f
   return withBossSessionPage(async (page) => {
     await openConversationByTarget(page, target, check);
     return runChatActionOnCurrentConversation(page, { action: 'agree-resume', target, json });
-  });
+  }, { retryOnContextDestroyed: false });
 }
 
 async function latestAttachmentCard(page: Page): Promise<string> {
@@ -67,6 +67,11 @@ export async function runDownloadTargetResume(
 ): Promise<string> {
   return withBossSessionPage(async (page) => {
     await openConversationByTarget(page, target, check);
+    return downloadCurrentResume(page, target, outputDir);
+  }, { retryOnContextDestroyed: false });
+}
+
+async function downloadCurrentResume(page: Page, target: ConversationTarget, outputDir: string): Promise<string> {
     const cardName = await latestAttachmentCard(page);
     await assertSelectedConversation(page, target);
     const previewButtons = await page.$$('.chat-message-list .message-item .item-friend:has(.resume-icon) .message-card-buttons .card-btn');
@@ -131,5 +136,57 @@ export async function runDownloadTargetResume(
     return JSON.stringify({ name: target.name, dataId: target.dataId, geekId: preview.geekId,
       attachmentName: cardName, fileName: path.basename(file), path: file,
       bytes: info.size, sha256: hash });
-  });
+}
+
+export type AttachmentProbe = {
+  name: string;
+  dataId: string;
+  attachment: 'RECEIVED' | 'NOT_OBSERVED';
+  attachmentName: string | null;
+  request: 'SENT' | 'NOT_OBSERVED';
+  requestEvidence: string[];
+  scope: 'loaded-messages';
+  download: Record<string, unknown> | null;
+};
+
+export function validateAttachmentProbe(value: AttachmentProbe): void {
+  if (!value || typeof value.name !== 'string' || !value.name.trim() || typeof value.dataId !== 'string' || !value.dataId.trim() ||
+      !['RECEIVED', 'NOT_OBSERVED'].includes(value.attachment) || !['SENT', 'NOT_OBSERVED'].includes(value.request) ||
+      (value.attachment === 'RECEIVED' ? typeof value.attachmentName !== 'string' || !value.attachmentName : value.attachmentName !== null) ||
+      value.scope !== 'loaded-messages' || !Array.isArray(value.requestEvidence) || value.requestEvidence.some(text => typeof text !== 'string') ||
+      (value.request === 'SENT' && !value.requestEvidence.length) ||
+      (value.download !== null && (typeof value.download !== 'object' ||
+        typeof value.download.path !== 'string' || typeof value.download.sha256 !== 'string' || typeof value.download.bytes !== 'number'))) {
+    throw new Error('附件探测结果格式无效，不能更新账本。');
+  }
+}
+
+/** Read attachment evidence first, then outgoing request evidence; never send a message. */
+export async function runProbeTargetResume(target: ConversationTarget, download = false, outputDir = path.join(APP_HOME, 'resume-files')): Promise<string> {
+  return withBossSessionPage(async (page) => {
+    await openConversationByTarget(page, target);
+    await page.waitForSelector('.chat-message-list .message-item', { timeout: 15_000 });
+    const evidence = await page.evaluate(`(() => {
+      const norm = v => (v ?? '').replace(/\\s+/g, ' ').trim();
+      const lists = Array.from(document.querySelectorAll('.chat-message-list'))
+        .filter(el => el.getBoundingClientRect().width && el.getBoundingClientRect().height);
+      if (lists.length !== 1) throw new Error('可见消息列表数量异常：' + lists.length);
+      const list = lists[0];
+      const cards = Array.from(list.querySelectorAll('.message-item .item-friend')).filter(el => el.querySelector('.resume-icon'));
+      const attachment = cards.length > 0;
+      const attachmentName = attachment ? norm(cards.at(-1).querySelector('.message-card-top-title')?.textContent) : null;
+      if (attachment && !attachmentName) throw new Error('附件卡片缺少名称，不能确认附件。');
+      const requestEvidence = Array.from(list.querySelectorAll('.message-item .item-myself .text'))
+        .map(el => norm(el.textContent)).filter(text => text === '方便发一份你的简历过来吗？');
+      return { attachment, attachmentName, requestEvidence };
+    })()`) as { attachment: boolean; attachmentName: string | null; requestEvidence: string[] };
+    await assertSelectedConversation(page, target);
+    const result: AttachmentProbe = {
+      ...target, attachment: evidence.attachment ? 'RECEIVED' : 'NOT_OBSERVED', attachmentName: evidence.attachmentName,
+      request: evidence.requestEvidence.length ? 'SENT' : 'NOT_OBSERVED',
+      requestEvidence: evidence.requestEvidence, scope: 'loaded-messages', download: null,
+    };
+    if (download && evidence.attachment) result.download = JSON.parse(await downloadCurrentResume(page, target, outputDir));
+    return JSON.stringify(result);
+  }, { retryOnContextDestroyed: false });
 }
