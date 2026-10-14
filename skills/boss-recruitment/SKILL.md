@@ -2,7 +2,7 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
   updated: "2026-10-14"
   language: "zh-CN"
   cli-baseline: "0.6.8-4b8bb63"
@@ -15,6 +15,8 @@ metadata:
 ## SOP 执行约束（必读）
 
 **除使用者明确提出特殊要求外，Agent 必须严格按对应 SOP 执行；SOP 是执行约定，不是可自行取舍的建议。**
+
+- **Chrome 启动与 BOSS 登录必须使用 boss-cli 提供的工具入口**：通过 `node .\dist\cli\index.js login --json` 启动或复用浏览器并打开登录页，通过 `node .\dist\cli\index.js --check-login --json` 核验。禁止 Agent 自行调用 Chrome 可执行文件、Start-Process、Puppeteer／Playwright launch、自写CDP脚本或其他浏览器工具替代启动与登录。扫码和验证码由用户完成；工具失败时停止并报告，不换启动方式。具体顺序见启动说明。
 
 - 执行前必须读取本轮入口对应的 SOP、共用规则及账本说明，按步骤满足前置条件、核验实际结果后再进入下一步。不得凭记忆、省略核验、调换依赖顺序、跨入口套用流程或自行扩大对象范围。
 - 只有使用者在当前任务或仍然适用的对话中明确提出的特殊要求，才能覆盖对应约定；以最新明确要求为准，其余 SOP 继续有效。例如“仅查看不联系”只排除联系及后续动作，不取消岗位、身份、计数和证据核验。
