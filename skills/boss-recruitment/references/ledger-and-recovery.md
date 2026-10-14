@@ -11,7 +11,7 @@ scope: "ledger"
 
 每个完整岗位名对应SHA-256文件名；默认 `~/.boss-cli/ledgers`。同名不同职位ID尚不能区分。每岗只能一个存活会话。
 
-启动后核对started/job/file/recoveryRequired。下面每行是给**同一进程stdin**的独立命令，等待前一条结果，不一次性提交：
+启动前必须按[路径核验规范](paths.md)确认固定ledgerDir及expectedLedgerFile；启动后逐项核对started/job/file/recoveryRequired，file必须与预期绝对路径一致，否则停止业务并正常关闭新会话。下面每行是给**同一进程stdin**的独立命令，等待前一条结果，不一次性提交：
 
 ```json
 {"op":"show"}

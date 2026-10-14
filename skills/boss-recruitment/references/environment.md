@@ -64,6 +64,8 @@ $env:CHROME_PATH = $chromePath
 
 ## 数据目录和编排配置
 
+必须先按[路径核验规范](paths.md)区分cliDir与workspaceDir；所有目录持久化为绝对路径，ledgerDir固定跨轮次使用，不随本轮runtime目录新建。
+
 复制[config.example.json](../assets/config.example.json)并填写：cliDir指向含package.json和构建后dist的源码根目录；resumeDir、ledgerDir、runDir指向当前用户可写目录。目录可在首次运行创建，不需要携带示例账本。下载--output-dir和collect --ledger-dir由Agent显式传递。
 
 config.cdpUrl不是CLI原生参数；CLI用端口环境变量，岗位切换脚本用--cdp-url。timeoutBudgetSec不会改变CLI内部超时。不要输出或提交Cookie、浏览器数据、真实简历及凭据。

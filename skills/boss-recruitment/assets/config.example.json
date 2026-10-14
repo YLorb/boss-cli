@@ -1,10 +1,12 @@
 {
   "schemaVersion": 1,
   "cliDir": "C:/Recruitment/boss-cli",
+  "workspaceDir": "C:/Recruitment/workspaces/run-001",
   "cdpUrl": "http://127.0.0.1:53470",
-  "resumeDir": "C:/Recruitment/runtime/resumes",
-  "ledgerDir": "C:/Recruitment/runtime/ledgers",
-  "runDir": "C:/Recruitment/runtime/runs",
+  "resumeDir": "C:/Recruitment/workspaces/run-001/runtime/resumes",
+  "ledgerDir": "C:/Recruitment/shared/ledgers",
+  "runDir": "C:/Recruitment/workspaces/run-001/runtime/runs",
+  "screenshotDir": "C:/Recruitment/workspaces/run-001/runtime/screenshots",
   "timeoutBudgetSec": 15,
-  "note": "仅供Agent编排读取；CLI不自动加载此配置。timeoutBudgetSec不覆盖CLI内置超时。"
+  "note": "示例绝对路径须按本机填写。ledgerDir必须使用已确认的跨轮次固定目录，不能用示例创建空账本替代历史账本；启动前计算expectedLedgerFile并核对collect返回file。仅供Agent编排读取，CLI不自动加载；timeoutBudgetSec不覆盖CLI内置超时。"
 }

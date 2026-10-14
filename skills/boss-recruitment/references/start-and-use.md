@@ -41,10 +41,12 @@ boss-cli入口不存在、启动失败或登录核验不明时，停止依赖登
 
 ## 账本启动
 
+启动前必须读取[路径与账本核验](paths.md)，确认固定ledgerDir并计算expectedLedgerFile；核对collect返回的file完全匹配后才处理候选人。
+
 有账本写入的正式业务运行，在独立终端保持下面进程及 stdin 打开：
 
 ```powershell
-node .\dist\cli\index.js collect --job '目标岗位完整名称' --ledger-dir 'C:\Recruitment\runtime\ledgers'
+node .\dist\cli\index.js collect --job '目标岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledgers'
 ```
 
 等待 started，核对 job、file、recoveryRequired。向**同一进程的 stdin** 写入一行 `{"op":"show"}`，等待响应。其他 CLI 命令在另一终端串行执行；collect stdin 只接受 JSON，不接受 shell。每条等待返回，不一次性灌入全部命令。结束写 `{"op":"stop"}` 并等待 stopped 及进程退出。

@@ -2,10 +2,10 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.5"
+  version: "1.0.6"
   updated: "2026-10-14"
   language: "zh-CN"
-  cli-baseline: "0.6.8-4b8bb63"
+  cli-baseline: "0.6.9-1943435"
 ---
 
 # BOSS 招聘流程
@@ -39,6 +39,7 @@ metadata:
 | --- | --- |
 | 首次安装、下载、环境或版本问题 | [安装与兼容性](references/install.md) |
 | Node.js、Chrome、PATH、CDP和目录配置 | [环境配置](references/environment.md)；不要求安装Git |
+| 确定工作目录、保存位置或启动collect | [路径与账本路径核验](references/paths.md)，正式运行前必读 |
 | 启动、登录、配置、调用模板 | [启动与使用](references/start-and-use.md) |
 | 确定命令参数、示例、页面要求 | [命令与 URL 对照](references/cli-reference.md)；只读所需命令小节 |
 | 未读简历收集 | [收集 SOP](references/collect-sop.md) |
@@ -55,6 +56,7 @@ metadata:
 ## 所有流程共同遵守
 
 - 先确认当前岗位和候选人身份，再执行动作；同名或身份不唯一时停止该动作。
+- cliDir、workspaceDir和所有数据目录必须明确为绝对路径；ledgerDir为跨轮次固定目录，不随工作区变化。collect返回的file必须与预先计算的岗位账本绝对路径一致，未核验不得处理候选人。发现同岗多账本停止并报告，不自行合并或改用空账本。
 - 一轮固定起始对象范围，逐人完成。循环内不刷新列表、不重复查询同一关键词；不要使用变化后的旧序号。确需追加搜索页时按搜索 SOP 加载更多。
 - “仅查看／评估”不包含联系、入正式候选人账本、求附件或上传；本轮评估记录可单独保存。既有授权按其范围执行，不额外制造确认步骤。
 - 同一浏览器页面串行操作。失败保留上下文并报告，不加备用点击路径，不盲重试。现有 CLI 的未修复限制见各 SOP，不能把规范写成已实现功能。

@@ -118,7 +118,7 @@ positions读取职位列表，jd读取或复用本地Markdown缓存，JSON返回
 ## collect
 
 ```powershell
-boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\runtime\ledgers'
+boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledgers'
 ```
 
 保持进程，stdin逐行发送JSON，完整协议与例子见[账本与恢复](ledger-and-recovery.md)。不支持 send/upload/recordProbe 等stdin op；round遍历账本，不是未读单人循环。
