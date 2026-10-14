@@ -25,14 +25,14 @@ npm run build
 node .\dist\cli\index.js help
 ```
 
-这是已推送的 CLI 0.6.7 源码，功能基线为 `457c5ef`，仓库为 `YLorb/boss-cli`。`source-manifest.json` 记录 commit 与文件哈希；不表示同名 npm 包已发布此版本。构建失败直接处理错误，不换用其他版本掩盖。
+这是已推送的 CLI 0.6.8 源码，功能基线为 `4b8bb63`，仓库为 `YLorb/boss-cli`。`source-manifest.json` 记录 commit 与文件哈希；不表示同名 npm 包已发布此版本。构建失败直接处理错误，不换用其他版本掩盖。
 
 ## 路径二：从 GitHub 下载源码
 
 ```powershell
 git clone --branch dev https://github.com/YLorb/boss-cli.git
 Set-Location boss-cli
-git checkout 457c5ef
+git checkout 4b8bb63
 git rev-parse HEAD
 npm ci
 npm run build

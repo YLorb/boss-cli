@@ -2,10 +2,10 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
   updated: "2026-10-14"
   language: "zh-CN"
-  cli-baseline: "0.6.7-457c5ef"
+  cli-baseline: "0.6.8-4b8bb63"
 ---
 
 # BOSS 招聘流程
@@ -37,6 +37,7 @@ metadata:
 | 启动、登录、配置、调用模板 | [启动与使用](references/start-and-use.md) |
 | 确定命令参数、示例、页面要求 | [命令与 URL 对照](references/cli-reference.md)；只读所需命令小节 |
 | 未读简历收集 | [收集 SOP](references/collect-sop.md) |
+| 沟通页读取／切换岗位 | [岗位切换脚本规范](references/switch-job.md)，操作前必读 |
 | 推荐寻访 | [推荐 SOP](references/recommend-sop.md) |
 | 常规搜索 | [搜索 SOP](references/search-sop.md) |
 | 评分、计数、去重及停止 | [共用规则](references/common-rules.md) |

@@ -40,6 +40,8 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 
 ## 列表与会话
 
+沟通页岗位切换使用CLI仓库的 `node .\scripts\switch-job.mjs --list` 与 `--job '完整label'`，不是boss子命令。调用前必须读取[脚本规范](switch-job.md)，参数、当前位置、结果核验和失败处理均按该规范执行。
+
 ```powershell
 boss list --unread --json
 boss list --chatting --json

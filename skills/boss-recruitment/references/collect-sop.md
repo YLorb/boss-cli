@@ -9,7 +9,7 @@ scope: "collect-unread"
 
 读取[共用规则](common-rules.md)、[账本](ledger-and-recovery.md)。输入目标岗位、JD及评估条件、获准消息、输出目录和本轮范围。禁止把 collect round 当成本 SOP。
 
-1. 确认登录、当前岗位。启动 collect，等待 started，核对 job 和恢复状态，show 读取账本。
+1. 确认登录；按[岗位切换脚本规范](switch-job.md)读取实时选项、唯一定位并核验目标沟通岗位，不把 collect --job 当成页面切换。启动 collect，等待 started，核对 job 和恢复状态，show 读取账本。
 2. **本轮只获取一次起始未读快照**：`node .\dist\cli\index.js list --unread --json`，核对岗位，保存姓名、data-id及顺序。本轮不反复刷新列表，新到未读留下一轮。
 3. 在仍保持本轮列表的前提下，根据当前可见行的身份重新定位起始快照中的下一人。`chat --index` 会重读当前列表，不能直接套用保存的旧序号；`chat --data-id` 会进入“全部”，不能冒充严格未读模式。若现有 CLI 无法维持边界，停止并报告，不能偷偷扩大范围。
 4. 进入后核对实际 data-id、姓名、目标岗位。打开使未读消失不影响继续处理已核对的当前人。依照获准范围读取摘要／在线简历及评估；新对象 add 到当前账本，保存结论；FAIL 从正式账本移除但本轮保留原因，不点页面“不合适”。
