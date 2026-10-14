@@ -11,11 +11,12 @@
   "observationLimit": null,
   "contactThreshold": null,
   "allowedActions": [],
+  "sopExceptions": [],
   "excludedCandidates": [],
   "observedCount": 0,
   "initialSnapshot": [],
   "records": [],
   "pendingActions": [],
   "stopReason": null,
-  "note": "由使用者填写必需输入；null不是默认授权。records保存身份依据、证据、分数、动作及结果，不能伪造正式dataId。"
+  "note": "由使用者填写必需输入；null不是默认授权。sopExceptions仅记录使用者明确要求的例外，包含原要求、受影响步骤、适用范围和实际处理，空数组表示无例外。records保存身份依据、证据、分数、动作及结果，不能伪造正式dataId。"
 }
