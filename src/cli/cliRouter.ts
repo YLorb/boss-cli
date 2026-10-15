@@ -31,6 +31,7 @@ import { jsonError, splitJsonFlag } from './output.js';
 import { isAttachmentCommand, runCommandProcess } from './command_process.js';
 import { runProbeTargetResume } from '../toolset/attachment.js';
 import { runCollectionSession } from '../collection/session.js';
+import { runBack } from '../toolset/back.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
 import { join } from 'node:path';
@@ -126,6 +127,8 @@ function splitShellLine(line: string): string[] {
 /** 短命令为主；保留旧长名作为别名，避免已有脚本失效 */
 function normalizeSubcommand(cmd: string): string {
   switch (cmd) {
+    case '/back':
+      return 'back';
     case 'list-candidates':
       return 'list';
     case 'open-chat':
@@ -155,7 +158,7 @@ function printHelp(): void {
       显示当前版本并检查 npm 是否有更新
   boss update
       使用 npm 安装最新版 boss-cli
-  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet）
+  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet/back）
       输出各命令的原始字段；JSON 模式 stdout 仅输出结果，诊断日志写 stderr
       失败输出 {ok:false,command,error:{name,message}} 并返回非零退出码
       jd --json 返回 Markdown 正文与缓存路径；download-resume 默认已输出 JSON
@@ -193,8 +196,11 @@ function printHelp(): void {
       读取当前职位列表（含开放/待开放/已关闭状态）
   boss jd <name>
       抓取指定职位详情并缓存到项目目录同名 .md
-  boss recommend [岗位关键字]
-      进入推荐页并读取推荐列表；带岗位关键字时先在岗位下拉中模糊匹配并切换
+  boss back [--check-in_online_resume]
+      关闭在线简历弹层；独立在线简历页仅向已核验的列表历史回退一步。检查开关在列表上不操作。
+
+  boss recommend [岗位关键字] [--check-job]
+      进入推荐页并读取推荐列表；带岗位关键字时选择岗位；--check-job 与当前完整岗位名匹配时跳过选择
   boss search [关键词]
       进入「搜索」页并读取 Boss 默认常规搜索结果；带关键词时填入搜索框并回车搜索
   boss preview <姓名>
@@ -407,7 +413,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['--check-login', 'login', 'list', 'chat', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet'].includes(cmd)) {
+  if (json && !['--check-login', 'login', 'list', 'chat', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet', 'back'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   configureHeadlessForCommand(cmd);
@@ -637,16 +643,23 @@ export async function executeCommand(argv: string[]): Promise<string> {
     return implPreview({ candidateTarget, json });
   }
 
+  if (cmd === 'back') {
+    const { rest, opts, flags } = parseOpts(tail, new Set(['check-in_online_resume']));
+    if (rest.length || Object.keys(opts).length || [...flags].some(f => f !== 'check-in_online_resume')) die('❌ 用法: back [--check-in_online_resume]');
+    return runBack(flags.has('check-in_online_resume'), json);
+  }
+
   if (cmd === 'recommend') {
-    const { rest, opts, flags } = parseOpts(tail);
+    const { rest, opts, flags } = parseOpts(tail, new Set(['check-job']));
     if (rest[0] === 'preview') {
       die('❌ 请改用: boss preview <姓名>（已不再使用 recommend preview）');
     }
-    if (Object.keys(opts).length > 0 || flags.size > 0) {
-      die('❌ 用法: recommend [岗位关键字]');
+    if (Object.keys(opts).length > 0 || [...flags].some(f => f !== 'check-job')) {
+      die('❌ 用法: recommend [岗位完整名称] [--check-job]');
     }
     const jobKeyword = rest.join(' ').trim();
-    return implRecommend(jobKeyword || undefined, json);
+    if (flags.has('check-job') && !jobKeyword) die('❌ --check-job 需要岗位完整名称');
+    return implRecommend(jobKeyword || undefined, json, flags.has('check-job'));
   }
 
   if (cmd === 'greet') {

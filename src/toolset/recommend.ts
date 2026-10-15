@@ -120,9 +120,8 @@ async function waitForRecommendJobSearchResults(frame: Frame, keyword: string): 
         const label = norm(el.querySelector(".label")?.textContent || el.textContent || "");
         return label.includes(norm(kw));
       });
-    })`,
+    })(${JSON.stringify(keyword)})`,
     { timeout: 10_000 },
-    keyword,
   );
 }
 
@@ -132,17 +131,21 @@ async function waitForRecommendJobSelected(frame: Frame, expectedLabel: string):
       const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
       const current = norm(document.querySelector(".job-selecter-wrap .ui-dropmenu-label")?.textContent);
       return !!current && current === label;
-    })`,
+    })(${JSON.stringify(expectedLabel)})`,
     { timeout: 10_000 },
-    expectedLabel,
   );
   await ensureRecommendFrameReady(frame);
 }
 
-export async function selectRecommendJob(frame: Frame, keyword: string): Promise<string> {
+export async function selectRecommendJob(frame: Frame, keyword: string, checkJob = false): Promise<string> {
   const kw = keyword.trim();
   if (!kw) {
     return readCurrentRecommendJobLabel(frame);
+  }
+  if (checkJob) {
+    const current = await readCurrentRecommendJobLabel(frame);
+    const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
+    if (normalize(current) === normalize(kw)) return current;
   }
   const kwLiteral = JSON.stringify(kw);
 
@@ -180,10 +183,12 @@ export async function selectRecommendJob(frame: Frame, keyword: string): Promise
     const norm = (v) => (v ?? "").replace(/\\s+/g, "").trim().toLowerCase();
     const rows = Array.from(document.querySelectorAll(".job-selecter-options .job-list .job-item"));
     if (rows.length === 0) return { ok: false, reason: "empty" };
-    const target = rows.find((el) => {
+    const matches = rows.filter((el) => {
       const label = norm(el.querySelector(".label")?.textContent || el.textContent || "");
-      return label.includes(norm(kw));
+      return ${checkJob} ? label === norm(kw) : label.includes(norm(kw));
     });
+    if (${checkJob} && matches.length > 1) return { ok: false, reason: "ambiguous" };
+    const target = matches[0];
     if (!(target instanceof HTMLElement)) return { ok: false, reason: "not_found" };
     const label = (target.querySelector(".label")?.textContent ?? target.textContent ?? "")
       .replace(/\\s+/g, " ")
@@ -193,9 +198,10 @@ export async function selectRecommendJob(frame: Frame, keyword: string): Promise
     return { ok: true, label };
   })()`)) as { ok: boolean; label?: string; reason?: string };
   if (!picked.ok) {
-    throw new Error(`未找到匹配岗位“${kw}”。`);
+    throw new Error(`岗位选择失败：${kw}；reason=${picked.reason}。`);
   }
-  const label = picked.label ?? kw;
+  if (!picked.label) throw new Error(`岗位选择结果缺少名称：${kw}`);
+  const label = picked.label;
   await sleepRandom(JOB_SELECT_ACTION_GAP_MS.min, JOB_SELECT_ACTION_GAP_MS.max);
   await waitForRecommendJobSelected(frame, label);
   return label;
@@ -495,11 +501,11 @@ export async function openRecommendResumePreview(frame: Frame, target: string): 
   return opened;
 }
 
-export async function runRecommend(jobKeyword?: string, json = false): Promise<string> {
+export async function runRecommend(jobKeyword?: string, json = false, checkJob = false): Promise<string> {
   try {
     return await withBossSessionPage(async (page) => {
       const frame = await ensureInRecommendPage(page);
-      const selectedJob = await selectRecommendJob(frame, (jobKeyword ?? '').trim());
+      const selectedJob = await selectRecommendJob(frame, (jobKeyword ?? '').trim(), checkJob);
       const candidates = await readRecommendList(frame);
       if (json) return JSON.stringify({ job: selectedJob, candidates });
       const title = selectedJob ? `当前岗位：${selectedJob}` : '当前岗位：默认';

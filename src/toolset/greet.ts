@@ -1,9 +1,6 @@
 import {
   GREET_PAYWALL_WAIT_MAX_MS,
-  resumeHeight,
-  setTempHeight,
   sleepRandom,
-  snapshotBossPageViewport,
 } from '../browser/index.js';
 import { closeBossModalIfPresent, waitAndCloseBossModalIfPresent } from '../common/boss_modal.js';
 import {
@@ -29,10 +26,6 @@ import {
   selectRecommendJob,
 } from './recommend.js';
 import type { Page } from 'puppeteer-core';
-
-/** 打招呼前临时拉高父页视口，使 iframe 内更多卡片进入 DOM（与 recommend 列表读取已解耦）。 */
-const RECOMMEND_GREET_EXPAND_HEIGHT_PX = 3000;
-const RECOMMEND_GREET_EXPAND_SETTLE_MS = { min: 600, max: 1400 } as const;
 
 /** 操作完成后等待并关闭延迟出现的提示弹层（如「当前职位尚未开放」）。 */
 const GREET_MODAL_CLEANUP_WAIT_MAX_MS = 4000;
@@ -93,25 +86,15 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
       const frame = await assertRecommendPageReady(page, '打招呼');
       const selectedJob = await selectRecommendJob(frame, kw);
       const jobLine = selectedJob ? `当前岗位：${selectedJob}` : '当前岗位：默认';
-      const savedViewport = await snapshotBossPageViewport(page);
-      try {
-        await setTempHeight(page, savedViewport, RECOMMEND_GREET_EXPAND_HEIGHT_PX);
-        await sleepRandom(
-          RECOMMEND_GREET_EXPAND_SETTLE_MS.min,
-          RECOMMEND_GREET_EXPAND_SETTLE_MS.max,
-        );
-        const before = await readRecommendList(frame);
-        const greetResult = await clickGreet(frame, t);
-        await assertNoGreetPaywallPopup(page);
-        await sleepRandom(380, 1000);
-        const after = await readRecommendList(frame);
-        markGreetProduced(before, after);
-        await cleanupGreetModalIfPresent(page);
-        if (options.json) return JSON.stringify({ source: 'recommend', ...greetResult, job: selectedJob, status: 'clicked', candidates: after });
-        return [jobLine, greetResult.message, '', '当前推荐列表（来源分组）：', renderRecommendList(after)].join('\n');
-      } finally {
-        await resumeHeight(page, savedViewport);
-      }
+      const before = await readRecommendList(frame);
+      const greetResult = await clickGreet(frame, t);
+      await assertNoGreetPaywallPopup(page);
+      await sleepRandom(380, 1000);
+      const after = await readRecommendList(frame);
+      markGreetProduced(before, after);
+      await cleanupGreetModalIfPresent(page);
+      if (options.json) return JSON.stringify({ source: 'recommend', ...greetResult, job: selectedJob, status: 'clicked', candidates: after });
+      return [jobLine, greetResult.message, '', '当前推荐列表（来源分组）：', renderRecommendList(after)].join('\n');
     }, { ensureChatShell: false, ensureMenuList: false });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

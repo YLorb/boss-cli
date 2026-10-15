@@ -3,15 +3,13 @@
  * 再执行 {@link withBossSessionPage} 回调。与 `src/toolset/chat.ts`（按姓名打开会话等业务）无关。
  */
 import type { Browser, Page } from 'puppeteer-core';
-import { BOSS_CHAT_INDEX_URL, isBossChatShellUrl } from './auth.js';
+import { isBossChatShellUrl } from './auth.js';
 import {
   ensureBrowserSession,
   getBrowserRef,
   getPageRef,
   setSessionPage,
 } from '../browser/browser_session.js';
-import { CONTEXT_DESTROY_RETRY_MS } from '../browser/human_delay.js';
-import { sleepRandom } from '../browser/timing.js';
 import { installBossPageGuards } from './boss_page_guards.js';
 import { withBossSessionLock } from './boss_session_lock.js';
 
@@ -56,7 +54,6 @@ type MenuListSnapshot = {
 type BossSessionPageOptions = {
   ensureChatShell?: boolean;
   ensureMenuList?: boolean;
-  retryOnContextDestroyed?: boolean;
 };
 
 function normalizeMenuText(raw: string | null | undefined): string {
@@ -82,16 +79,16 @@ async function readMenuListSnapshot(page: Page): Promise<MenuListSnapshot> {
 }
 
 /**
- * 先按 URL 判断：不在 Boss 已登录主壳页（`/web/chat/*`）时跳到沟通页 `/web/chat/index`，
+ * 先按 URL 判断：不在 Boss 已登录主壳页（`/web/chat/*`）时明确报错，不自动导航，
  * 再交由 {@link ensureMenuListMountedAfterLoad} 查 `.menu-list`。
- * 已经在 `/web/chat/recommend`、`/web/chat/aiform` 等主壳子页时直接跳过 goto，
+ * 已经在 `/web/chat/recommend`、`/web/chat/aiform` 等主壳子页时保留当前路径，
  * 避免触发"先回到聊天页再切回业务页"的额外跳转。
  */
 async function ensureBossChatShellUrlBeforeMenuList(page: Page): Promise<void> {
   if (isBossChatShellUrl(page.url())) {
     return;
   }
-  await page.goto(BOSS_CHAT_INDEX_URL, { waitUntil: 'load', timeout: 60_000 });
+  throw new Error(`当前不在 BOSS 工作台：${page.url()}；不会自动导航。在线简历请使用 back --check-in_online_resume 返回。`);
 }
 
 async function ensureMenuListMountedAfterLoad(page: Page): Promise<void> {
@@ -128,7 +125,7 @@ async function ensureMenuListMountedAfterLoad(page: Page): Promise<void> {
 
 /**
  * 在已连接浏览器、且当前页为 Boss 主壳（含侧栏 `.menu-list`）的前提下执行回调。
- * 默认会先按 URL 确保落在 `/web/chat/*` 主壳页（已在主壳子页则保留原路径，否则跳回沟通页 `/web/chat/index`），
+ * 默认先按 URL 校验 `/web/chat/*` 主壳页，错误直接暴露，不重跑业务回调，
  * 再校验侧栏；需要严格使用当前页面的命令可通过 options 关闭这些预检查。
  */
 export async function withBossSessionPage<T>(
@@ -139,55 +136,31 @@ export async function withBossSessionPage<T>(
   const shouldEnsureMenuList = options.ensureMenuList !== false;
 
   return withBossSessionLock(async () => {
-    const isContextDestroyed = (e: unknown): boolean => {
-    const msg = e instanceof Error ? e.message : String(e);
-    return (
-      msg.includes('Execution context was destroyed') ||
-      msg.includes('Cannot find context with specified id') ||
-      msg.includes('Most likely because of a navigation')
-    );
-  };
-
-    const maxAttempts = options.retryOnContextDestroyed === false ? 1 : 2;
-    let lastErr: unknown;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      await ensureBrowserSession();
-      const browser = getBrowserRef();
-      if (!browser) {
-        throw new Error('无法获取浏览器实例。');
-      }
-
-      let page: Page | null = getPageRef();
-      if (!page || page.isClosed()) {
-        page = (await pickExistingPage(browser)) ?? (await browser.newPage());
-      }
-      setSessionPage(page);
-      await page.bringToFront();
-
-      await installBossPageGuards(page);
-
-      if (shouldEnsureChatShell) {
-        await ensureBossChatShellUrlBeforeMenuList(page);
-      }
-      if (SHOULD_DISABLE_JS) {
-        await page.setJavaScriptEnabled(false);
-      }
-      if (shouldEnsureMenuList) {
-        await ensureMenuListMountedAfterLoad(page);
-      }
-
-      return await callback(page);
-    } catch (e) {
-      lastErr = e;
-      if (attempt < maxAttempts - 1 && isContextDestroyed(e)) {
-        // Boss 页面偶发跳转/重渲染会销毁执行上下文；短暂等待并重试一次即可。
-        await sleepRandom(CONTEXT_DESTROY_RETRY_MS.min, CONTEXT_DESTROY_RETRY_MS.max);
-        continue;
-      }
-      throw e;
+    await ensureBrowserSession();
+    const browser = getBrowserRef();
+    if (!browser) {
+      throw new Error('无法获取浏览器实例。');
     }
-  }
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+
+    let page: Page | null = getPageRef();
+    if (!page || page.isClosed()) {
+      page = (await pickExistingPage(browser)) ?? (await browser.newPage());
+    }
+    setSessionPage(page);
+    if (await page.evaluate("document.visibilityState") !== "visible") await page.bringToFront();
+
+    await installBossPageGuards(page);
+
+    if (shouldEnsureChatShell) {
+      await ensureBossChatShellUrlBeforeMenuList(page);
+    }
+    if (SHOULD_DISABLE_JS) {
+      await page.setJavaScriptEnabled(false);
+    }
+    if (shouldEnsureMenuList) {
+      await ensureMenuListMountedAfterLoad(page);
+    }
+
+    return await callback(page);
   });
 }

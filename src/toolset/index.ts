@@ -137,8 +137,8 @@ export async function implBossSearchSet(opts: {
   return runBossSearchSet(opts);
 }
 
-export async function implRecommend(jobKeyword?: string, json = false): Promise<string> {
-  return runRecommend(jobKeyword, json);
+export async function implRecommend(jobKeyword?: string, json = false, checkJob = false): Promise<string> {
+  return runRecommend(jobKeyword, json, checkJob);
 }
 
 export async function implPreview(opts: {

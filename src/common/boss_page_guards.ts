@@ -1,5 +1,4 @@
 import type { Browser, CDPSession, Page, Target } from 'puppeteer-core';
-import { BOSS_CHAT_INDEX_URL } from './auth.js';
 
 const SHOULD_ALLOW_CONSOLE_CLEAR =
   process.env.BOSS_BROWSER_ALLOW_CONSOLE_CLEAR === 'true' ||
@@ -424,9 +423,7 @@ function ensurePageNavigationGuard(page: Page): void {
     if (frame !== page.mainFrame()) return;
     const url = frame.url();
     if (!isRiskNavigationUrl(url)) return;
-    void page.goto(BOSS_CHAT_INDEX_URL, { waitUntil: 'load', timeout: 60_000 }).catch(() => {
-      console.error(`[boss-cli] 风险页导航恢复失败：${url}`);
-    });
+    console.error(`[boss-cli] 页面进入验证或异常页面，停止自动恢复，不导航、不回退：${url}`);
   });
   pagesWithNavigationGuard.add(page);
 }

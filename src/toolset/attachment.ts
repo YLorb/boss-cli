@@ -15,7 +15,7 @@ export async function runAcceptTargetResume(target: ConversationTarget, json = f
   return withBossSessionPage(async (page) => {
     await openConversationByTarget(page, target, check);
     return runChatActionOnCurrentConversation(page, { action: 'agree-resume', target, json });
-  }, { retryOnContextDestroyed: false });
+  });
 }
 
 async function latestAttachmentCard(page: Page): Promise<string> {
@@ -68,7 +68,7 @@ export async function runDownloadTargetResume(
   return withBossSessionPage(async (page) => {
     await openConversationByTarget(page, target, check);
     return downloadCurrentResume(page, target, outputDir);
-  }, { retryOnContextDestroyed: false });
+  });
 }
 
 async function downloadCurrentResume(page: Page, target: ConversationTarget, outputDir: string): Promise<string> {
@@ -188,5 +188,5 @@ export async function runProbeTargetResume(target: ConversationTarget, download 
     };
     if (download && evidence.attachment) result.download = JSON.parse(await downloadCurrentResume(page, target, outputDir));
     return JSON.stringify(result);
-  }, { retryOnContextDestroyed: false });
+  });
 }

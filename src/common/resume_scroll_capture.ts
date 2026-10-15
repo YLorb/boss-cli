@@ -135,6 +135,23 @@ export function composeResumeFrame(shell: PNG, body: PNG, x: number, y: number, 
   return PNG.sync.write(output);
 }
 
+/** Capture only the current viewport; crop locally without a browser clip override. */
+export async function captureVisibleRegion(page: Page, clip: { x: number; y: number; width: number; height: number }, scale: number): Promise<PNG> {
+  const viewport = await page.evaluate('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,scale:devicePixelRatio})') as {width:number;height:number;x:number;y:number;scale:number};
+  if (viewport.scale !== scale) throw new Error('截图期间像素缩放发生变化');
+  const image = PNG.sync.read(Buffer.from(await page.screenshot({ type: 'png', fullPage: false, captureBeyondViewport: false })));
+  const x = Math.round((clip.x - viewport.x) * scale), y = Math.round((clip.y - viewport.y) * scale);
+  const width = Math.round(clip.width * scale), height = Math.round(clip.height * scale);
+  if (Math.abs(image.width - viewport.width * scale) > 1 || Math.abs(image.height - viewport.height * scale) > 1 ||
+      x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > image.width || y + height > image.height)
+    throw new Error('当前视口截图尺寸或裁剪边界异常');
+  const after = await page.evaluate('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,scale:devicePixelRatio})');
+  if (JSON.stringify(viewport) !== JSON.stringify(after)) throw new Error('截图期间主页面视口或滚动位置变化');
+  const cropped = new PNG({ width, height });
+  PNG.bitblt(image, cropped, x, y, width, height, 0, 0);
+  return cropped;
+}
+
 export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Element>, path: string): Promise<void> {
   const frame = await iframe.contentFrame();
   if (!frame) throw new Error('无法读取在线简历 iframe 的滚动信息');
@@ -245,8 +262,8 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
     if (!outer && (frameBox.x < 0 || frameBox.y < 0 || frameBox.x + frameBox.width > viewport.width || frameBox.y + frameBox.height > viewport.height))
       throw new Error('在线简历 iframe 未完整显示，无法保留顶部和底部信息');
     const shellBox = outer ? bodyClip : frameBox;
-    const shell = PNG.sync.read(Buffer.from(await page.screenshot({ type: 'png', clip: shellBox, captureBeyondViewport: false })));
     const scale = viewport.pixelRatio;
+    const shell = await captureVisibleRegion(page, shellBox, scale);
     if (!Number.isFinite(scale) || scale <= 0 || Math.abs(shell.width - shellBox.width * scale) > 1 || Math.abs(shell.height - shellBox.height * scale) > 1)
       throw new Error('简历截图尺寸与浏览器像素缩放不一致');
     traceResumeCapture('pixel-scale', { scale, cssWidth: shellBox.width, imageWidth: shell.width });
@@ -255,7 +272,7 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
     let complete = false, pixels = 0;
     for (let i = 0; i < 100; i++) {
       const clip = await geometry(m);
-      const image = PNG.sync.read(Buffer.from(await page.screenshot({ type: 'png', clip, captureBeyondViewport: false })));
+      const image = outer && i === 0 ? shell : await captureVisibleRegion(page, clip, scale);
       const after = await read();
       if (JSON.stringify(m) !== JSON.stringify(after)) throw new Error('截图期间在线简历发生滚动或布局变化');
       pixels += image.width * image.height;

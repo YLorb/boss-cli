@@ -70,7 +70,7 @@ export async function runFullCandidateInventory(shouldStop: () => boolean = () =
       await sleepRandom(450, 650);
     }
     throw new Error('全量扫描超过 400 轮仍未见列表结束标志，对账未完成。');
-  }, { retryOnContextDestroyed: false });
+  });
 }
 
 function traceListStep(message: string): void {
