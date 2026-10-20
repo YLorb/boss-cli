@@ -34,7 +34,7 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 | 登录 | `/web/user/?ka=header-login` | login |
 | 沟通 | `/web/chat/index` | list/chat/send/action/附件命令 |
 | 推荐 | `/web/chat/recommend` | recommend/preview/greet |
-| 常规搜索 | `/web/chat/search` | search/preview；greet不支持 |
+| 常规搜索 | `/web/chat/search` | search/preview/greet；搜索 greet --check 只预检，需包含2026-10-20本地实现的CLI |
 | 深度搜索 | `/web/chat/aiform` | deep-search/preview/greet |
 | 职位管理 | `/web/chat/job/list` | positions/jd |
 
@@ -65,7 +65,7 @@ boss preview '唯一候选人姓名' --json
 boss greet '唯一候选人姓名' --job '岗位关键字' --json
 ```
 
-recommend岗位模糊匹配；核对实际完整名称。search关键词最多20字符，不带词只读取当前状态；不支持--job、不设置不限职位、不提供加载更多。preview保存在线简历截图并关闭弹层，会消耗查看次数；不做OCR。姓名歧义先停止。greet仅推荐／深度搜索可用，会消耗次数并可能发送平台默认问候，必须核对实际结果，不凭clicked计成功。
+recommend岗位模糊匹配；核对实际完整名称。search关键词最多20字符，不带词只读取当前状态；不支持--job、不设置不限职位、不提供加载更多。preview保存在线简历截图并关闭弹层，会消耗查看次数；不做OCR。姓名歧义先停止。greet支持推荐／深度搜索；包含2026-10-20本地实现的CLI还支持搜索页及其在线简历。搜索页先用 greet "完整显示姓名" --check --json 预检，实际联系去掉 --check，不支持 --job。联系可能消耗次数并发送平台默认问候。contact-confirmed只证明按钮变为“继续沟通”；不代表消息3或账本完成。点击后未确认不得重试。旧安装须先核验help及来源，不因本Skill描述就认定已具备新功能。
 
 ```powershell
 boss deep-search --core '模型推理优化' --core '源码实现经验' --bonus 'CUDA' --json
@@ -124,3 +124,23 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 ```
 
 保持进程，stdin逐行发送JSON，完整协议与例子见[账本与恢复](ledger-and-recovery.md)。不支持 send/upload/recordProbe 等stdin op；round遍历账本，不是未读单人循环。
+
+### Canvas 简历身份核验（2026-10-20）
+
+搜索列表完整显示姓名必须唯一，卡片组件姓名必须一致且提供候选人 `encryptGeekId`。在线简历打开时，CLI 在主页面对应简历右侧操作区定位按钮，同时核对该组件 `geekInfo`、`resumeInfo` 的 ID 与卡片 ID 一致；不要求 Canvas 简历提供姓名 DOM。任一字段缺失、不一致或作用域不唯一直接停止，不以截图姓名或全局按钮代替身份校验。`preview --open-only` 也使用此规则。
+
+真实只读预检已验证 `identityVerified=true`、`status=ready`、`clicked=false`；真实首次点击已弹出联系岗位选择框，后续弹层确认已验证成功，见下文。用户要求只读时必须保留 `--check`，不得因为 ready 自动联系。
+
+## 联系弹层选岗规则
+
+用户已明确指定本轮招聘目标岗位时，直接选择弹层中的对应岗位；未指定时先向用户确认，不采用默认选中项，也不将搜索条件“不限职位”当作联系岗位。简称须先核对唯一完整名称，歧义时询问用户。
+
+使用 `boss greet "完整显示姓名" --select-job "联系岗位完整名称" --json`；可加 `--check` 只读核对。CLI 核对候选人 ID、精确匹配岗位并验证选中状态；该步骤只选岗，不点击弹层“立即沟通”。后续确认遵循用户当前授权范围。
+
+确认联系使用 `boss greet "完整显示姓名" --select-job "已选岗位完整名称" --confirm-contact --json`，可先加 `--check` 只读核对。要求候选人身份与已选岗位一致，不自动改选，只点击弹层确认一次。弹层关闭且同一候选人的按钮变为“继续沟通”后返回 `contact-confirmed`、`contactConfirmed=true`；失败不得重试。仅在用户已授权联系时执行，消息3及入账仍为独立步骤。
+
+2026-10-20 实测：n** / 大模型推理加速专家已完成弹层确认，CLI 返回 `contactConfirmed=true`。本次未单独发送消息3或写入账本。
+
+已联系后打开会话：`boss greet "姓名" --continue-chat --candidate-id "成功回执中的候选人ID" --json`。要求当前简历仍打开，核对该 ID 的两处组件数据；不依赖联系后可能移除候选人的搜索列表。可加 `--check` 只读核对。`continue-clicked` 只确认点击，不证明已打开独立沟通页。
+
+已知边界：2026-10-20 实测“继续沟通”打开了搜索页内聊天窗口，姓名可能由掩码变为完整显示名。当前 `chat --check` 与 `send` 仅支持 `/web/chat/index`，尚未支持该搜索页内窗口；禁止据点击回执直接发送，需先解决该窗口的身份核验和发送支持。本轮消息未发送。

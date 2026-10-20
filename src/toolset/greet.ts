@@ -25,6 +25,10 @@ import {
   renderRecommendList,
   selectRecommendJob,
 } from './recommend.js';
+import { isBossChatSearchUrl, assertNormalSearchPageReadyForPreview } from './normal-search.js';
+import { selectSearchContactJob } from './search-contact-job.js';
+import { greetNormalSearch } from './search-greet.js';
+import { inspectSearchContactFrames } from './search-contact-diagnostics.js';
 import type { Page } from 'puppeteer-core';
 
 /** 操作完成后等待并关闭延迟出现的提示弹层（如「当前职位尚未开放」）。 */
@@ -48,6 +52,11 @@ async function cleanupGreetModalIfPresent(page: Page): Promise<void> {
 export type GreetOptions = {
   candidateTarget: string;
   jobKeyword?: string;
+  check?: boolean;
+  selectJob?: string;
+  confirmContact?: boolean;
+  continueChat?: boolean;
+  candidateId?: string;
   json?: boolean;
 };
 
@@ -59,8 +68,28 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
   }
   try {
     return await withBossSessionPage(async (page) => {
-      await closeBossModalIfPresent(page);
       const url = page.url();
+      if (isBossChatSearchUrl(url)) {
+        if (kw) throw new Error('搜索页 greet 不支持 --job；请先核对当前搜索岗位');
+        const frame = await assertNormalSearchPageReadyForPreview(page);
+        if (options.selectJob) {
+          const selected = await selectSearchContactJob(page, frame, t, options.selectJob, options.check === true, options.confirmContact === true);
+          return options.json ? JSON.stringify(selected) : `候选人：${t}；岗位：${selected.job}；selected=${selected.selected}；contactConfirmed=${selected.contactConfirmed}`;
+        }
+        let result;
+        try {
+          result = await greetNormalSearch(page, frame, t, options.check === true, options.continueChat === true, options.candidateId);
+        } catch (error) {
+          if (!options.check) throw error;
+          const diagnostics = await inspectSearchContactFrames(page, t);
+          throw new Error(`${error instanceof Error ? error.message : String(error)}；只读frame诊断=${JSON.stringify(diagnostics)}`);
+        }
+        return options.json ? JSON.stringify(result) : `候选人：${t}；入口：${result.source}；状态：${result.status}；clicked=${result.clicked}`;
+      }
+      if (options.continueChat) throw new Error('--continue-chat 仅支持搜索页');
+      if (options.selectJob) throw new Error('--select-job 仅支持搜索页已打开的联系岗位弹层');
+      if (options.check) throw new Error('greet --check 当前仅支持常规搜索页及其在线简历');
+      await closeBossModalIfPresent(page);
       if (isBossChatAiFormUrl(url)) {
         await ensureInDeepSearchPage(page);
         let jobLine = '';

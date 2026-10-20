@@ -1,3 +1,4 @@
+import { isBossChatIndexUrl } from '../common/auth.js';
 /** 业务实现聚合出口：impl* 供 CLI 与其它模块调用 */
 import { runLogin } from './login.js';
 import { runGetCandidateList, type CandidateListOptions } from './list.js';
@@ -14,7 +15,7 @@ import { runNormalSearch } from './normal-search.js';
 import { runRecommend } from './recommend.js';
 import { runPreview } from './preview.js';
 import { runRecommendGreet } from './greet.js';
-import { openConversationByTarget, type ConversationTarget } from './target_chat.js';
+import { readSelectedConversation, assertSelectedConversation, openConversationByTarget, type ConversationTarget } from './target_chat.js';
 import { runAcceptTargetResume, runDownloadTargetResume } from './attachment.js';
 export type { ChatPageAction };
 export type { DeepSearchGeekItem } from './deep-search.js';
@@ -35,7 +36,14 @@ export async function implOpenChat(
   candidateName: string,
   exact: boolean,
   json = false,
+  check = false,
 ): Promise<string> {
+  if (check) return withBossSessionPage(async page => {
+    if (!isBossChatIndexUrl(page.url())) throw new Error('当前不在沟通页，停止只读核验；当前路径=' + new URL(page.url()).pathname);
+    const current = await readSelectedConversation(page);
+    await assertSelectedConversation(page, {name:candidateName,dataId:current.dataId});
+    return renderOpenedCandidateChat(page, candidateName, json);
+  });
   return withBossSessionPage(async (page) => runOpenCandidateChat(page, candidateName, exact, json));
 }
 
@@ -143,6 +151,7 @@ export async function implRecommend(jobKeyword?: string, json = false, checkJob 
 
 export async function implPreview(opts: {
   candidateTarget: string;
+  openOnly?: boolean;
   json?: boolean;
 }): Promise<string> {
   return runPreview(opts);
@@ -151,6 +160,11 @@ export async function implPreview(opts: {
 export async function implRecommendGreet(opts: {
   candidateTarget: string;
   jobKeyword?: string;
+  check?: boolean;
+  selectJob?: string;
+  confirmContact?: boolean;
+  continueChat?: boolean;
+  candidateId?: string;
   json?: boolean;
 }): Promise<string> {
   return runRecommendGreet(opts);

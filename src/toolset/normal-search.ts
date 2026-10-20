@@ -159,16 +159,11 @@ export async function openNormalSearchResumePreview(frame: Frame, target: string
   const targetLiteral = JSON.stringify(target.trim());
   const opened = (await frame.evaluate(`(() => {
     const raw = ${targetLiteral};
-    const bare = raw.replace(/\\*/g, "");
     const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
     const cards = Array.from(document.querySelectorAll(".geek-info-card"));
-    if (cards.length === 0) return false;
-    const targetCard =
-      cards.find((item) => {
-        const name = norm(item.querySelector(".name-label")?.textContent);
-        return name === raw || (!!bare && name.includes(bare));
-      }) ?? null;
-    if (!(targetCard instanceof HTMLElement)) return false;
+    const matches = cards.filter(item => norm(item.querySelector(".name-label")?.textContent) === raw);
+    if (matches.length !== 1) throw new Error('候选人姓名须唯一精确匹配：' + raw + '；matches=' + matches.length);
+    const targetCard = matches[0];
 
     function tryOpen(el) {
       if (!(el instanceof HTMLElement)) return false;
@@ -179,11 +174,7 @@ export async function openNormalSearchResumePreview(frame: Frame, target: string
       return true;
     }
 
-    if (tryOpen(targetCard.querySelector(".name-label"))) return true;
-    if (tryOpen(targetCard.querySelector(".info-detail"))) return true;
-    if (tryOpen(targetCard.querySelector(".geek-info-main, .geek-card-main, .card-content"))) return true;
-    if (tryOpen(targetCard.querySelector("a"))) return true;
-    return tryOpen(targetCard);
+    return tryOpen(targetCard.querySelector(".name-label"));
   })()`)) as boolean;
   if (opened) {
     await sleepRandom(RESUME_PREVIEW_OPEN_GAP_MS.min, RESUME_PREVIEW_OPEN_GAP_MS.max);

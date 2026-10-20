@@ -16,7 +16,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 | `/web/chat/index` | 沟通列表、候选人会话页 | `boss list [--unread] [--chatting] [--json]`、`boss chat <姓名>`、`boss chat [姓名] --index <序号> [--unread]`、`boss chat <姓名> --data-id <会话ID>`、`boss accept-resume <姓名> --data-id <会话ID>`、`boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]`、`boss send [--name <姓名> --data-id <会话ID>]`、`boss action` | `list --chatting` 明确选择顶部「沟通中」，`--json` 输出会话行 `data-id` 和当前沟通职位；联合键命令会在顶部「全部」查找并核对详情。`accept-resume` 仅点击当前候选人的附件请求卡片并等待附件到达；`download-resume` 要求附件已经收到，打开预览并经 Boss 下载按钮保存原文件。指定目标的 `send` 在发送前后核对会话并确认新消息出现在页面。传统 `send` / `action` 仍要求当前会话已打开。 |
 | `/web/chat/recommend` | 推荐候选人列表 | `boss recommend`、`boss preview <姓名>`、`boss greet <姓名>` | `recommend` 会先检查当前位置，不在该页时直接进入；`preview` / `greet` 要求当前已在该页且列表已加载。 |
 | `/web/chat/aiform` | 深度搜索 / Agent 搜索 | `boss deep-search [--core <要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]`、`boss preview <姓名>`、`boss greet <姓名>` | `deep-search` 会先检查当前位置，不在该页时直接进入；默认只输出招聘要求表单、核心要求、加分项、今日剩余匹配次数和按钮状态，不输出候选列表；`--core` / `--bonus` 可重复，并按传入列表同步对应分组（多余行会删除，不足会新增），`--clear-core` / `--clear-bonus` 清空对应分组；只有 `--match` 会消耗今日匹配次数并输出列表顶部最新 20 条；`preview` / `greet` 要求当前已在该页且列表已加载。 |
-| `/web/chat/search` | 常规搜索 | `boss search [关键词]`、`boss preview <姓名>` | `search` 会先检查当前位置，不在该页时直接进入；带关键词时填入搜索框并回车搜索；`preview` 要求当前已在该页且列表已加载，不支持 `--job`。 |
+| `/web/chat/search` | 常规搜索 | `boss search [关键词]`、`boss preview <姓名>`、`boss greet <姓名> [--check]` | `search` 会先检查当前位置，不在该页时直接进入；带关键词时填入搜索框并回车搜索；`preview` 要求当前已在该页且列表已加载，不支持 `--job`。 |
 | `/web/chat/job/list` | 职位管理列表 | `boss positions`、`boss jd <name>` | 可通过侧栏进入职位管理页后读取。 |
 
 ## 约定
@@ -62,3 +62,46 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - `greet` 不再临时拉高视口或恢复视口尺寸；读取当前已挂载卡片，找不到目标直接报错。已可见页面不再重复 bringToFront。
 - 简历截图采用当前可见视口截图，`fullPage=false`、`captureBeyondViewport=false`，不传浏览器 clip；按实际 DPR 在本地裁剪所需区域、拼接，裁剪边界或视口变化直接报错。外层滚动时复用首屏，避免重复截图。保留原有阅读等待、分段等待、完整性校验及关闭等待。此改动减少浏览器裁剪渲染干扰，不宣称未经现场验证的闪烁已完全消失。
 - 离线回归：`node --experimental-test-module-mocks --test scripts/test-recommend-navigation.mjs scripts/test-session-no-recovery.mjs`，以及 `npm run test:json`、`npm run test:resume-timing`。
+
+## 搜索页立即沟通（2026-10-20，本地实现）
+
+- `boss greet "完整显示姓名" --check --json`：仅常规搜索页支持预检；读取当前候选人身份、作用域和按钮状态，不点击、不关闭简历、不搜索、不切岗位。默认检查当前已打开的在线简历；无可见在线简历时检查搜索卡片。两条路径按页面状态明确选择，失败不切换另一条路径。
+- `boss greet "完整显示姓名" --json`：搜索页要求已加载卡片中姓名严格唯一；搜索卡片组件的姓名须与显示姓名一致，并提供非空 `encryptGeekId`；若简历已打开，主页面唯一 `.resume-middle-wrap` 须包含该简历 iframe，右侧唯一 `.resume-simple-box` 的 `geekInfo.encryptGeekId` 和 `resumeInfo.encryptGeekId` 必须同时与卡片 ID 一致。按钮仅在该右侧操作区内定位。Canvas 简历不以 iframe 内姓名 DOM 核验身份，不调用组件方法或接口。仅点击唯一、可见、可用且未被遮挡的「立即沟通」或「打招呼」，支持带额度数字的按钮文字。搜索页拒绝 `--job`，普通 greet 不代选联系岗位；选岗使用下述 --select-job 独立步骤。不处理购买或二次确认。
+- 返回 `ready` 表示预检可点击；`already-contacted` 表示按钮已为「继续沟通」，不再点击；只有点击后同一身份的按钮变为「继续沟通」才返回 `contact-confirmed`。该状态不证明消息3已发送或账本已写入。
+- 点击后按钮消失、页面跳转、出现确认弹层或超时等无法确认结果时，明确报出“已点击一次，禁止自动重试”；应先人工核对，不连续执行 greet。平台可能自动发送默认问候并消耗权益，预检不会消耗这些点击权益。
+- 姓名不唯一、候选人 ID 缺失或不符、按钮结构与现有依据不符、按钮在视口外等情况直接停止。选择器与组件字段依据为 2026-10-20 真实搜索页面只读检查；n** 的真实预检已返回 `identityVerified=true`、`status=ready`、`clicked=false`，随后按用户授权点击一次，出现联系岗位选择弹层；未选岗或二次确认，尚未完成沟通。组件字段变化直接报错，不退回按姓名或全局按钮猜测。
+- 离线回归：`node --experimental-test-module-mocks --test scripts/test-search-greet.mjs`。测试独立浏览器，网络请求全部由模拟内容响应，不连接真实会话。
+
+### 只打开搜索在线简历
+
+`boss preview "完整显示姓名" --open-only --json` 仅支持当前常规搜索页。先唯一精确匹配卡片；已有可见简历时不再点卡片，等待 Canvas 就绪并按候选人 ID 核验当前简历；没有简历时只点击匹配卡片的 `.name-label`，等待可见 iframe 和 Canvas 加载后按同一 ID 规则核验。ID 不符、姓名重复或超时直接报错，不自动关闭重开。
+
+返回 `status=open`、`reused`、`candidateId`、`identityVerified=true`、`controls`（该简历右侧已核验按钮的文字）、`screenshot=false`、`closed=false`。不截图、不滚动简历、不点击沟通按钮，不执行截图成功后的自动关闭。加载就绪与身份核验分开执行，等待条件不能吞掉身份错误。后续使用 `greet --check` 预检，确认后再执行真实沟通。不带 `--open-only` 的 preview 仍是原截图流程。
+
+2026-10-20 点击后验证：`common-job-list-dialog` 提示“请选择与牛人沟通的职位”，不是沟通成功。现有公共付费提示检测因文案“VVIP账号沟通权益”将其归类为付费弹层，仍须依据只读诊断正文区分；普通 greet 的付费提示分类仍可能误报选岗弹层；选岗与二次确认使用下述显式入口。
+
+### 搜索联系弹层选岗
+
+`boss greet "姓名" --select-job "联系岗位完整名称" [--check] --json` 仅用于搜索页已打开的 `.common-job-list-dialog`。按卡片与简历操作组件 ID 核对候选人，完整名称唯一匹配岗位，选择后验证唯一 active 行；只选岗，不点击弹层的“立即沟通”。`--check` 不滚动、不点击。不能与 `--job` 混用。已有明确招聘目标岗位时直接按该岗位选择；没有明确岗位时必须先询问用户，不采用弹层默认选中项。搜索条件“不限职位”不代表联系岗位。
+
+真实选岗验收：为 n** 执行 `--select-job "大模型推理加速专家"` 返回 `job-selected`、`selected=true`、`clicked=true`、`contactConfirmed=false`，未点击弹层确认按钮。
+
+### 确认搜索联系
+
+`boss greet "姓名" --select-job "已选岗位完整名称" --confirm-contact [--check] --json`：只处理已打开的联系选岗弹层，核对候选人 ID 与唯一选中岗位，不自动改选。`--check` 仅预检；去掉后只点击一次弹层 footer 中的“立即沟通”。弹层关闭且同一候选人的简历按钮变为“继续沟通”才返回 `contactConfirmed=true`；超时或身份变化明确报错，禁止自动重试。不等于消息3发送或账本入账完成。
+
+确认联系使用 `boss greet "完整显示姓名" --select-job "已选岗位完整名称" --confirm-contact --json`，可先加 `--check` 只读核对。要求候选人身份与已选岗位一致，不自动改选，只点击弹层确认一次。弹层关闭且同一候选人的按钮变为“继续沟通”后返回 `contact-confirmed`、`contactConfirmed=true`；失败不得重试。仅在用户已授权联系时执行，消息3及入账仍为独立步骤。
+
+2026-10-20 实测：n** / 大模型推理加速专家已完成弹层确认，CLI 返回 `contactConfirmed=true`。本次未单独发送消息3或写入账本。
+
+### 打开已联系候选人的沟通
+
+`boss greet "姓名" --continue-chat --candidate-id "成功回执中的候选人ID" [--check] --json` 仅支持搜索页及当前在线简历。核对候选人 ID 后，要求按钮严格为“继续沟通”，显式点击一次；`--check` 只读。不与选岗、确认联系或 `--job` 混用。不发送消息。返回 `continue-clicked` 仅表示点击已执行，不证明会话加载或消息发送成功；执行异常不得自动重试。
+
+继续沟通要求当前在线简历已打开，ID 必须来自先前成功回执，并与当前简历的两处 ID 一致；此路径不依赖联系后可能移除目标的搜索列表，不自动回退到姓名匹配。
+
+`boss chat "姓名" --check --json` 只读核对当前沟通页：唯一选中行姓名、data-id 与详情姓名必须匹配，返回当前摘要和消息；不导航、不点击、不切筛选，不与 index/data-id 定位选项混用。
+
+已联系后打开会话：`boss greet "姓名" --continue-chat --candidate-id "成功回执中的候选人ID" --json`。要求当前简历仍打开，核对该 ID 的两处组件数据；不依赖联系后可能移除候选人的搜索列表。可加 `--check` 只读核对。`continue-clicked` 只确认点击，不证明已打开独立沟通页。
+
+已知边界：2026-10-20 实测“继续沟通”打开了搜索页内聊天窗口，姓名可能由掩码变为完整显示名。当前 `chat --check` 与 `send` 仅支持 `/web/chat/index`，尚未支持该搜索页内窗口；禁止据点击回执直接发送，需先解决该窗口的身份核验和发送支持。本轮消息未发送。

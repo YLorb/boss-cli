@@ -11,6 +11,7 @@ mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries(names
   calls.push({name,args});
   return JSON.stringify({reader:name,args});
 }])) });
+mock.module('../dist/toolset/back.js', { namedExports: { runBack: async (...args) => { calls.push({name:'runBack',args}); return JSON.stringify({args}); } } });
 const { executeCommand } = await import('../dist/cli/cliRouter.js');
 
 test('every business command forwards --json to its reader, including aliases and flag placement', async () => {
@@ -31,7 +32,7 @@ test('every business command forwards --json to its reader, including aliases an
     [['positions','--json'],'implListPositions',[true]],
     [['jd','测试岗位','--json'],'implListPositionsWithOptions',[{detail:true,name:'测试岗位',json:true}]],
     [['search','--json','评估'],'implNormalSearch',['评估',true]],
-    [['recommend','测试岗位','--json'],'implRecommend',['测试岗位',true]],
+    [['recommend','测试岗位','--json'],'implRecommend',['测试岗位',true,false]],
     [['deep-search','--core','Python','--bonus','评测','--json'],'implBossSearch',[{jobKeyword:undefined,coreRequirements:['Python'],bonusRequirements:['评测'],match:false,json:true}]],
     [['preview','测试候选人','--json'],'implPreview',[{candidateTarget:'测试候选人',json:true}]],
     [['greet','测试候选人','--job','测试岗位','--json'],'implRecommendGreet',[{candidateTarget:'测试候选人',jobKeyword:'测试岗位',json:true}]],
@@ -41,6 +42,29 @@ test('every business command forwards --json to its reader, including aliases an
     assert.equal(result.reader,name);
     assert.deepEqual(calls.at(-1),{name,args});
   }
+});
+
+test('recommend check-job and guarded back parse flags without swallowing positional names', async () => {
+  for (const argv of [['recommend','--check-job','测试岗位','--json'], ['recommend','测试岗位','--check-job','--json']]) {
+    await executeCommand(argv);
+    assert.deepEqual(calls.at(-1), {name:'implRecommend',args:['测试岗位',true,true]});
+  }
+  await executeCommand(['/back','--check-in_online_resume','--json']);
+  assert.deepEqual(calls.at(-1), {name:'runBack',args:[true,true]});
+  await assert.rejects(executeCommand(['recommend','--check-job','--json']), /需要岗位完整名称/);
+  await assert.rejects(executeCommand(['back','--check-in_online_resume=false']), /布尔开关/);
+});
+
+test('greet check forwards a boolean without consuming the candidate name', async () => {
+  await executeCommand(['greet','--check','n**','--json']);
+  assert.deepEqual(calls.at(-1),{name:'implRecommendGreet',args:[{candidateTarget:'n**',jobKeyword:undefined,json:true,check:true}]});
+  await assert.rejects(executeCommand(['greet','n**','--check=true']),/布尔开关/);
+});
+
+test('preview open-only forwards its flag and preserves the name', async () => {
+  await executeCommand(['preview','--open-only','n**','--json']);
+  assert.deepEqual(calls.at(-1),{name:'implPreview',args:[{candidateTarget:'n**',json:true,openOnly:true}]});
+  await assert.rejects(executeCommand(['preview','n**','--open-only=true']),/布尔开关/);
 });
 
 test('literal --json after -- and inside --text=value is not an output flag; text defaults remain', async () => {
@@ -152,4 +176,23 @@ test('accept action JSON is produced only after the received attachment check; h
   page.evaluate=async()=> ++evaluations===1?0:{kind:'already_handled',which:'agree'};
   await assert.rejects(runChatActionOnCurrentConversation(page,{action:'agree-resume',json:true}),/已经处理/);
   assert.equal(checks,1);
+});
+
+
+test('search contact steps and current-chat check enforce explicit arguments', async () => {
+  await executeCommand(['greet','candidate','--select-job','role','--confirm-contact','--check','--json']);
+  assert.deepEqual(calls.at(-1),{name:'implRecommendGreet',args:[{candidateTarget:'candidate',jobKeyword:undefined,json:true,check:true,confirmContact:true,selectJob:'role'}]});
+  await executeCommand(['greet','candidate','--continue-chat','--candidate-id','id-1','--json']);
+  assert.deepEqual(calls.at(-1),{name:'implRecommendGreet',args:[{candidateTarget:'candidate',jobKeyword:undefined,json:true,continueChat:true,candidateId:'id-1'}]});
+  await executeCommand(['chat','candidate','--check','--json']);
+  assert.deepEqual(calls.at(-1),{name:'implOpenChat',args:['candidate',true,true,true]});
+  const count=calls.length;
+  for(const args of [
+    ['greet','candidate','--confirm-contact'],
+    ['greet','candidate','--continue-chat'],
+    ['greet','candidate','--candidate-id','id-1'],
+    ['greet','candidate','--continue-chat','--candidate-id','id-1','--select-job','role'],
+    ['chat','candidate','--check','--index','1'],
+  ]) await assert.rejects(executeCommand(args));
+  assert.equal(calls.length,count);
 });

@@ -1,6 +1,7 @@
 /**
  * 在线简历预览：须在「推荐」页、「深度搜索 aiform」页或「常规搜索」页且列表已加载；不自动跳转，否则报错。
  */
+import { openSearchResumeOnly } from './open-search-resume.js';
 import { join } from 'node:path';
 import { ONLINE_RESUME_IFRAME_WAIT_MAX_MS } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
@@ -38,6 +39,7 @@ import {
 export type PreviewOptions = {
   json?: boolean;
   candidateTarget: string;
+  openOnly?: boolean;
 };
 
 export async function runPreview(options: PreviewOptions): Promise<string> {
@@ -48,6 +50,11 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
   try {
     return await withBossSessionPage(async (page) => {
       const url = page.url();
+      if (options.openOnly) {
+        if (!isBossChatSearchUrl(url)) throw new Error('preview --open-only 当前仅支持常规搜索页');
+        const result = await openSearchResumeOnly(page, target);
+        return options.json ? JSON.stringify(result) : `在线简历已打开并核对：${target}；保持展开，未截图、未沟通`;
+      }
       let jobLine: string;
       let job: string;
       let opened: boolean;
