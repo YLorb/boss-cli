@@ -57,17 +57,24 @@ test('capture pauses between wheel segments, retains pulse pacing, restores scro
   };
   const frame = {
     evaluateHandle: async () => handle,
-    evaluate: async script => script.startsWith('delete') ? undefined : metrics(),
+    evaluate: async script => {
+      if (script.startsWith('delete')) return undefined;
+      assert.ok(now >= 2000, 'opening overlay must not be checked before initial reading pause');
+      return metrics();
+    },
   };
   const iframe = { frame: parent, contentFrame: async () => frame,
     boundingBox: async () => ({ x: 0, y: 0, width: 100, height: 100 }) };
   const page = {
-    evaluate: async () => ({ width: 100, height: 100, x: 0, y: 0, pixelRatio: 1 }),
+    evaluate: async () => ({ width: 100, height: 100, x: 0, y: 0, pixelRatio: 1, scale: 1 }),
     mouse: {
       move: async () => { events.push({ kind: 'segment', now }); },
       wheel: async ({ deltaY }) => { events.push({ kind: 'pulse', now }); top = Math.max(0, Math.min(200, top + deltaY)); },
     },
-    screenshot: async () => {
+    screenshot: async options => {
+      assert.equal(options.clip, undefined);
+      assert.equal(options.fullPage, false);
+      assert.equal(options.captureBeyondViewport, false);
       const image = new PNG({ width: 100, height: 100 });
       image.data.fill(255);
       events.push({ kind: 'screenshot', top });

@@ -8,6 +8,7 @@ const SEARCH_FRAME_READY_TIMEOUT_MS = 18_000;
 const SEARCH_RESULT_SETTLE_MS = { min: 900, max: 1600 } as const;
 
 type NormalSearchCandidate = {
+  candidateId: string;
   name: string;
   active: string;
   labels: string[];
@@ -155,15 +156,17 @@ export async function readNormalSearchSelectedJobLabel(frame: Frame): Promise<st
   return label || '默认';
 }
 
-export async function openNormalSearchResumePreview(frame: Frame, target: string): Promise<boolean> {
+export async function openNormalSearchResumePreview(frame: Frame, target: string, candidateId?: string): Promise<boolean> {
   const targetLiteral = JSON.stringify(target.trim());
   const opened = (await frame.evaluate(`(() => {
     const raw = ${targetLiteral};
     const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
     const cards = Array.from(document.querySelectorAll(".geek-info-card"));
-    const matches = cards.filter(item => norm(item.querySelector(".name-label")?.textContent) === raw);
-    if (matches.length !== 1) throw new Error('候选人姓名须唯一精确匹配：' + raw + '；matches=' + matches.length);
+    const matches = cards.filter(item => norm(item.querySelector(".name-label")?.textContent) === raw && (!${JSON.stringify(candidateId)} || item.__vue__?.$props?.geek?.geekCard?.encryptGeekId === ${JSON.stringify(candidateId)}));
+    if (matches.length !== 1) throw new Error('候选人姓名须唯一精确匹配：' + raw + '；candidateId=' + ${JSON.stringify(candidateId)} + '；matches=' + matches.length);
     const targetCard = matches[0];
+    const geek = targetCard.__vue__?.$props?.geek?.geekCard;
+    if (!geek?.encryptGeekId || norm(geek.name) !== raw) throw new Error("候选人卡片姓名或ID缺失/不符");
 
     function tryOpen(el) {
       if (!(el instanceof HTMLElement)) return false;
@@ -196,6 +199,7 @@ async function readNormalSearchCandidates(frame: Frame): Promise<NormalSearchCan
         .map((el) => norm(el.textContent))
         .filter(Boolean);
       return {
+        candidateId: typeof card.__vue__?.$props?.geek?.geekCard?.encryptGeekId === 'string' ? card.__vue__.$props.geek.geekCard.encryptGeekId : '',
         name: norm(card.querySelector(".name-label")?.textContent),
         active: norm(card.querySelector(".active-desc-text")?.textContent),
         labels,

@@ -32,13 +32,13 @@ import {
 import {
   assertNormalSearchPageReadyForPreview,
   isBossChatSearchUrl,
-  openNormalSearchResumePreview,
   readNormalSearchSelectedJobLabel,
 } from './normal-search.js';
 
 export type PreviewOptions = {
   json?: boolean;
   candidateTarget: string;
+  candidateId?: string;
   openOnly?: boolean;
 };
 
@@ -50,9 +50,11 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
   try {
     return await withBossSessionPage(async (page) => {
       const url = page.url();
+      if (options.candidateId && !isBossChatSearchUrl(url)) throw new Error('--candidate-id 仅支持常规搜索页');
+      let verifiedCandidateId: string | undefined;
       if (options.openOnly) {
         if (!isBossChatSearchUrl(url)) throw new Error('preview --open-only 当前仅支持常规搜索页');
-        const result = await openSearchResumeOnly(page, target);
+        const result = await openSearchResumeOnly(page, target, options.candidateId);
         return options.json ? JSON.stringify(result) : `在线简历已打开并核对：${target}；保持展开，未截图、未沟通`;
       }
       let jobLine: string;
@@ -75,7 +77,9 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         const label = await readNormalSearchSelectedJobLabel(frame);
         job = label;
         jobLine = `当前岗位：${label}`;
-        opened = await openNormalSearchResumePreview(frame, target);
+        const result = await openSearchResumeOnly(page, target, options.candidateId);
+        verifiedCandidateId = result.candidateId;
+        opened = true;
       } else {
         throw new Error('当前不在推荐列表页、深度搜索页或常规搜索页，无法预览候选人。');
       }
@@ -110,7 +114,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const disclaimer =
         '说明：平台对在线简历的每日可查看次数有限，请按需使用、谨慎查看。';
 
-      if (options.json) return JSON.stringify({ name: target, sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot' });
+      if (options.json) return JSON.stringify({ name: target, ...(verifiedCandidateId ? {candidateId: verifiedCandidateId, identityVerified:true} : {}), sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot' });
 
       return [jobLine, `简历预览截图：${absPath}`, '', disclaimer].join('\n');
     });

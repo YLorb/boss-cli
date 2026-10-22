@@ -243,11 +243,13 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
   let failure: unknown;
   let result: Buffer | undefined;
   try {
-    original = await stable();
     const waitMs = resumeReadingDelayMs(), started = performance.now();
     traceResumeCapture('reading-wait-start', { waitMs, scrollSurface: outer ? 'outer' : 'iframe' });
     await pause(waitMs);
     traceResumeCapture('reading-wait-end', { elapsedMs: Math.round(performance.now() - started) });
+    // Do not classify an opening/loading overlay as a capture obstruction before
+    // the promised initial reading pause. Persistent obstructions still fail.
+    original = await stable();
     let m = await moveTo(0);
     const bodyClip = await geometry(m);
     const frameBox = await iframe.boundingBox();

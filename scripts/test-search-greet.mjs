@@ -51,6 +51,23 @@ test('search greeting verifies identity, checks without clicking and never retri
         assert.equal(await page.evaluate('window.clicks'),0);
       }
     });
+    await t.test('duplicate names use exact candidate ID, mismatch never clicks', async () => {
+      await reset(card()+card());
+      await page.evaluate("document.querySelectorAll('.geek-info-card')[1].__vue__.$props.geek.geekCard.encryptGeekId='candidate-2'");
+      assert.equal((await greetNormalSearch(page,frame,'n**',true,false,'candidate-2')).candidateId,'candidate-2');
+      assert.equal(await page.evaluate('window.clicks'),0);
+      await assert.rejects(greetNormalSearch(page,frame,'n**',false,false,'missing'));
+      await assert.rejects(greetNormalSearch(page,frame,'wrong',false,false,'candidate-2'));
+      assert.equal(await page.evaluate('window.clicks'),0);
+      assert.equal((await greetNormalSearch(page,frame,'n**',false,false,'candidate-2')).status,'contact-confirmed');
+      assert.equal(await page.evaluate("document.querySelectorAll('.geek-info-card')[0].querySelector('button').textContent"),'立即沟通(30/196)');
+      assert.equal(await page.evaluate('window.clicks'),1);
+      const {openNormalSearchResumePreview}=await import('../dist/toolset/normal-search.js');
+      await page.evaluate("document.querySelectorAll('.name-label').forEach((e,i)=>e.onclick=()=>window.opened=i)");
+      await openNormalSearchResumePreview(frame,'n**','candidate-2');
+      assert.equal(await page.evaluate('window.opened'),1);
+      await assert.rejects(openNormalSearchResumePreview(frame,'n**','missing'));
+    });
     await t.test('paywall blocks without dismissing it', async () => {
       await reset(card());
       await assert.rejects(greetNormalSearch(page,frame,'n**',false,true),/candidate-id/);

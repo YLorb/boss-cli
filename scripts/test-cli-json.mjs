@@ -190,9 +190,17 @@ test('search contact steps and current-chat check enforce explicit arguments', a
   for(const args of [
     ['greet','candidate','--confirm-contact'],
     ['greet','candidate','--continue-chat'],
-    ['greet','candidate','--candidate-id','id-1'],
+    ['greet','candidate','--candidate-id',''],
     ['greet','candidate','--continue-chat','--candidate-id','id-1','--select-job','role'],
     ['chat','candidate','--check','--index','1'],
   ]) await assert.rejects(executeCommand(args));
   assert.equal(calls.length,count);
+});
+
+
+test('candidate ID routes through preview and initial greet without continue-chat', async()=>{
+  await executeCommand(['preview','唐**','--candidate-id','id-2','--json']);
+  assert.deepEqual(calls.at(-1),{name:'implPreview',args:[{candidateTarget:'唐**',candidateId:'id-2',json:true}]});
+  await executeCommand(['greet','唐**','--candidate-id','id-2','--check','--json']);
+  assert.deepEqual(calls.at(-1),{name:'implRecommendGreet',args:[{candidateTarget:'唐**',candidateId:'id-2',jobKeyword:undefined,json:true,check:true}]});
 });

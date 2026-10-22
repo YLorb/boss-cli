@@ -32,6 +32,7 @@ import { isAttachmentCommand, runCommandProcess } from './command_process.js';
 import { runProbeTargetResume } from '../toolset/attachment.js';
 import { runCollectionSession } from '../collection/session.js';
 import { runBack } from '../toolset/back.js';
+import { inspectEmbeddedChat, checkEmbeddedChat, sendEmbeddedChat } from '../toolset/embedded-chat.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
 import { join } from 'node:path';
@@ -168,6 +169,10 @@ function printHelp(): void {
       只读检查现有浏览器中的首个 BOSS 标签页；返回已登录/未登录/无法判定，不打开或跳转页面
   boss list [--unread] [--chatting] [--json]
       --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
+  boss chat --inspect-embedded
+  boss chat <实际姓名> --embedded --check --candidate-id <搜索候选人ID> --job <完整岗位>
+  boss send --embedded --name <实际姓名> --candidate-id <搜索候选人ID> --job <完整岗位> --text <正文> [--check]
+    只处理当前搜索页内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
   boss chat <姓名> [--strict]
       打开指定联系人会话；默认包含匹配，--strict 为精确匹配
   boss chat [姓名] --index <序号> [--unread] [--strict]
@@ -203,11 +208,11 @@ function printHelp(): void {
       进入推荐页并读取推荐列表；带岗位关键字时选择岗位；--check-job 与当前完整岗位名匹配时跳过选择
   boss search [关键词]
       进入「搜索」页并读取 Boss 默认常规搜索结果；带关键词时填入搜索框并回车搜索
-  boss preview <姓名> [--open-only]
+  boss preview <姓名> [--candidate-id <ID>] [--open-only]
       在线简历预览：须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
       --open-only 仅搜索页：打开并核验候选人 ID，保持展开，不截图、不沟通；已打开同一人时复用
       注意：平台对在线简历每日可查看次数有限，请按需使用、谨慎查看
-  boss greet <姓名> [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]
+  boss greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]
       须在推荐、深度搜索或常规搜索页；常规搜索支持当前在线简历，不自动跳转
       点击目标的“打招呼/立即沟通”；搜索页 --check 只核对身份及按钮，不点击；搜索页不支持 --job
       --select-job 仅选择联系岗位；--confirm-contact 确认已选岗位；--continue-chat 配合回执 ID 打开已联系会话
@@ -467,7 +472,17 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'chat') {
-    const { rest, flags, opts } = parseOpts(tail, new Set(['check']));
+    const { rest, flags, opts } = parseOpts(tail, new Set(['check', 'embedded', 'inspect-embedded']));
+    if (flags.has('inspect-embedded')) {
+      if(rest.length || Object.keys(opts).length || flags.size!==1) die('chat --inspect-embedded 不能与其他选项混用');
+      return inspectEmbeddedChat();
+    }
+    if (flags.has('embedded')) {
+      if(!flags.has('check') || !rest.length || !opts['candidate-id'] || !opts.job ||
+        [...flags].some(f=>!['embedded','check'].includes(f)) || Object.keys(opts).some(k=>!['candidate-id','job'].includes(k)))
+        die('chat <实际姓名> --embedded --check --candidate-id <ID> --job <完整岗位>');
+      return checkEmbeddedChat({name:rest.join(' ').trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()});
+    }
     const nameArg = rest.join(' ').trim();
     if ((opts.action ?? '').trim().length > 0 || (opts.remark ?? '').trim().length > 0) {
       die('❌ chat 不再支持 --action/--remark。请改用: action <操作> [--remark <备注>]');
@@ -573,7 +588,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'send') {
-    const { flags, opts } = parseOpts(tail, new Set(['check']));
+    const { flags, opts, rest } = parseOpts(tail, new Set(['check','embedded']));
+    if(flags.has('embedded')) {
+      if(rest.length || !opts.name || !opts['candidate-id'] || !opts.job || !(opts.text||opts.t) ||
+        [...flags].some(f=>!['embedded','check'].includes(f)) || Object.keys(opts).some(k=>!['name','candidate-id','job','text','t'].includes(k)))
+        die('send --embedded --name <实际姓名> --candidate-id <ID> --job <完整岗位> --text <正文> [--check]');
+      return sendEmbeddedChat({name:opts.name.trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()},opts.text||opts.t,flags.has('check'));
+    }
     const check = flags.has('check');
     const text = opts.text?.trim() || opts.t?.trim() || '';
     if (!text) {
@@ -639,7 +660,8 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if ([...flags].some(flag => flag !== 'open-only')) {
       die('❌ preview 不支持该 flag');
     }
-    const unsupportedOpts = Object.keys(opts);
+    const unsupportedOpts = Object.keys(opts).filter(k => k !== 'candidate-id');
+    if (opts['candidate-id'] !== undefined && !opts['candidate-id'].trim()) die('--candidate-id 不能为空');
     if (unsupportedOpts.length > 0) {
       die(`❌ preview 不支持: --${unsupportedOpts[0]}`);
     }
@@ -647,7 +669,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!candidateTarget) {
       die('❌ 用法: preview <姓名>');
     }
-    return implPreview({ candidateTarget, json, ...(flags.has('open-only') ? { openOnly: true } : {}) });
+    return implPreview({ candidateTarget, json, ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}) });
   }
 
   if (cmd === 'back') {
@@ -672,22 +694,23 @@ export async function executeCommand(argv: string[]): Promise<string> {
   if (cmd === 'greet') {
     const { rest, opts, flags } = parseOpts(tail, new Set(['check', 'confirm-contact', 'continue-chat']));
     if ([...flags].some(flag => flag !== 'check' && flag !== 'confirm-contact' && flag !== 'continue-chat')) {
-      die('❌ 用法: greet <姓名> [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
+      die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
-    if (flags.has('continue-chat') !== Boolean(opts['candidate-id']?.trim())) die('--continue-chat 必须配合成功回执的 --candidate-id');
+    if (opts['candidate-id'] !== undefined && !opts['candidate-id'].trim()) die('--candidate-id 不能为空');
+    if (flags.has('continue-chat') && !opts['candidate-id']?.trim()) die('--continue-chat 必须配合成功回执的 --candidate-id');
     if (flags.has('continue-chat') && (opts.job || opts['select-job'] || flags.has('confirm-contact'))) die('--continue-chat 不能与选岗或确认联系混用');
     if (flags.has('confirm-contact') && !opts['select-job']?.trim()) die('--confirm-contact 需要 --select-job 指定已选岗位');
     const jobKeyword = opts.job?.trim();
     const extraOpts = Object.keys(opts).filter((k) => k !== 'job' && k !== 'select-job' && k !== 'candidate-id');
     if (extraOpts.length > 0) {
-      die('❌ 用法: greet <姓名> [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
+      die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
     if (opts['select-job'] !== undefined && (!opts['select-job'].trim() || jobKeyword)) die('--select-job 需要完整岗位名称且不能与 --job 混用');
     const target = rest.join(' ').trim();
     if (!target) {
-      die('❌ 用法: greet <姓名> [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
+      die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
-    return implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(flags.has('continue-chat') ? {continueChat:true,candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) });
+    return implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) });
   }
 
   die(`❌ 未知命令 “${argv[0]}”。输入 help 查看用法。`);

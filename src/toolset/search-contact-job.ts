@@ -2,8 +2,8 @@ import type { Frame, Page } from 'puppeteer-core';
 import { readSearchCandidateId } from './search-greet.js';
 
 /** Selecting and explicitly confirming are separate actions; neither is retried. */
-export async function selectSearchContactJob(page: Page, search: Frame, name: string, job: string, check: boolean, confirm = false) {
-  const candidateId = await readSearchCandidateId(search, name);
+export async function selectSearchContactJob(page: Page, search: Frame, name: string, job: string, check: boolean, confirm = false, expectedCandidateId?: string) {
+  const candidateId = await readSearchCandidateId(search, name, expectedCandidateId);
   const script = (click: boolean) => `(() => {
     const norm=v=>(v||'').replace(/\\s+/g,' ').trim();
     const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);

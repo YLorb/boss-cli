@@ -27,7 +27,7 @@ function contactScript(name: string, resume: boolean, click: boolean, candidateI
       root = boxes[0];
     } else {
       const cards = Array.from(document.querySelectorAll('.geek-info-card')).filter(el =>
-        visible(el) && norm(el.querySelector('.name-label')?.textContent) === name);
+        visible(el) && norm(el.querySelector('.name-label')?.textContent) === name && el.__vue__?.$props?.geek?.geekCard?.encryptGeekId === ${JSON.stringify(candidateId)});
       if (cards.length !== 1) throw new Error('搜索候选人必须按完整显示姓名唯一匹配：' + name + '；matches=' + cards.length);
       const geek = cards[0].__vue__?.$props?.geek?.geekCard;
       if (geek?.encryptGeekId !== ${JSON.stringify(candidateId)} || norm(geek?.name) !== name)
@@ -98,12 +98,12 @@ export async function visibleResumeFrame(page: Page): Promise<Frame | null> {
 }
 
 /** Read the same identity used by the rendered search card. No component methods are called. */
-export async function readSearchCandidateId(searchFrame: Frame, name: string): Promise<string> {
+export async function readSearchCandidateId(searchFrame: Frame, name: string, expectedCandidateId?: string): Promise<string> {
   return await searchFrame.evaluate(`(() => {
     const norm = value => (value || '').replace(/\\s+/g,' ').trim();
     const cards = Array.from(document.querySelectorAll('.geek-info-card'))
-      .filter(el => norm(el.querySelector('.name-label')?.textContent) === ${JSON.stringify(name)});
-    if (cards.length !== 1) throw new Error('搜索列表姓名不唯一，禁止沟通：matches=' + cards.length);
+      .filter(el => norm(el.querySelector('.name-label')?.textContent) === ${JSON.stringify(name)} && (!${JSON.stringify(expectedCandidateId)} || el.__vue__?.$props?.geek?.geekCard?.encryptGeekId === ${JSON.stringify(expectedCandidateId)}));
+    if (cards.length !== 1) throw new Error('搜索列表姓名不唯一或ID不匹配，禁止操作：name=' + ${JSON.stringify(name)} + '；candidateId=' + ${JSON.stringify(expectedCandidateId)} + '；matches=' + cards.length);
     const geek = cards[0].__vue__?.$props?.geek?.geekCard;
     if (norm(geek?.name) !== ${JSON.stringify(name)} || typeof geek?.encryptGeekId !== 'string' || !geek.encryptGeekId.trim())
       throw new Error('搜索卡片候选人姓名或 ID 缺失/不符');
@@ -120,13 +120,13 @@ export async function greetNormalSearch(page: Page, searchFrame: Frame, name: st
   const source = resumeFrame ? 'search-resume' : 'search';
   if (continueChat && (!resumeFrame || !expectedCandidateId?.trim()))
     throw new Error('继续沟通需要已打开简历及成功回执中的 --candidate-id');
-  const candidateId = continueChat ? expectedCandidateId! : await readSearchCandidateId(searchFrame, name);
+  const candidateId = continueChat ? expectedCandidateId! : await readSearchCandidateId(searchFrame, name, expectedCandidateId);
   const paywall = await describeBossPaywallPopupIfPresent(page, 'greet');
   if (paywall) throw new Error(paywall);
   const before = await frame.evaluate(contactScript(name, !!resumeFrame, false, candidateId, continueChat)) as ContactState;
   if (before.point) await assertAncestorFramesExposed(frame, before.point);
   if (check || before.status === 'already-contacted') return { source, ...before, candidateId, identityVerified:true, clicked: false };
-  if (!continueChat && await readSearchCandidateId(searchFrame, name) !== candidateId)
+  if (!continueChat && await readSearchCandidateId(searchFrame, name, expectedCandidateId) !== candidateId)
     throw new Error('点击前搜索候选人身份已变化，停止操作');
   let clicked: ContactState;
   try {
