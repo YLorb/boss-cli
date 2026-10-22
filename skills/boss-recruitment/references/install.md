@@ -1,7 +1,7 @@
 ---
 title: "下载、安装与版本兼容"
 read_when: "首次部署、换机、升级或命令缺失"
-updated: "2026-10-14"
+updated: "2026-10-22"
 scope: "local-installation"
 ---
 
@@ -15,7 +15,7 @@ Node.js/npm缺失时，先按[环境配置的授权安装流程](environment.md#
 
 ## 路径一：使用随包源码快照（对应本文档）
 
-解压 `boss-cli-source-2026-10-14.zip` 到自选目录，进入其 `boss-cli` 子目录：
+解压 `boss-cli-source-2026-10-22.zip` 到自选目录，进入其 `boss-cli` 子目录：
 
 ```powershell
 node --version
@@ -25,25 +25,27 @@ npm run build
 node .\dist\cli\index.js help
 ```
 
-这是已推送的 CLI 0.6.9 源码，功能基线为 `702c224`，仓库为 `YLorb/boss-cli`。`source-manifest.json` 记录 commit 与文件哈希；不表示同名 npm 包已发布此版本。构建失败直接处理错误，不换用其他版本掩盖。
+这是已推送的 CLI 0.6.9 源码，功能基线为 `2346714`，仓库为 `YLorb/boss-cli`。`delivery-manifest.json` 记录 commit 与文件哈希；不表示同名 npm 包已发布此版本。构建失败直接处理错误，不换用其他版本掩盖。
+
+本地已构建包 `boss-cli-0.6.9-local.zip` 含 dist、源码、package-lock 和同步 skill；解压进入 boss-cli，执行 `npm ci` 后可直接运行 `node .\dist\cli\index.js help`。不含 node_modules、浏览器登录态、账本或候选人资料。组合包内的独立 boss-recruitment 文件夹可安装到 Agent 的技能目录。
 
 ## 路径二：GitHub ZIP下载（无需Git，推荐固定提交）
 
 固定功能基线0.6.9的下载地址：
 
-[下载CLI源码ZIP：702c224](https://github.com/YLorb/boss-cli/archive/702c224a105e3958cf809e2bd7301e13ab115b99.zip)
+[下载CLI源码ZIP：2346714](https://github.com/YLorb/boss-cli/archive/2346714e939ca2994ce23333e60e8eee463c92f2.zip)
 
 可在浏览器中直接下载，也可使用PowerShell；下面目标目录须尚不存在，避免覆盖现有安装：
 
 ```powershell
 $installRoot = 'C:\Recruitment'
-$archive = Join-Path $installRoot 'boss-cli-702c224.zip'
-$extractDir = Join-Path $installRoot 'boss-cli-702c224'
+$archive = Join-Path $installRoot 'boss-cli-2346714.zip'
+$extractDir = Join-Path $installRoot 'boss-cli-2346714'
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 if ((Test-Path -LiteralPath $archive) -or (Test-Path -LiteralPath $extractDir)) { throw '下载目标已存在，请选择新的目录或核验现有文件' }
-Invoke-WebRequest -Uri 'https://github.com/YLorb/boss-cli/archive/702c224a105e3958cf809e2bd7301e13ab115b99.zip' -OutFile $archive
+Invoke-WebRequest -Uri 'https://github.com/YLorb/boss-cli/archive/2346714e939ca2994ce23333e60e8eee463c92f2.zip' -OutFile $archive
 Expand-Archive -LiteralPath $archive -DestinationPath $extractDir
-Set-Location (Join-Path $extractDir 'boss-cli-702c224a105e3958cf809e2bd7301e13ab115b99')
+Set-Location (Join-Path $extractDir 'boss-cli-2346714e939ca2994ce23333e60e8eee463c92f2')
 npm.cmd ci
 if ($LASTEXITCODE -ne 0) { throw '依赖安装失败，停止' }
 npm.cmd run build
@@ -62,7 +64,7 @@ GitHub归档格式与固定提交下载依据：[GitHub官方文档](https://doc
 ```powershell
 git clone --branch dev https://github.com/YLorb/boss-cli.git
 Set-Location boss-cli
-git checkout 702c224
+git checkout 2346714
 git rev-parse HEAD
 npm ci
 npm run build
@@ -82,7 +84,7 @@ npm 版可能缺少本包依赖的 collect、联合键、JSON、check-login 等�
 
 ## 必须核验的能力
 
-help 应包含：`collect`、`--check-login`、业务 `--json`、`chat --data-id`、`send --check`、`accept-resume --check`、`download-resume --check`、`search`、`preview`。help 只能证明入口存在，页面选择器仍需登录验收。当前缺口见 [迁移与边界](manual-migration.md)。
+help 应包含：`collect`、`--check-login`、业务 `--json`、`chat --data-id`、`send --check`、`accept-resume --check`、`download-resume --check`、`search`、`preview --candidate-id`、`greet --candidate-id`、`chat --inspect-embedded`、`send --embedded`。help 只能证明入口存在，页面选择器仍需登录验收。当前缺口见 [迁移与边界](manual-migration.md)。
 
 ## 安装 Skill
 

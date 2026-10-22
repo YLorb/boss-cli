@@ -127,7 +127,7 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 
 ### Canvas 简历身份核验（2026-10-20）
 
-搜索列表完整显示姓名必须唯一，卡片组件姓名必须一致且提供候选人 `encryptGeekId`。在线简历打开时，CLI 在主页面对应简历右侧操作区定位按钮，同时核对该组件 `geekInfo`、`resumeInfo` 的 ID 与卡片 ID 一致；不要求 Canvas 简历提供姓名 DOM。任一字段缺失、不一致或作用域不唯一直接停止，不以截图姓名或全局按钮代替身份校验。`preview --open-only` 也使用此规则。
+搜索列表无ID参数时完整显示姓名必须唯一；提供 --candidate-id 时姓名和ID必须联合唯一匹配，卡片组件姓名必须一致且提供候选人 `encryptGeekId`。在线简历打开时，CLI 在主页面对应简历右侧操作区定位按钮，同时核对该组件 `geekInfo`、`resumeInfo` 的 ID 与卡片 ID 一致；不要求 Canvas 简历提供姓名 DOM。任一字段缺失、不一致或作用域不唯一直接停止，不以截图姓名或全局按钮代替身份校验。`preview --open-only` 也使用此规则。
 
 真实只读预检已验证 `identityVerified=true`、`status=ready`、`clicked=false`；真实首次点击已弹出联系岗位选择框，后续弹层确认已验证成功，见下文。用户要求只读时必须保留 `--check`，不得因为 ready 自动联系。
 
@@ -143,6 +143,24 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 
 已联系后打开会话：`boss greet "姓名" --continue-chat --candidate-id "成功回执中的候选人ID" --json`。要求当前简历仍打开，核对该 ID 的两处组件数据；不依赖联系后可能移除候选人的搜索列表。可加 `--check` 只读核对。`continue-clicked` 只确认点击，不证明已打开独立沟通页。
 
-已知边界：2026-10-20 实测“继续沟通”打开了搜索页内聊天窗口，姓名可能由掩码变为完整显示名。当前 `chat --check` 与 `send` 仅支持 `/web/chat/index`，尚未支持该搜索页内窗口；禁止据点击回执直接发送，需先解决该窗口的身份核验和发送支持。本轮消息未发送。
+已知边界：2026-10-20 实测“继续沟通”打开了搜索页内聊天窗口，姓名可能由掩码变为完整显示名。不带 --embedded 的 `chat --check` 与 `send` 使用 `/web/chat/index`；搜索内嵌会话使用下节显式 --embedded 入口，必须先核验身份。完整真实发送仍待验收。
 
 搜索业务执行顺序以[搜索 SOP（2026-10-22）](search-sop.md)为准：已指定沟通岗位不走联系选岗弹层；不限职位才按招聘目标岗位选择。内嵌窗口正式入口尚待支持，下一次实战按 SOP 测试并记录失败，不能据已有 greet 参数推定 send 已支持。
+
+
+### 搜索页内嵌聊天（本地新增，2026-10-22）
+
+`chat --inspect-embedded --json` 仅读取当前窗口，不代表身份通过。
+`chat "实际姓名" --embedded --check --candidate-id "触达回执ID" --job "完整岗位" --json` 严格核验。
+`send --embedded --name "实际姓名" --candidate-id "触达回执ID" --job "完整岗位" --text "正文" [--check] --json` 发送；此处 --check 严格只读。
+无窗口或多窗口、身份/岗位不符、已有草稿、发送禁用均停止；不导航、不刷新、不请求附件。conversationId 是原生内嵌组件ID，未核验与列表data-id映射前不得直接用于collect。只读身份已实测，完整真实发送待验证；先检查本地help确认版本支持。
+
+
+## 搜索同名候选人定位（2026-10-22）
+
+`search --json` 返回每张卡片的 `candidateId`（组件 encryptGeekId）；无关键词时只读当前搜索页列表。先将姓名、院校、年限与同一卡片 ID 对照保存，不使用旧序号。
+
+- `preview "姓名" --candidate-id "ID" [--open-only] --json`：仅常规搜索页，按姓名和 ID 联合唯一定位，打开后核对简历组件 ID；截图回执也返回 candidateId 和 identityVerified。
+- `greet "姓名" --candidate-id "ID" [--check] --json`：同一 ID 贯穿首次联系、预检及选岗/确认。继续沟通仍必须携带成功回执 ID。
+- 无 ID 时维持姓名必须唯一；ID 缺失、姓名不符、重复 ID 或目标不在当前列表直接报错，不回退按姓名匹配，不刷新寻找。
+- 此规则替代前文“同名一律不能操作”的限制：只有获得当前卡片的可靠 ID 后才可处理同名者。推荐与深度搜索不支持该参数。
