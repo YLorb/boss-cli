@@ -1,3 +1,4 @@
+import { runCheck } from './check.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readdir, stat } from 'node:fs/promises';
@@ -12,8 +13,9 @@ const MAX_BYTES = 50 * 1024 * 1024;
 
 /** 接受当前候选人发来的附件请求；不发送任何文字消息。 */
 export async function runAcceptTargetResume(target: ConversationTarget, json = false, check = false): Promise<string> {
+  if(check) return runCheck({page:'chat',state:'resume-request',...target,embedded:false});
   return withBossSessionPage(async (page) => {
-    await openConversationByTarget(page, target, check);
+    await openConversationByTarget(page, target);
     return runChatActionOnCurrentConversation(page, { action: 'agree-resume', target, json });
   });
 }
@@ -65,8 +67,9 @@ export async function runDownloadTargetResume(
   outputDir = path.join(APP_HOME, 'resume-files'),
   check = false,
 ): Promise<string> {
+  if(check) return runCheck({page:'chat',state:'resume-received',...target,embedded:false});
   return withBossSessionPage(async (page) => {
-    await openConversationByTarget(page, target, check);
+    await openConversationByTarget(page, target);
     return downloadCurrentResume(page, target, outputDir);
   });
 }

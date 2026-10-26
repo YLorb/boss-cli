@@ -1,3 +1,4 @@
+import { runCheck } from './check.js';
 import {
   randomIntInclusive,
   selectAllModifierKey,
@@ -30,10 +31,11 @@ export async function runSendChatMessage(options: SendChatMessageOptions): Promi
   }
   if (options.check && !options.target) throw new Error('send --check 必须同时提供 --name 和 --data-id。');
 
+  if (options.check) return runCheck({page:'chat',state:'send-ready',name:options.target!.name,dataId:options.target!.dataId,text:messageText,embedded:false});
   try {
     return await withBossSessionPage(async (page) => {
       if (options.target) {
-        await openConversationByTarget(page, options.target, options.check);
+        await openConversationByTarget(page, options.target);
       }
       const currentUrl = page.url();
       if (!isBossChatIndexUrl(currentUrl)) {

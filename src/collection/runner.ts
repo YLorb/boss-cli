@@ -35,6 +35,8 @@ export class CollectionRunner {
           results.push({ dataId: row.dataId, status: this.ledger.get(row.dataId).status, probe });
         } catch (error) {
           const failure = error instanceof Error ? error : new Error(String(error));
+          // Human selection is pending, not an attachment failure. Stop without changing ledger status.
+          if (failure.name === 'CandidateSelectionRequired') throw failure;
           this.ledger.recordFailure(row.dataId, failure);
           if (!(failure instanceof AttachmentTimeoutError)) throw failure;
           results.push({ dataId: row.dataId, status: 'RECHECK', error: failure.message });

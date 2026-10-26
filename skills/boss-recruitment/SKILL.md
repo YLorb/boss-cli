@@ -48,6 +48,7 @@ metadata:
 | 确定命令参数、示例、页面要求 | [命令与 URL 对照](references/cli-reference.md)；只读所需命令小节 |
 | 未读简历收集 | [收集 SOP](references/collect-sop.md) |
 | 沟通页读取／切换岗位 | [岗位切换脚本规范](references/switch-job.md)，操作前必读 |
+| 沟通页按昵称定位已有候选人、重名暂停 | [沟通页候选人定位](references/chat-candidate-location.md)；`chat-search` 在全部职位搜索，重名等待用户确认 |
 | 推荐寻访 | [推荐 SOP](references/recommend-sop.md) |
 | 常规搜索、联系选岗、内嵌聊天实战测试 | [搜索 SOP](references/search-sop.md)，含岗位分支、消息核验与失败记账 |
 | 评分、计数、去重及停止 | [共用规则](references/common-rules.md) |

@@ -13,13 +13,19 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 | URL / Path | 页面功能 | 相关命令 | 当前行为 |
 | --- | --- | --- | --- |
 | `https://www.zhipin.com/web/user/?ka=header-login` | 登录入口 | `boss login` | 直接打开登录页，交还给人工扫码/验证。 |
-| `/web/chat/index` | 沟通列表、候选人会话页 | `boss list [--unread] [--chatting] [--json]`、`boss chat <姓名>`、`boss chat [姓名] --index <序号> [--unread]`、`boss chat <姓名> --data-id <会话ID>`、`boss accept-resume <姓名> --data-id <会话ID>`、`boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]`、`boss send [--name <姓名> --data-id <会话ID>]`、`boss action` | `list --chatting` 明确选择顶部「沟通中」，`--json` 输出会话行 `data-id` 和当前沟通职位；联合键命令会在顶部「全部」查找并核对详情。`accept-resume` 仅点击当前候选人的附件请求卡片并等待附件到达；`download-resume` 要求附件已经收到，打开预览并经 Boss 下载按钮保存原文件。指定目标的 `send` 在发送前后核对会话并确认新消息出现在页面。传统 `send` / `action` 仍要求当前会话已打开。 |
+| `/web/chat/index` | 沟通列表、候选人会话页 | `boss list [--unread] [--chatting] [--json]`、`boss chat <姓名>`、`boss chat [姓名] --index <序号> [--unread]`、`boss chat <姓名> --data-id <会话ID>`、`boss accept-resume <姓名> --data-id <会话ID>`、`boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]`、`boss send [--name <姓名> --data-id <会话ID>]`、`boss action` | `list --chatting` 明确选择顶部「沟通中」，`--json` 输出会话行 `data-id` 和当前沟通职位；姓名、序号及联合键命令统一通过全部职位昵称搜索，重名暂停，不滚动查找。`accept-resume` 仅点击当前候选人的附件请求卡片并等待附件到达；`download-resume` 要求附件已经收到，打开预览并经 Boss 下载按钮保存原文件。指定目标的 `send` 在发送前后核对会话并确认新消息出现在页面。传统 `send` / `action` 仍要求当前会话已打开。 |
 | `/web/chat/recommend` | 推荐候选人列表 | `boss recommend`、`boss preview <姓名>`、`boss greet <姓名>` | `recommend` 会先检查当前位置，不在该页时直接进入；`preview` / `greet` 要求当前已在该页且列表已加载。 |
 | `/web/chat/aiform` | 深度搜索 / Agent 搜索 | `boss deep-search [--core <要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]`、`boss preview <姓名>`、`boss greet <姓名>` | `deep-search` 会先检查当前位置，不在该页时直接进入；默认只输出招聘要求表单、核心要求、加分项、今日剩余匹配次数和按钮状态，不输出候选列表；`--core` / `--bonus` 可重复，并按传入列表同步对应分组（多余行会删除，不足会新增），`--clear-core` / `--clear-bonus` 清空对应分组；只有 `--match` 会消耗今日匹配次数并输出列表顶部最新 20 条；`preview` / `greet` 要求当前已在该页且列表已加载。 |
 | `/web/chat/search` | 常规搜索 | `boss search [关键词]`、`boss preview <姓名>`、`boss greet <姓名> [--check]` | `search` 会先检查当前位置，不在该页时直接进入；带关键词时填入搜索框并回车搜索；`preview` 要求当前已在该页且列表已加载，不支持 `--job`。 |
 | `/web/chat/job/list` | 职位管理列表 | `boss positions`、`boss jd <name>` | 可通过侧栏进入职位管理页后读取。 |
 
 ## 约定
+
+- 2026-10-26 原 `chat "刘海罗" --data-id "692932186-0" --json` 接入昵称搜索后已真实验证成功，返回正确会话ID及岗位；未发送消息。38项相关隔离回归通过。
+
+- 2026-10-26 `chat-search` 真实验证：按用户指定搜索“刘海罗”，唯一结果打开成功，返回 `status=opened`，搜索uniqueId与会话data-id一致，岗位已读取核验。重名暂停已通过隔离测试，尚无真实重名验收；未发送消息，未关闭浏览器。
+
+- 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。选择岗位下拉“全部职位”，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，比较参数不用于自动选择重名。成功为 `status=opened`；无结果、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
 
 - 沟通岗位切换使用 `node scripts/switch-job.mjs --list` 读取实时完整label，再用 `--job "完整label"` 唯一匹配并核验；要求已登录、仅一个BOSS标签且当前在 `/web/chat/index`。可显式传 `--cdp-url` 和 `--timeout-ms`，不导航、不改分类、不联系候选人、不重试；错误非零退出。完整操作规范见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
 
@@ -29,12 +35,12 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 - `boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]` 使用 `/web/chat/index`：进入「沟通—全部」，定位后先读附件再读己方已发送的默认求简历话术。未观察到不等于无附件或未发送；`--download` 才下载。与 `accept-resume`、`download-resume` 一样，CLI 整条命令限时 15 秒，确认子进程退出后报错。
 - `boss collect --job <岗位完整名称> [--ledger-dir <目录>]` 为候选人处理流程的第一个常驻步骤：等待 started、核对岗位与 recoveryRequired、读取 show 后才处理候选人；有恢复要求时等待人工 reconcile 完成。启动 collect 本身不导航页面。round 处理普通记录；人工 recheck 复查 RECHECK；人工 reconcile 遍历「沟通—全部」，按岗位全量逐项对账；stop 写回。见 [岗位账本](collection-ledger.md)。
-- 联合键定位先检查当前列表；未找到时在列表区域内使用滚轮分段扫描，每段不超过视口高度的 65% 且不超过 500px，不再强制跳到顶部。先向下扫描，连续三轮可见行位置与身份未变化后转向上扫描；双向扫描仍未定位或超过 120 轮直接报错，不将未找到解释为候选人不存在。目标已挂载但位于视口外时，分段滚动使其可见。`--check` 命中当前正确会话时仍只读、不滚动。全量对账的完整列表盘点仍从顶部开始。
+- 候选人姓名、序号和联合键定位统一使用昵称搜索；原列表扫描、向下／向上滚动及目标居中点击代码已删除，不存在滚动回退。重名时即使有会话ID也通过CandidateSelectionRequired暂停，等待用户确认；指定对象的发送／收件／下载／探测不会继续。全量对账的列表盘点属于独立功能，仍需用户明确要求，不参与候选人定位或充当回退。
 - DOM 信息读取本身不刷新页面、不点击或导航；滚轮可能触发 BOSS 的虚拟列表更新或加载更多，点击候选人会更新详情。完整 `list`/定位命令包含页面和分类筛选准备，不能把整条命令称为纯读取。已经在沟通页时 URL 检查不导航；公共层不再把非工作台页面自动导航到沟通首页，风险页只记录错误上下文、不自动返回；执行上下文销毁直接报错，不重跑业务回调。
 
-- 列表准备按「进入沟通页 → 切换所需顶部分类 → 选择全部/未读筛选 → 等待列表」顺序执行。已选中的分类和筛选不重复点击；需要切换筛选时只调用一次 `.click()`。联合键定位只准备一次列表。
+- 列表准备按「进入沟通页 → 切换所需顶部分类 → 选择全部/未读筛选 → 等待列表」顺序执行。已选中的分类和筛选不重复点击；需要切换筛选时只调用一次 `.click()`。此列表准备只用于列表读取及序号取身份；指定姓名或联合键定位直接使用昵称搜索，不再准备并扫描列表。
 - `send` 将整段话术写入剪贴板，全选后粘贴，核对输入内容再发送；任何一步失败直接报错，不回退到逐字符输入。该操作会覆盖系统剪贴板文本。
-- `download-resume`、`accept-resume` 和指定姓名及 `data-id` 的 `send` 支持无值开关 `--check`。加开关时直接只读读取当前沟通页选中行的 `data-id`；相同 ID 时仅核对姓名、选中行和详情，不关闭预览、不切分类、不滚动、不再次点击会话。不相同时正常按联合键定位。相同 ID 但姓名或详情不符直接报错，不改走定位路径。未加开关仍执行完整定位。直接比较页面现状，不安装全局变量或 DOM 观察器；当前选中行数量异常直接报错。
+- `download-resume`、`accept-resume` 和指定姓名及 `data-id` 的 `send --check` 严格只读，分别判断当前目标是否有附件、待同意请求、可发送状态，只返回 true/false。身份不匹配返回 false，不定位或执行动作；读取异常报错。实际业务必须去掉 --check。
 
 - 所有业务命令支持 `--json`：`login/list/chat/action/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet`。默认文本行为保留，`download-resume` 默认已输出 JSON；JSON 字段与用法见 [CLI JSON 输出](cli-json-output.md)。JSON 模式 stdout 仅输出一个结果，日志走 stderr，参数或执行失败输出 JSON 错误并返回非零退出码。
 - `chat --data-id --json` 在身份核对后读取人才摘要、当前已加载的消息和附件存在标记；默认文本仍仅输出定位确认。`jd --json` 继续保存和复用 Markdown，返回正文、文件路径与 `cache/page` 来源，不解析 Markdown 或强制刷新。
@@ -128,3 +134,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - 此规则替代前文“同名一律不能操作”的限制：只有获得当前卡片的可靠 ID 后才可处理同名者。推荐与深度搜索不支持该参数。
 
 真实验证：同一搜索列表中两位唐**按不同 candidateId 区分，指定6年/新南威尔士大学者的完整 preview 返回 identityVerified=true；无再次查询。该候选人未达到岗位证据要求，未实际测试此 ID 的联系或发送。
+
+
+
+- 2026-10-26：沟通姓名、序号与联合键定位已替换为全部职位昵称搜索，原分段滚动定位实现及对应测试已删除。check/status继续严格只读；在线简历截图及明确全量对账的滚动不属于候选人查找回退。

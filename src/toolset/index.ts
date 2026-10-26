@@ -1,3 +1,5 @@
+import { runCheck } from './check.js';
+import { searchChatCandidate, type ChatSearchOptions } from './chat_search.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
 /** 业务实现聚合出口：impl* 供 CLI 与其它模块调用 */
 import { runLogin } from './login.js';
@@ -18,6 +20,12 @@ import { runRecommendGreet } from './greet.js';
 import { readSelectedConversation, assertSelectedConversation, openConversationByTarget, type ConversationTarget } from './target_chat.js';
 import { runAcceptTargetResume, runDownloadTargetResume } from './attachment.js';
 export type { ChatPageAction };
+export async function implChatSearch(options: ChatSearchOptions, json = false): Promise<string> {
+  const result = await withBossSessionPage(page => searchChatCandidate(page, options));
+  return json ? JSON.stringify(result) : result.status === 'needs-confirmation'
+    ? `已暂停：${result.reason}\n${JSON.stringify(result.matches)}`
+    : `已打开并核验：${result.name} / ${result.dataId} / ${result.job}`;
+}
 export type { DeepSearchGeekItem } from './deep-search.js';
 
 export async function implLogin(json = false): Promise<string> {
@@ -38,12 +46,7 @@ export async function implOpenChat(
   json = false,
   check = false,
 ): Promise<string> {
-  if (check) return withBossSessionPage(async page => {
-    if (!isBossChatIndexUrl(page.url())) throw new Error('当前不在沟通页，停止只读核验；当前路径=' + new URL(page.url()).pathname);
-    const current = await readSelectedConversation(page);
-    await assertSelectedConversation(page, {name:candidateName,dataId:current.dataId});
-    return renderOpenedCandidateChat(page, candidateName, json);
-  });
+  if (check) return runCheck({page:'chat',state:'conversation',name:candidateName,embedded:false});
   return withBossSessionPage(async (page) => runOpenCandidateChat(page, candidateName, exact, json));
 }
 

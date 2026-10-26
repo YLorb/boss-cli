@@ -6,7 +6,8 @@ import path from 'node:path';
 import { splitJsonFlag } from '../dist/cli/output.js';
 
 const calls = [];
-const names = ['implChatAction','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
+mock.module('../dist/toolset/check.js',{namedExports:{runCheck:async (...args)=>{calls.push({name:'runCheck',args});return 'true';},runStatus:async()=>'{"pageType":"chat"}'}});
+const names = ['implChatAction','implChatSearch','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
 mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries(names.map(name => [name, async (...args) => {
   calls.push({name,args});
   return JSON.stringify({reader:name,args});
@@ -17,11 +18,12 @@ const { executeCommand } = await import('../dist/cli/cliRouter.js');
 test('every business command forwards --json to its reader, including aliases and flag placement', async () => {
   const cases = [
     [['login','--json'],'implLogin',[true]],
+    [['chat-search','黄子佳','--data-id','123-0','--job','目标岗位','--json'],'implChatSearch',[{name:'黄子佳',dataId:'123-0',job:'目标岗位'},true]],
     [['list','--unread','--json'],'implListCandidates',[{unreadOnly:true,chattingOnly:false,json:true}]],
     [['list-candidates','--json','--chatting'],'implListCandidates',[{unreadOnly:false,chattingOnly:true,json:true}]],
     [['chat','--json','测试候选人','--data-id','123'],'implOpenTargetChat',[{name:'测试候选人',dataId:'123'},true]],
     [['chat','测试候选人','--strict','--json'],'implOpenChat',['测试候选人',true,true]],
-    [['chat','--index','2','--unread','--json'],'implOpenChatByIndex',[{index:2,unreadOnly:true,expectedName:undefined,exact:false,json:true}]],
+    [['chat','--index','2','--unread','--json'],'implOpenChatByIndex',[{index:2,unreadOnly:true,expectedName:undefined,exact:true,json:true}]],
     [['action','remark','--remark','包含换行\n和引号"','--json'],'implChatAction',[{action:'remark',remark:'包含换行\n和引号"',json:true}]],
     [['accept-resume','测试候选人','--data-id','123','--json'],'implAcceptTargetResume',[{name:'测试候选人',dataId:'123'},true,false]],
     [['download-resume','测试候选人','--data-id','123','--json'],'implDownloadTargetResume',[{name:'测试候选人',dataId:'123'},undefined,false]],

@@ -17,6 +17,7 @@ boss jd "模型评估工程师" --json
 
 - 成功：stdout 输出一个 JSON 对象，每个命令使用自己的字段；没有统一的成功外壳，不反向解析中文结果。
 - 失败：stdout 输出 `{"ok":false,"command":"chat","error":{"name":"CliError","message":"..."}}`，进程退出码为 1。错误名称和原始错误描述保留；尚未定义专门的业务错误码。
+- 重名暂停：独立 `chat-search` 返回 `status=needs-confirmation,clicked=false,matches,groupCount,reason`；chat及指定对象的发送／附件／探测抛出 `CandidateSelectionRequired`，错误消息含完整匹配信息，退出码1。必须等待用户确认，不继续业务动作或改用滚动；collect暂停当前轮次，不写附件失败。
 - 诊断日志、trace 写 stderr。JSON 模式跳过自动版本检查提示；退出码和结果必须一起判断。
 - 交互开发模式也接受该开关，但提示符等属于交互界面。Agent 应调用一次性命令。
 - `help/version/update` 与内部凭证命令不在业务 JSON 范围内。

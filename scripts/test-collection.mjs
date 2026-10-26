@@ -138,6 +138,21 @@ test('incomplete reconciliation remains mandatory even after a requested stop an
   await ledger.stop();
 });
 
+test('ambiguous candidate pauses the round without advancing or changing the ledger', async t => {
+  const ledger = await Ledger.load(await directory(t), '岗位 A');
+  ledger.add(candidate); ledger.add({dataId:'456',name:'测试乙'});
+  const before = structuredClone(ledger.entries());
+  let calls=0;
+  const runner = new CollectionRunner(ledger,async()=>{
+    calls++;
+    const error=new Error('重名，等待用户确认');error.name='CandidateSelectionRequired';throw error;
+  });
+  await assert.rejects(runner.round('round'),/重名/);
+  assert.equal(calls,1);
+  assert.deepEqual(ledger.entries(),before);
+  await ledger.stop();
+});
+
 test('unexpected command error is exposed, records RECHECK, and stops this round', async t => {
   const ledger = await Ledger.load(await directory(t), '岗位 A');
   ledger.add(candidate);

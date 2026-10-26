@@ -42,6 +42,8 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 
 ## 列表与会话
 
+2026-10-26 用户确认的[沟通页候选人定位流程](chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期岗位"] --json`，必须已在沟通页。岗位选择“全部职位” → 搜索图标 → 输入昵称 → 读取完整匹配项（含隐藏项） → 唯一匹配才点击 → 核验会话姓名、data-id及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令；比较参数不用于选择重名。成功为 `status=opened`；无结果、旧搜索未清空或核验失败直接报错，不重试。此命令不支持 `--check`、不发送，不以人才搜索 `boss search` 代用，现有chat及指定对象发送／附件／探测均接入此搜索，滚动查找已删除；仍只处理起始快照中的对象。`status --json` 的 `chatSearch` 字段只读查看搜索输入及结果。
+
 沟通页岗位切换使用CLI仓库的 `node .\scripts\switch-job.mjs --list` 与 `--job '完整label'`，不是boss子命令。调用前必须读取[脚本规范](switch-job.md)，参数、当前位置、结果核验和失败处理均按该规范执行。
 
 ```powershell
@@ -54,7 +56,7 @@ boss chat '张三' --data-id '123-0' --json
 
 list读取列表，--chatting选顶部“沟通中”，--unread选未读；输出姓名、data-id和岗位。不是F5，页面不匹配时仍会导航，筛选不一致时会点击。正常循环仅起始读取一次。
 
-chat仅用于已有会话。默认姓名包含匹配，--strict精确匹配仍不能解决同名；index从1开始，指的是调用时列表，不能复用旧序号。--data-id联合姓名定位会进入顶部“全部”，不适合冒充严格未读定位。chat --json返回已加载消息、摘要与附件事实，不证明历史完整。
+chat仅用于已有会话，必须已在沟通页。姓名、--data-id及--index入口统一在全部职位按完整昵称搜索，不再滚动查找；姓名始终精确匹配，--strict保留兼容。index从1开始，仅从调用时列表取得姓名、ID及岗位再搜索，不能复用旧序号。重名即使已给ID或序号也通过CandidateSelectionRequired暂停，等待用户手动确认或进一步指令；没有滚动回退。指定候选人的发送、附件及探测同样在重名时中止。chat --json成功仍返回已加载消息、摘要与附件事实，不证明历史完整。
 
 ## 推荐、搜索、预览与打招呼
 

@@ -69,6 +69,8 @@ stop 到达后不再接受新任务，取消尚未开始的排队任务，等当
 
 ## 超时和人工复查
 
+2026-10-26：已有候选人定位统一改为全部职位昵称搜索，不再滚动查找。重名通过CandidateSelectionRequired暂停当前轮次，等待用户手动确认或进一步指令；不继续下一人，不改写候选人状态或附件错误。姓名、会话ID及岗位核验仍须通过，已有ID不能用于自动跳过重名暂停。
+
 ```powershell
 boss probe-resume "测试候选人" --data-id "123-0" --json
 boss probe-resume "测试候选人" --data-id "123-0" --download --json

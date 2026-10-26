@@ -1,3 +1,4 @@
+import { runCheck, runStatus, type CheckCriteria } from '../toolset/check.js';
 /**
  * CLI：子命令直接调用 toolset 中的 impl*。
  * 无参数时进入交互模式，逐行解析与 `boss <argv...>` 相同的命令。
@@ -7,6 +8,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { detachBrowserSession } from '../browser/index.js';
 import {
   implChatAction,
+  implChatSearch,
   implLogin,
   implListCandidates,
   implListUnreadCandidates,
@@ -167,6 +169,9 @@ function printHelp(): void {
       打开登录页（需要用户在浏览器中自行完成登录，这个命令会直接返回）
   boss --check-login [--json]
       只读检查现有浏览器中的首个 BOSS 标签页；返回已登录/未登录/无法判定，不打开或跳转页面
+  boss check --page <chat|search|recommend|deep-search|online-resume|positions|login|other> [--state <状态>] [--name <姓名>] [--data-id <ID>] [--candidate-id <ID>] [--job <完整岗位>] [--text <正文>]
+  boss status [--json]
+      check 和业务 --check 严格只读，输出 true/false；status 输出当前页面信息。读取失败报错。
   boss list [--unread] [--chatting] [--json]
       --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
   boss chat --inspect-embedded
@@ -174,13 +179,16 @@ function printHelp(): void {
   boss send --embedded --name <实际姓名> --candidate-id <搜索候选人ID> --job <完整岗位> --text <正文> [--check]
     只处理当前搜索页内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
   boss chat <姓名> [--strict]
-      打开指定联系人会话；默认包含匹配，--strict 为精确匹配
+      在全部职位按完整昵称搜索，唯一匹配才打开；重名暂停等待用户确认，--strict 保留兼容且始终精确核验
+  boss chat-search <完整昵称> [--data-id <预期会话ID>] [--job <预期完整岗位>] [--json]
+      须已在沟通页；选择全部职位，按昵称搜索，唯一匹配才点击并核验会话；重名暂停等待用户确认
+      --job/--data-id 仅定位后比较，不用于自动挑选重名；不支持 --check，不发送消息
   boss chat [姓名] --index <序号> [--unread] [--strict]
-      按 boss list 输出的 1-based 序号打开会话；--unread 表示序号对应 boss list --unread
-      同时提供姓名时会校验该序号候选人姓名，--strict 表示精确校验
+      从当前列表 1-based 序号读取姓名、ID及岗位，再按昵称搜索定位；--unread 用于读取未读列表的序号对象
+      同时提供姓名时精确校验；序号或ID不能绕过重名暂停，不滚动查找
       仅用于已建立联系的候选人（即在 list 里可见的会话对象）
   boss chat <姓名> --data-id <会话ID>
-      在顶部「全部」会话中按姓名 + data-id 精确定位并核对详情
+      在全部职位按昵称搜索，再核验会话ID和详情；重名即使提供ID也暂停，无滚动回退
   boss accept-resume <姓名> --data-id <会话ID> [--check]
       在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
   boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]
@@ -188,7 +196,7 @@ function printHelp(): void {
       probe-resume / accept-resume / download-resume 整条命令限时 15 秒，超时终止子进程并返回错误
   boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]
       下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
-      --check：检查当前会话，同一 data-id 时跳过列表定位；仍核对姓名与详情
+      --check：只读比较当前身份及附件状态，返回 true/false，不定位、不接收或下载
   boss action <操作> [--remark <备注>]
       仅在当前聊天页已打开候选人详情时执行操作，并只返回 action 执行结果
       操作: resume | not-fit | remark | agree-resume | request-attachment-resume | history | wechat
@@ -216,7 +224,7 @@ function printHelp(): void {
       须在推荐、深度搜索或常规搜索页；常规搜索支持当前在线简历，不自动跳转
       点击目标的“打招呼/立即沟通”；搜索页 --check 只核对身份及按钮，不点击；搜索页不支持 --job
       --select-job 仅选择联系岗位；--confirm-contact 确认已选岗位；--continue-chat 配合回执 ID 打开已联系会话
-      chat <姓名> --check 只读核对当前沟通页，不支持搜索页内聊天窗口
+      chat <姓名> --check 只读返回身份匹配 true/false；读取详情用 status
       可选 --job 先在岗位下拉中模糊匹配并切换（与 recommend 共用同一套选择逻辑）
       会消耗打招呼次数且单次成本较高，请谨慎使用
   boss deep-search [岗位关键字] [--job <岗位关键字>] [--core <核心要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]
@@ -421,8 +429,21 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['--check-login', 'login', 'list', 'chat', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet', 'back'].includes(cmd)) {
+  if (json && !['check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet', 'back'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
+  }
+  if(cmd==='status') {
+    if(tail.length) die('status 不接受参数');
+    return runStatus();
+  }
+  if(cmd==='check') {
+    const {rest,opts,flags}=parseOpts(tail,new Set(['embedded']));
+    const keys:Record<string,keyof CheckCriteria>={page:'page',overlay:'overlay',state:'state',name:'name','data-id':'dataId','candidate-id':'candidateId',job:'job',keyword:'keyword',text:'text'};
+    if(rest.length||[...flags].some(f=>f!=='embedded')||Object.keys(opts).some(k=>!keys[k]))die('check 参数不支持');
+    const criteria:CheckCriteria={};
+    for(const [k,v] of Object.entries(opts)){if(!v.trim()&&k!=='keyword')die('check 比较标准不能为空');(criteria as any)[keys[k]!]=v.trim();}
+    if(flags.has('embedded'))criteria.embedded=true;
+    return runCheck(criteria);
   }
   configureHeadlessForCommand(cmd);
 
@@ -471,6 +492,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
     return implListCandidates({ unreadOnly: flags.has('unread'), chattingOnly: flags.has('chatting'), json });
   }
 
+  if (cmd === 'chat-search') {
+    const { rest, opts, flags } = parseOpts(tail);
+    if (rest.length !== 1 || !rest[0]!.trim() || flags.size || Object.keys(opts).some(k => !['data-id', 'job'].includes(k)) || Object.values(opts).some(v => !v.trim())) die('用法: chat-search <完整昵称> [--data-id <预期ID>] [--job <预期岗位>] [--json]');
+    return implChatSearch({ name: rest[0]!, dataId: opts['data-id'], job: opts.job }, json);
+  }
+
   if (cmd === 'chat') {
     const { rest, flags, opts } = parseOpts(tail, new Set(['check', 'embedded', 'inspect-embedded']));
     if (flags.has('inspect-embedded')) {
@@ -492,15 +519,16 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (unsupportedOpts.length > 0) {
       die(`❌ chat 不支持参数: --${unsupportedOpts.join(', --')}`);
     }
-    // 默认模糊匹配（包含）；仅在指定 --strict 时做精确匹配
-    const exact = flags.has('strict');
+    // Full nickname is required on every chat search path; --strict remains compatible.
+    const exact = true;
     const indexRaw = (opts.index ?? opts.i ?? '').trim();
     const dataId = (opts['data-id'] ?? '').trim();
     if (flags.has('data-id')) {
       die('❌ chat --data-id 必须提供会话 ID。');
     }
     if (flags.has('check')) {
-      if (!nameArg || indexRaw || dataId || [...flags].some(f=>!['check','strict'].includes(f))) die('chat --check 需要姓名，不能配合定位选项');
+      if (!nameArg || indexRaw || [...flags].some(f=>!['check','strict'].includes(f))) die('chat --check 需要姓名，不接受index定位选项');
+      if(dataId) return runCheck({page:'chat',state:'conversation',name:nameArg,dataId,embedded:false});
       return implOpenChat(nameArg, true, json, true);
     }
     if (dataId) {
@@ -814,7 +842,7 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
-  if (!isAttachmentCommand(argv) && !['update', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
+  if (!argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['update', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
     await printPackageUpdateNoticeIfDue();
   }
 
