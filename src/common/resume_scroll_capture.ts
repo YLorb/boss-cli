@@ -30,7 +30,11 @@ export const RESUME_SCROLL_ROOT_SCRIPT = `(() => {
   return roots.length === 1 ? roots[0] : doc;
 })()`;
 
-const METRICS_SCRIPT = `((el) => {
+export const RESUME_SCROLL_METRICS_SCRIPT = `((el, sourceUrl) => {
+  const source = new URL(sourceUrl);
+  const warnOnFixedOverlay = source.origin === 'https://www.zhipin.com' &&
+    source.pathname.replace(/\\/+$/, '') === '/web/chat/recommend';
+  const obstructionMessages = [];
   if (!el.isConnected) throw new Error('在线简历滚动容器已被替换');
   const documentRoot = el === document.scrollingElement;
   const r = el.getBoundingClientRect();
@@ -49,11 +53,14 @@ const METRICS_SCRIPT = `((el) => {
         b.right > x && b.left < x + width && b.bottom > y && b.top < y + height) {
       const hit = document.elementFromPoint((Math.max(x,b.left)+Math.min(x+width,b.right))/2,
         (Math.max(y,b.top)+Math.min(y+height,b.bottom))/2);
-      if (hit && (node === hit || node.contains(hit)))
-        throw new Error('在线简历有固定/吸顶元素遮挡截图区域，停止拼接；element=' + node.tagName + '.' + node.className + '；position=' + s.position + '；rect=' + JSON.stringify({x:b.x,y:b.y,width:b.width,height:b.height}));
+      if (hit && (node === hit || node.contains(hit))) {
+        const detail = 'element=' + node.tagName + '.' + node.className + '；position=' + s.position + '；rect=' + JSON.stringify({x:b.x,y:b.y,width:b.width,height:b.height});
+        if (!warnOnFixedOverlay) throw new Error('在线简历有固定/吸顶元素遮挡截图区域，停止拼接；' + detail);
+        obstructionMessages.push(detail);
+      }
     }
   }
-  return { x, y, width, height, top: el.scrollTop, total: el.scrollHeight };
+  return { x, y, width, height, top: el.scrollTop, total: el.scrollHeight, obstructionMessages };
 })`;
 
 type Metrics = { x: number; y: number; width: number; height: number; top: number; total: number };
@@ -181,7 +188,19 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
   const rootHandle = outer ? outerHandle : await frame.evaluateHandle(`globalThis[${key}] = ${RESUME_SCROLL_ROOT_SCRIPT}`);
   const root = rootHandle.asElement() as ElementHandle<Element> | null;
   if (!root) { await rootHandle.dispose(); throw new Error('未找到在线简历滚动容器'); }
-  const read = () => rootFrame.evaluate(`${METRICS_SCRIPT}(globalThis[${key}])`) as Promise<Metrics>;
+  const reportedObstructions = new Set<string>();
+  const read = async (): Promise<Metrics> => {
+    const { obstructionMessages, ...metrics } = await rootFrame.evaluate(
+      `${RESUME_SCROLL_METRICS_SCRIPT}(globalThis[${key}], ${JSON.stringify(page.url())})`,
+    ) as Metrics & { obstructionMessages: string[] };
+    for (const detail of obstructionMessages) {
+      if (reportedObstructions.has(detail)) continue;
+      reportedObstructions.add(detail);
+      // Warnings remain visible even without tracing, and never contaminate JSON stdout.
+      console.error('[boss-cli][resume] 推荐页检测到固定/吸顶元素，继续截图并保留完整性校验；' + detail);
+    }
+    return metrics;
+  };
   let original: Metrics | undefined;
   let initialBox: { x: number; y: number; width: number; height: number } | undefined;
   const stable = async (): Promise<Metrics> => {

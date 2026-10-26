@@ -48,7 +48,10 @@ test('capture pauses between wheel segments, retains pulse pacing, restores scro
     events.push({ kind: 'wait', ms }); now += ms; queueMicrotask(callback); return 0;
   });
   t.mock.method(Math, 'random', () => 0);
-  const metrics = () => ({ x: 0, y: 0, width: 100, height: 100, top, total: 300 });
+  const metrics = () => ({ x: 0, y: 0, width: 100, height: 100, top, total: 300,
+    obstructionMessages: ['element=DIV.status;position=fixed'] });
+  const warnings = [];
+  t.mock.method(console, 'error', message => warnings.push(message));
   const root = { boundingBox: async () => ({ x: 0, y: 0, width: 100, height: 100 }) };
   const handle = { asElement: () => root, dispose: async () => {} };
   const parent = {
@@ -66,6 +69,7 @@ test('capture pauses between wheel segments, retains pulse pacing, restores scro
   const iframe = { frame: parent, contentFrame: async () => frame,
     boundingBox: async () => ({ x: 0, y: 0, width: 100, height: 100 }) };
   const page = {
+    url: () => 'https://www.zhipin.com/web/chat/recommend',
     evaluate: async () => ({ width: 100, height: 100, x: 0, y: 0, pixelRatio: 1, scale: 1 }),
     mouse: {
       move: async () => { events.push({ kind: 'segment', now }); },
@@ -83,6 +87,8 @@ test('capture pauses between wheel segments, retains pulse pacing, restores scro
   };
   const file = path.join(dir, 'resume.png');
   await captureResumeByWheel(page, iframe, file);
+  assert.equal(warnings.length, 1, 'same obstruction is reported once per capture');
+  assert.match(warnings[0], /推荐页.*继续截图.*element=DIV.status/);
   assert.ok(Math.abs(top) <= 0.5, 'original position restored within capture tolerance');
   assert.equal(PNG.sync.read(await readFile(file)).height, 300);
   const firstPulse = events.findIndex(event => event.kind === 'pulse');
