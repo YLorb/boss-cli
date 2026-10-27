@@ -59,6 +59,8 @@ node .\dist\cli\index.js collect --job '目标岗位完整名称' --ledger-dir '
 
 以下业务 prompt 须同时带上[严格工具约束 prompt](tool-boundary.md#可复用执行-prompt)；“仅查看”或“验收”不构成非 CLI 工具例外。
 
+WorkBuddy 定时搜索／推荐且要求“单人出错不影响其他人”：使用[不联系模式配置与可复制提示词](non-contact-continuation.md)。先完成一次人工监督运行，再配置本地定时任务；该文档是 Agent 执行规范，不代表 CLI 已实现调度或跨任务互斥。
+
 推荐：
 > 使用 boss-recruitment Skill 执行推荐 SOP。目标岗位及 JD：……；评分标准：……；否决项：无；观察上限：5；触达门槛：……；允许查看、评估并对符合条件者发送已确认的消息3。运行目录：……。
 
