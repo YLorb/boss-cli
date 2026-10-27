@@ -1,12 +1,14 @@
 ---
 title: "CLI指令、示例与页面要求"
 read_when: "需要某个命令的语法或副作用说明"
-updated: "2026-10-14"
+updated: "2026-10-27"
 scope: "cli-reference"
 source: "本地cliRouter、help、docs/boss-url-map.md"
 ---
 
 # 命令参考
+
+逐项可执行语法、每个调用的前置条件／结果／副作用、岗位值区别及collect stdin协议，统一见[逐项调用手册](invocation-guide.md)。本文保留按功能的补充说明。
 
 使用前遵守[工具使用边界](tool-boundary.md)。缺失能力不授权 Agent 直接连接 CDP、使用其他浏览器工具、导入内部模块或临时编写页面脚本。
 
@@ -23,7 +25,7 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 | `boss version`、`boss ver`、`boss -v`、`boss --version` | 显示版本并检查npm更新；不是纯离线核验 |
 | `boss update` | 更新全局npm包；不更新源码工作区，不在业务中自动执行 |
 | `boss login --json` | 打开登录页，用户扫码，命令返回不代表已登录 |
-| `boss --check-login --json` | 只读检查已有BOSS标签，不导航；区分已登录、未登录和unknown |
+| `boss --check-login --json` | 只读检查已有BOSS标签，不导航；已登录返回true、未登录false，无法判断报错 |
 
 业务命令 `--json` 输出原始结构；stdout为结果，stderr为日志。错误返回非零码和 `{ok:false,command,error:{name,message}}`。下载默认也是JSON。不能通过错误码推断副作用未发生。
 
@@ -42,7 +44,7 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 
 ## 列表与会话
 
-2026-10-26 用户确认的[沟通页候选人定位流程](chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期岗位"] --json`，必须已在沟通页。岗位选择“全部职位” → 搜索图标 → 输入昵称 → 读取完整匹配项（含隐藏项） → 唯一匹配才点击 → 核验会话姓名、data-id及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令；比较参数不用于选择重名。成功为 `status=opened`；无结果、旧搜索未清空或核验失败直接报错，不重试。此命令不支持 `--check`、不发送，不以人才搜索 `boss search` 代用，现有chat及指定对象发送／附件／探测均接入此搜索，滚动查找已删除；仍只处理起始快照中的对象。`status --json` 的 `chatSearch` 字段只读查看搜索输入及结果。
+2026-10-26 用户确认的[沟通页候选人定位流程](chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期岗位"] --json`，必须已在沟通页。保留当前页面状态、不主动切岗 → 搜索图标 → 输入昵称 → 读取完整匹配项（含隐藏项） → 唯一匹配才点击 → 核验会话姓名、data-id及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令；比较参数不用于选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不重试。此命令不支持 `--check`、不发送，不以人才搜索 `boss search` 代用，现有chat及指定对象发送／附件／探测均接入此搜索，滚动查找已删除；仍只处理起始快照中的对象。`status --json` 的 `chatSearch` 字段只读查看搜索输入及结果。
 
 沟通页岗位切换使用CLI仓库的 `node .\scripts\switch-job.mjs --list` 与 `--job '完整label'`，不是boss子命令。调用前必须读取[脚本规范](switch-job.md)，参数、当前位置、结果核验和失败处理均按该规范执行。
 
@@ -56,7 +58,7 @@ boss chat '张三' --data-id '123-0' --json
 
 list读取列表，--chatting选顶部“沟通中”，--unread选未读；输出姓名、data-id和岗位。不是F5，页面不匹配时仍会导航，筛选不一致时会点击。正常循环仅起始读取一次。
 
-chat仅用于已有会话，必须已在沟通页。姓名、--data-id及--index入口统一在全部职位按完整昵称搜索，不再滚动查找；姓名始终精确匹配，--strict保留兼容。index从1开始，仅从调用时列表取得姓名、ID及岗位再搜索，不能复用旧序号。重名即使已给ID或序号也通过CandidateSelectionRequired暂停，等待用户手动确认或进一步指令；没有滚动回退。指定候选人的发送、附件及探测同样在重名时中止。chat --json成功仍返回已加载消息、摘要与附件事实，不证明历史完整。
+chat仅用于已有会话，必须已在沟通页。姓名和--index入口直接按完整昵称搜索，不主动切换或恢复岗位，不再滚动查找；姓名始终精确匹配，--strict保留兼容。index从1开始，仅从调用时列表取得姓名、ID及岗位再搜索，不能复用旧序号。重名即使已给ID或序号也通过CandidateSelectionRequired暂停，等待用户手动确认或进一步指令；没有滚动回退。指定候选人的发送、附件及探测同样在重名时中止。--data-id入口先核验当前姓名、ID和详情姓名，一致则直接复用，否则才搜索。chat --json成功仍返回已加载消息、摘要与附件事实，不证明历史完整。
 
 ## 推荐、搜索、预览与打招呼
 
@@ -80,12 +82,14 @@ deep-search支持岗位位置参数或--job；--core/--bonus可重复，按给�
 ## 发送与当前会话动作
 
 ```powershell
-boss send --name '张三' --data-id '123-0' --check --text '已确认的话术' --json
+boss send --name '张三' --data-id '123-0' --check --text '已确认的话术' --json # 只读检查，返回true/false
+# 仅检查为true且获得本轮授权后执行：
+boss send --name '张三' --data-id '123-0' --text '已确认的话术' --json
 boss action resume --json
 boss action remark --remark '用户要求的备注' --json
 ```
 
-send支持--text/-t；不带联合键时发送当前会话，自动化应先核对身份。--check命中当前ID时只读核对，未命中会正常定位全部。--request-resume会在发消息后追加求简历动作，不用于消息3。send使用剪贴板粘贴，会覆盖系统剪贴板。
+send支持--text/-t；不带联合键时发送当前会话，自动化应先核对身份。--check只读比较当前会话及对应状态，返回true/false，不定位或执行动作。--request-resume会在发消息后追加求简历动作，不用于消息3。send使用剪贴板粘贴，会覆盖系统剪贴板。
 
 | action操作 | 作用与示例 |
 | --- | --- |
@@ -104,11 +108,15 @@ send支持--text/-t；不带联合键时发送当前会话，自动化应先核�
 ```powershell
 boss probe-resume '张三' --data-id '123-0' --json
 boss probe-resume '张三' --data-id '123-0' --download --output-dir 'C:\Recruitment\runtime\resumes' --json
-boss accept-resume '张三' --data-id '123-0' --check --json
-boss download-resume '张三' --data-id '123-0' --check --output-dir 'C:\Recruitment\runtime\resumes' --json
+boss accept-resume '张三' --data-id '123-0' --check --json # 只读检查，返回true/false
+# 仅检查为true且获得本轮授权后执行：
+boss accept-resume '张三' --data-id '123-0' --json
+boss download-resume '张三' --data-id '123-0' --check --output-dir 'C:\Recruitment\runtime\resumes' --json # 只读检查，返回true/false
+# 仅检查为true且获得本轮授权后执行：
+boss download-resume '张三' --data-id '123-0' --output-dir 'C:\Recruitment\runtime\resumes' --json
 ```
 
-probe-resume进入全部核对附件与默认求简历话术；--download才下载，不接受--check。accept-resume只在出现待同意卡片时操作并等待附件，不发文字。download-resume下载已收到的原附件，返回path、bytes、sha256等。三者整命令15秒预算；超时终止子进程不撤销已发送给浏览器的动作。
+probe-resume核对指定会话附件与默认求简历话术；--download才下载，不接受--check。accept-resume只在出现待同意卡片时操作并等待附件，不发文字。download-resume下载已收到的原附件，返回path、bytes、sha256等。三者整命令15秒预算；超时终止子进程不撤销已发送给浏览器的动作。
 
 ## 岗位与 JD
 
@@ -131,7 +139,7 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 
 搜索列表无ID参数时完整显示姓名必须唯一；提供 --candidate-id 时姓名和ID必须联合唯一匹配，卡片组件姓名必须一致且提供候选人 `encryptGeekId`。在线简历打开时，CLI 在主页面对应简历右侧操作区定位按钮，同时核对该组件 `geekInfo`、`resumeInfo` 的 ID 与卡片 ID 一致；不要求 Canvas 简历提供姓名 DOM。任一字段缺失、不一致或作用域不唯一直接停止，不以截图姓名或全局按钮代替身份校验。`preview --open-only` 也使用此规则。
 
-真实只读预检已验证 `identityVerified=true`、`status=ready`、`clicked=false`；真实首次点击已弹出联系岗位选择框，后续弹层确认已验证成功，见下文。用户要求只读时必须保留 `--check`，不得因为 ready 自动联系。
+历史预检曾输出结构化对象；现行只读预检统一输出true/false，详情改用status。真实首次点击已弹出联系岗位选择框，后续弹层确认已验证成功，见下文。用户要求只读时必须保留 `--check`，不得因为 true 自动联系。
 
 ## 联系弹层选岗规则
 
@@ -147,7 +155,7 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 
 已知边界：2026-10-20 实测“继续沟通”打开了搜索页内聊天窗口，姓名可能由掩码变为完整显示名。不带 --embedded 的 `chat --check` 与 `send` 使用 `/web/chat/index`；搜索内嵌会话使用下节显式 --embedded 入口，必须先核验身份。完整真实发送仍待验收。
 
-搜索业务执行顺序以[搜索 SOP（2026-10-22）](search-sop.md)为准：已指定沟通岗位不走联系选岗弹层；不限职位才按招聘目标岗位选择。内嵌窗口正式入口尚待支持，下一次实战按 SOP 测试并记录失败，不能据已有 greet 参数推定 send 已支持。
+搜索业务执行顺序以[搜索 SOP（2026-10-22）](search-sop.md)为准：已指定沟通岗位不走联系选岗弹层；不限职位才按招聘目标岗位选择。内嵌窗口正式入口已提供，详见下节；完整真实发送仍待验收，不据greet点击回执推定send成功。
 
 
 ### 搜索页内嵌聊天（本地新增，2026-10-22）

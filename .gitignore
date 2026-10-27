@@ -19,3 +19,6 @@ dist/
 # Local runtime evidence and delivery archives
 /.cache/
 /output/
+
+# Private live candidate diagnostics and receipts
+/runtime/

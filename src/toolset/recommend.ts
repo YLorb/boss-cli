@@ -142,11 +142,9 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
   if (!kw) {
     return readCurrentRecommendJobLabel(frame);
   }
-  if (checkJob) {
-    const current = await readCurrentRecommendJobLabel(frame);
-    const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
-    if (normalize(current) === normalize(kw)) return current;
-  }
+  const current = await readCurrentRecommendJobLabel(frame);
+  const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
+  if (normalize(current) === normalize(kw)) return current;
   const kwLiteral = JSON.stringify(kw);
 
   const opened = (await frame.evaluate(`(() => {
@@ -193,15 +191,31 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
     const label = (target.querySelector(".label")?.textContent ?? target.textContent ?? "")
       .replace(/\\s+/g, " ")
       .trim();
+    // A partial keyword can resolve to the current job too. Close the dropdown without selecting it again.
+    const host = document.querySelector(".job-selecter-wrap .ui-dropmenu-label");
+    if (!(host instanceof HTMLElement)) throw new Error('选择前无法读取当前推荐岗位');
+    if (norm(host.textContent) === norm(label)) {
+      host.click();
+      return { ok: true, label, changed: false };
+    }
     target.scrollIntoView({ block: "center", inline: "nearest" });
     target.click();
-    return { ok: true, label };
-  })()`)) as { ok: boolean; label?: string; reason?: string };
+    return { ok: true, label, changed: true };
+  })()`)) as { ok: boolean; label?: string; reason?: string; changed?: boolean };
   if (!picked.ok) {
     throw new Error(`岗位选择失败：${kw}；reason=${picked.reason}。`);
   }
   if (!picked.label) throw new Error(`岗位选择结果缺少名称：${kw}`);
   const label = picked.label;
+  if (picked.changed === false) {
+    await frame.waitForFunction(`(() => {
+      const el = document.querySelector('.job-selecter-options');
+      if (!el) return true;
+      const rect = el.getBoundingClientRect(), style = getComputedStyle(el);
+      return rect.width <= 0 || rect.height <= 0 || style.display === 'none' || style.visibility === 'hidden';
+    })()`, { timeout: 8_000 });
+    return label;
+  }
   await sleepRandom(JOB_SELECT_ACTION_GAP_MS.min, JOB_SELECT_ACTION_GAP_MS.max);
   await waitForRecommendJobSelected(frame, label);
   return label;

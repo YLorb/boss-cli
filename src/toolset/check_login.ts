@@ -31,9 +31,8 @@ export async function runCheckLogin(json = false): Promise<string> {
       const account = Array.from(document.querySelectorAll('.nav-user .name, .nav-user-name, .header .user-name, header .user-name, a[href*="logout"], a[href*="signout"]')).some(el => visible(el) && !!(el.textContent || '').trim());
       return shell || account ? { status: 'logged-in', loggedIn: true, url } : { status: 'unknown', loggedIn: null, url };
     })()`) as LoginCheck;
-    if (json) return JSON.stringify(result);
-    const labels = { 'logged-in': '已登录', 'logged-out': '未登录', unknown: '无法判定登录状态' };
-    return `${labels[result.status]}\n${result.url}`;
+    if(result.loggedIn===null) throw new Error('无法判断登录状态：'+result.url);
+    return JSON.stringify(result.loggedIn);
   } finally {
     await browser.disconnect();
   }

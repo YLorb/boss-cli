@@ -32,11 +32,11 @@ test('reading is durable before activation; seven fields change only in memory u
   assert.equal(Object.keys(saved.candidates[0]).length, 7);
 });
 
-test('one ledger per job and concurrent ownership rejected', async t => {
+test('full job names retain city isolation and reject concurrent ownership', async t => {
   const dir = await directory(t);
-  const first = await Ledger.load(dir, '岗位 A');
-  await assert.rejects(Ledger.load(dir, '岗位 A'), /正在使用/);
-  const second = await Ledger.load(dir, '岗位 B');
+  const first = await Ledger.load(dir, '全栈软件开发工程师 _ 深圳');
+  await assert.rejects(Ledger.load(dir, '全栈软件开发工程师 _ 深圳'), /正在使用/);
+  const second = await Ledger.load(dir, '全栈软件开发工程师 _ 西安');
   assert.notEqual(first.file, second.file);
   first.add(candidate);
   await first.stop();

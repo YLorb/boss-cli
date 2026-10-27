@@ -1,7 +1,7 @@
 ---
 title: "下载、安装与版本兼容"
 read_when: "首次部署、换机、升级或命令缺失"
-updated: "2026-10-22"
+updated: "2026-10-27"
 scope: "local-installation"
 ---
 
@@ -13,7 +13,20 @@ scope: "local-installation"
 
 Node.js/npm缺失时，先按[环境配置的授权安装流程](environment.md#nodejsnpm缺失时的授权安装流程)告知用户，取得明确同意后再由Agent从 https://nodejs.org/ 下载并配置。Chrome仅作浏览器推荐，Agent不下载、不安装；缺少兼容浏览器时由用户自行准备。版本要求以交付源码的package.json、构建结果及命令核验为准。
 
-## 路径一：使用随包源码快照（对应本文档）
+## 当前交付：dev分支构建ZIP
+
+使用本次交付的 `boss-cli-0.6.9-dev-<提交短号>.zip`，解压后进入 `boss-cli` 目录。包内包含dist、Skill和调用说明，不包含源码、node_modules或浏览器资料。ZIP旁的发布清单记录确切dev提交与SHA-256；不要把旧源码包的版本说明套用到此包。
+
+```powershell
+Set-Location 'C:\Recruitment\boss-cli'
+npm.cmd install --omit=dev
+if ($LASTEXITCODE -ne 0) { throw '依赖安装失败，停止' }
+node .\dist\cli\index.js help
+```
+
+本包已编译，不运行 `npm run build`。端口配置、各命令参数及前置条件见[逐项调用手册](invocation-guide.md)。同名npm包不代表包含本次dev修改；使用本包内入口核验。以下固定提交仅供复现旧版本，不能验证本次修改。
+
+## 历史路径一：2026-10-22源码快照
 
 解压 `boss-cli-source-2026-10-22.zip` 到自选目录，进入其 `boss-cli` 子目录：
 

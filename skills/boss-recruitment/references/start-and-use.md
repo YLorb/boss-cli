@@ -35,7 +35,7 @@ node .\dist\cli\index.js login --json
 
 首次启动或已确认未登录时使用此命令；CLI负责启动／复用Chrome、配置CDP及打开登录页。已由check-login确认登录时直接复用，不反复login。check-login本身不启动浏览器；连接失败必须区分尚未启动和其他错误，不将所有错误解释为需要重启。
 
-扫码、验证码由用户在CLI打开的浏览器中完成。随后执行 `node .\dist\cli\index.js --check-login --json`，只有明确已登录才继续。login返回不等于已登录，unknown或异常不能当成功；浏览器账号和招聘岗位由使用者确认。
+扫码、验证码由用户在CLI打开的浏览器中完成。随后执行 `node .\dist\cli\index.js --check-login --json`，只有明确已登录才继续。login返回不等于已登录，无法判断或异常不能当成功；浏览器账号和招聘岗位由使用者确认。
 
 **禁止替代启动／登录路径**：直接运行chrome.exe、Start-Process、Puppeteer／Playwright launch、自写CDP连接及导航脚本、其他浏览器控制工具。不得复制他人的Cookie或自动更换用户数据目录来绕过故障。CHROME_PATH及端口配置仅交给CLI读取，不授权Agent另起浏览器。
 

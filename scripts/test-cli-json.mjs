@@ -49,10 +49,10 @@ test('every business command forwards --json to its reader, including aliases an
 test('recommend check-job and guarded back parse flags without swallowing positional names', async () => {
   for (const argv of [['recommend','--check-job','测试岗位','--json'], ['recommend','测试岗位','--check-job','--json']]) {
     await executeCommand(argv);
-    assert.deepEqual(calls.at(-1), {name:'implRecommend',args:['测试岗位',true,true]});
+    assert.deepEqual(calls.at(-1), {name:'runCheck',args:[{page:'recommend',job:'测试岗位'}]});
   }
   await executeCommand(['/back','--check-in_online_resume','--json']);
-  assert.deepEqual(calls.at(-1), {name:'runBack',args:[true,true]});
+  assert.deepEqual(calls.at(-1), {name:'runCheck',args:[{state:'online-resume-open'}]});
   await assert.rejects(executeCommand(['recommend','--check-job','--json']), /需要岗位完整名称/);
   await assert.rejects(executeCommand(['back','--check-in_online_resume=false']), /布尔开关/);
 });

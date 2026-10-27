@@ -180,7 +180,7 @@ export async function runProbeTargetResume(target: ConversationTarget, download 
       const attachmentName = attachment ? norm(cards.at(-1).querySelector('.message-card-top-title')?.textContent) : null;
       if (attachment && !attachmentName) throw new Error('附件卡片缺少名称，不能确认附件。');
       const requestEvidence = Array.from(list.querySelectorAll('.message-item .item-myself .text'))
-        .map(el => norm(el.textContent)).filter(text => text === '方便发一份你的简历过来吗？');
+        .map(el => norm(el.textContent)).filter(text => ['方便发一份你的简历过来吗？', '你好，方便发一份你的简历过来吗？'].includes(text));
       return { attachment, attachmentName, requestEvidence };
     })()`) as { attachment: boolean; attachmentName: string | null; requestEvidence: string[] };
     await assertSelectedConversation(page, target);

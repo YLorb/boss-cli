@@ -1,5 +1,7 @@
 # Boss URL 与功能对照
 
+各入口的完整语法、参数语义、返回判断和顺序，见[逐项调用手册](../skills/boss-recruitment/references/invocation-guide.md)。
+
 本文件记录 boss-cli 已知页面 URL、对应命令和当前位置要求。修改页面导航、命令入口或报错文案前，先对照这里，避免把某个命令改成隐式跳转或多路径兜底。
 
 招聘 Agent 必须遵守[工具使用边界](../skills/boss-recruitment/references/tool-boundary.md)：真实页面默认仅用公开 CLI 及列明的岗位切换脚本。本文的源码位置、CDP 技术说明或开发测试命令不授予直接连接浏览器的权限；非 CLI 线上监测、截图和测试均需用户明确特殊声明。
@@ -13,7 +15,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 | URL / Path | 页面功能 | 相关命令 | 当前行为 |
 | --- | --- | --- | --- |
 | `https://www.zhipin.com/web/user/?ka=header-login` | 登录入口 | `boss login` | 直接打开登录页，交还给人工扫码/验证。 |
-| `/web/chat/index` | 沟通列表、候选人会话页 | `boss list [--unread] [--chatting] [--json]`、`boss chat <姓名>`、`boss chat [姓名] --index <序号> [--unread]`、`boss chat <姓名> --data-id <会话ID>`、`boss accept-resume <姓名> --data-id <会话ID>`、`boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]`、`boss send [--name <姓名> --data-id <会话ID>]`、`boss action` | `list --chatting` 明确选择顶部「沟通中」，`--json` 输出会话行 `data-id` 和当前沟通职位；姓名、序号及联合键命令统一通过全部职位昵称搜索，重名暂停，不滚动查找。`accept-resume` 仅点击当前候选人的附件请求卡片并等待附件到达；`download-resume` 要求附件已经收到，打开预览并经 Boss 下载按钮保存原文件。指定目标的 `send` 在发送前后核对会话并确认新消息出现在页面。传统 `send` / `action` 仍要求当前会话已打开。 |
+| `/web/chat/index` | 沟通列表、候选人会话页 | `boss list [--unread] [--chatting] [--json]`、`boss chat <姓名>`、`boss chat [姓名] --index <序号> [--unread]`、`boss chat <姓名> --data-id <会话ID>`、`boss accept-resume <姓名> --data-id <会话ID>`、`boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>]`、`boss send [--name <姓名> --data-id <会话ID>]`、`boss action` | `list --chatting` 明确选择顶部「沟通中」，`--json` 输出会话行 `data-id` 和当前沟通职位；姓名、序号及联合键命令统一通过昵称搜索，重名暂停，不滚动查找。`accept-resume` 仅点击当前候选人的附件请求卡片并等待附件到达；`download-resume` 要求附件已经收到，打开预览并经 Boss 下载按钮保存原文件。指定目标的 `send` 在发送前后核对会话并确认新消息出现在页面。传统 `send` / `action` 仍要求当前会话已打开。 |
 | `/web/chat/recommend` | 推荐候选人列表 | `boss recommend`、`boss preview <姓名>`、`boss greet <姓名>` | `recommend` 会先检查当前位置，不在该页时直接进入；`preview` / `greet` 要求当前已在该页且列表已加载。 |
 | `/web/chat/aiform` | 深度搜索 / Agent 搜索 | `boss deep-search [--core <要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]`、`boss preview <姓名>`、`boss greet <姓名>` | `deep-search` 会先检查当前位置，不在该页时直接进入；默认只输出招聘要求表单、核心要求、加分项、今日剩余匹配次数和按钮状态，不输出候选列表；`--core` / `--bonus` 可重复，并按传入列表同步对应分组（多余行会删除，不足会新增），`--clear-core` / `--clear-bonus` 清空对应分组；只有 `--match` 会消耗今日匹配次数并输出列表顶部最新 20 条；`preview` / `greet` 要求当前已在该页且列表已加载。 |
 | `/web/chat/search` | 常规搜索 | `boss search [关键词]`、`boss preview <姓名>`、`boss greet <姓名> [--check]` | `search` 会先检查当前位置，不在该页时直接进入；带关键词时填入搜索框并回车搜索；`preview` 要求当前已在该页且列表已加载，不支持 `--job`。 |
@@ -21,17 +23,27 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 约定
 
+
+- 2026-10-27 诊断：昵称搜索每次等待默认20000ms，可用环境变量 `BOSS_CHAT_SEARCH_TIMEOUT_MS` 设置1000–60000的整数毫秒（例如30000），不是整条命令总时限，不改变附件命令独立的15秒总时限。`ChatLocateError` 表示尚未完成候选人定位核验；`ChatStateError` 表示候选人身份曾核验成功，但定位结束时的页面或身份复核失败。chat/chat-search/send的JSON错误保留 `error.details`：stage、timeoutMs、clickState、locationVerified、verifiedConversation及diagnostics。locationVerified只代表此前身份核验的历史事实，不保证错误发生后的当前身份，也不表示业务动作成功。附件子进程保留错误名称及含诊断的message，受总时限约束可能先退出。
+- 失败诊断仅执行一次只读DOM快照，记录关键选择器total/visible数量、当前选中行姓名/ID、详情姓名/岗位、职位标签、搜索输入及组件匹配、主页面路径和视口；不读取聊天正文、不包含URL查询参数。诊断读取失败单独标注diagnosticError，保留原异常，不重试业务。重名规则及身份比较条件未因诊断而放宽；尚不将“10秒超时”解释为根因，不采用跨页面往返恢复或按同公司自动合并会话。
+
+- 2026-10-27：`chat --data-id` 及指定对象的send/accept-resume/download-resume/probe-resume共用入口先只读核验当前会话：选中行唯一、姓名、data-id及详情姓名均须匹配。匹配则直接使用当前会话，不打开搜索、不切换职位；不匹配才直接进入昵称搜索，不主动切换或恢复岗位。现有附件预览清理仍保留，清理后及业务操作前再次核验身份。读取异常、清理失败或后续身份变化直接报错，不catch后转去搜索、不重试。搜索出现重名仍保持现场暂停。只有姓名的chat和显式chat-search不采用此复用判断。
+
+- 2026-10-27（最新约定）：直接在当前页面状态下搜索候选人，不打开岗位下拉、不主动切全部职位、不恢复岗位。唯一结果打开后，以姓名、会话ID及详情姓名一致确认定位成功；BOSS自行重置职位筛选不算失败，筛选不再作为前后置条件。显式提供--job时仍比较实际沟通岗位，它不是筛选设置。删除临时--keep-current-job选项，保持单一默认路径。重名或群聊歧义暂停；身份不符、错误页面仍报错，无回退。覆盖chat-search、chat姓名/ID/序号及共用定位入口；当前身份一致的联合键操作仍直接复用。
+
+- status/check识别推荐及常规搜索iframe时，对pathname统一去掉末尾斜杠后精确比较，兼容 `/web/frame/search/` 与 `/web/frame/recommend/` 的实际URL；查询参数不参与路径比较。缺失或多个匹配仍报错，并附主页面及frame路径，不导航、不刷新。
+
 - 2026-10-26 原 `chat "刘海罗" --data-id "692932186-0" --json` 接入昵称搜索后已真实验证成功，返回正确会话ID及岗位；未发送消息。38项相关隔离回归通过。
 
 - 2026-10-26 `chat-search` 真实验证：按用户指定搜索“刘海罗”，唯一结果打开成功，返回 `status=opened`，搜索uniqueId与会话data-id一致，岗位已读取核验。重名暂停已通过隔离测试，尚无真实重名验收；未发送消息，未关闭浏览器。
 
-- 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。选择岗位下拉“全部职位”，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，比较参数不用于自动选择重名。成功为 `status=opened`；无结果、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
+- 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。不操作岗位下拉，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，比较参数不用于自动选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
 
 - 沟通岗位切换使用 `node scripts/switch-job.mjs --list` 读取实时完整label，再用 `--job "完整label"` 唯一匹配并核验；要求已登录、仅一个BOSS标签且当前在 `/web/chat/index`。可显式传 `--cdp-url` 和 `--timeout-ms`，不导航、不改分类、不联系候选人、不重试；错误非零退出。完整操作规范见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
 
-- 正常招聘SOP只从指定岗位未读列表逐人处理，评估一人后完成其发送/收件或等待，再处理下一人；本轮附件收集完成后统一上传。对账、复查、仅收集须人工明确指定。当前 `collect round` 遍历全账本、`chat --data-id` 进入全部、`--check` 未命中会完整定位，不能保证严格未读边界；不得将这些技术能力作为正常SOP扩大范围的授权。
+- 正常招聘SOP只从指定岗位未读列表逐人处理，评估一人后完成其发送/收件或等待，再处理下一人；本轮附件收集完成后统一上传。对账、复查、仅收集须人工明确指定。当前 `collect round` 遍历全账本、`chat --data-id` 通过昵称搜索已指定对象、`--check` 未命中只返回false，不能保证严格未读边界；不得将这些技术能力作为正常SOP扩大范围的授权。
 
-- `boss --check-login [--json]` 通过已配置的本机 CDP 端口，只读检查首个 `www.zhipin.com` 页面；不启动浏览器、不导航、不安装页面守卫。登录入口返回 logged-out；可见工作台菜单或账号入口返回 logged-in；验证页或缺乏证据返回 unknown。连接失败、没有 BOSS 标签页、页面失效直接报错，不能解释为未登录。此命令检查页面信号，不验证服务端会话有效期。
+- `boss --check-login [--json]` 通过已配置的本机 CDP 端口，只读检查首个 `www.zhipin.com` 页面；不启动浏览器、不导航、不安装页面守卫。登录入口返回 false；可见工作台菜单或账号入口返回 true；验证页或缺乏证据报无法判断错误。连接失败、没有 BOSS 标签页、页面失效直接报错，不能解释为未登录。此命令检查页面信号，不验证服务端会话有效期。
 
 - `boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]` 使用 `/web/chat/index`：进入「沟通—全部」，定位后先读附件再读己方已发送的默认求简历话术。未观察到不等于无附件或未发送；`--download` 才下载。与 `accept-resume`、`download-resume` 一样，CLI 整条命令限时 15 秒，确认子进程退出后报错。
 - `boss collect --job <岗位完整名称> [--ledger-dir <目录>]` 为候选人处理流程的第一个常驻步骤：等待 started、核对岗位与 recoveryRequired、读取 show 后才处理候选人；有恢复要求时等待人工 reconcile 完成。启动 collect 本身不导航页面。round 处理普通记录；人工 recheck 复查 RECHECK；人工 reconcile 遍历「沟通—全部」，按岗位全量逐项对账；stop 写回。见 [岗位账本](collection-ledger.md)。
@@ -54,8 +66,8 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - 侧栏导航使用实际调用的字符串脚本：点击菜单后必须等待 pathname 等于目标路径，不能只返回函数对象就视为导航完成。
 - `boss action resume` 与 `boss preview` 当前只保存并返回在线简历截图路径；Boss CLI 的截图 OCR 调用已关闭，不自动解析简历。
 - 在线简历截图保持当前视口尺寸，打开后随机等待 2000–10000ms，再通过简历区域内的滚轮逐屏截取并拼接；每段滚动采用随机加减速，保留约 35% 重叠，以实际滚动位置裁剪重复部分并检查重叠像素。确认顶部、稳定底部后恢复原滚动位置，再写入 PNG。支持 iframe 内部滚动和完整高度 iframe 的外层容器滚动；按实际布局唯一识别滚动容器。重叠校验使用区域平均像素差，兼容非整数显示缩放的抗锯齿差异。推荐、常规搜索、深度搜索的 `preview` 与沟通页 `action resume` 共用此实现。截图不再使用 `BOSS_RESUME_SCREENSHOT_VIEWPORT_HEIGHT`，不主动刷新页面。随机滚动不构成平台风控安全保证。
-- 完整性检查失败直接报错，不保存为完整简历、不改用拉高视口截图。多个滚动容器、横向溢出、区域超出视口、内容高度变化、滚轮无响应或重叠校验失败均停止。固定/吸顶遮挡在推荐页按下述规则提示，其他页面仍停止。最多 100 屏、8000 万累计截图像素；动态加载或特殊布局需要先解决原因。本地已验证合成图像与模拟滚动流程，测试脚本不随本次正式代码交付。
-- 首次固定/吸顶遮挡检测在打开后的 2000–10000ms 阅读等待结束后执行，避免尚未经过初始等待就将加载层判为截图失败；等待后持续遮挡在推荐页输出提示，其他页面直接报错；不隐藏元素、不重复尝试。2026-10-22 修正时序，后续两份完整截图实测成功；未重开此前失败的候选人，不声明已确认该遮挡元素的具体用途。
+- 完整性检查失败直接报错，不保存为完整简历、不改用拉高视口截图。多个滚动容器、横向溢出、区域超出视口、内容高度变化、滚轮无响应或重叠校验失败均停止。固定/吸顶遮挡在推荐页及常规搜索页按下述规则提示，其他页面仍停止。最多 100 屏、8000 万累计截图像素；动态加载或特殊布局需要先解决原因。本地已验证合成图像与模拟滚动流程，测试脚本不随本次正式代码交付。
+- 首次固定/吸顶遮挡检测在打开后的 2000–10000ms 阅读等待结束后执行，避免尚未经过初始等待就将加载层判为截图失败；等待后持续遮挡在推荐页及常规搜索页输出提示，其他页面直接报错；不隐藏元素、不重复尝试。2026-10-22 修正时序，后续两份完整截图实测成功；未重开此前失败的候选人，不声明已确认该遮挡元素的具体用途。
 - 相邻完整滚动段之间随机等待 500～3000ms（含顶部定位和原位置恢复），与每个滚轮脉冲的 16～32ms 间隔分开；首次滚动前仍随机等待 2000～10000ms。成功完成截图、恢复位置并写入文件后，随机等待 1000～5050ms 再关闭简历；截图失败直接报错，不走成功关闭流程。离线回归：`npm run test:resume-timing`。
 - `BOSS_CLI_TRACE=true/1` 时，简历截图在 stderr 输出 `[boss-cli][resume]` JSON事件：阅读/分段等待、滚动起止、分屏、实际DPR/重叠校验、写入和关闭顺序；不改变业务 stdout。拼接使用实际devicePixelRatio，不能从取整后的PNG宽度反推缩放；确认底部后按实际末屏像素范围输出。关闭后仍可见在线简历时直接报错。2026-10-14补测已验证完整截图及成功后的3562ms延迟关闭；`jd` 详情读取仍因编辑页结构变化失败。具体边界见 [实测记录](live-validation-2026-10-14.md)。
 - 实际浏览器验收覆盖内外滚动容器、150% 像素缩放、首轮阅读等待、滚动恢复和无重载检查。拼接保证范围为当前展开内容；页面自身折叠的“查看全部”等内容不因滚动而自动展开。
@@ -63,10 +75,12 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 推荐页状态保持与返回（2026-10-15）
 
-- 2026-10-26：按用户确认，在线简历截图时仅主页面为 `https://www.zhipin.com/web/chat/recommend`（允许末尾斜杠和查询参数）将固定/吸顶元素检测降为提示；stderr 保留元素、定位方式及矩形，同一提示每次截图只输出一次，不污染 JSON stdout。此规则针对检测类别，不声称已识别具体状态栏；不隐藏或删除元素，截图仍包含可见内容。其他页面仍因同类遮挡报错。滚动到底、重叠一致性、尺寸/高度、像素预算和恢复位置等校验保持不变；提示本身不证明正文无遮挡。离线回归：`node --experimental-test-module-mocks --test scripts/test-resume-obstruction.mjs scripts/test-resume-capture-timing.mjs`。
+- 2026-10-26：按用户确认，在线简历截图时仅主页面为 `https://www.zhipin.com/web/chat/recommend` 或 `https://www.zhipin.com/web/chat/search`（允许末尾斜杠和查询参数）将固定/吸顶元素检测降为提示；stderr 保留主页面路径、元素、定位方式及矩形，同一提示每次截图只输出一次，不污染 JSON stdout。此规则针对检测类别，不声称已识别具体状态栏；不隐藏或删除元素，截图仍包含可见内容。其他页面仍因同类遮挡报错。滚动到底、重叠一致性、尺寸/高度、像素预算和恢复位置等校验保持不变；提示本身不证明正文无遮挡。离线回归：`node --experimental-test-module-mocks --test scripts/test-resume-obstruction.mjs scripts/test-resume-capture-timing.mjs`。
 
-- `boss recommend "岗位完整名称" --check-job [--json]`：先读取当前岗位，忽略空白和大小写后完整相等则不打开下拉、不搜索、不点击；不相等时只选择完整相等的岗位。该开关需要岗位名称，不接受赋值。未带开关仍保留原来的关键词选择语义。
-- `boss back --check-in_online_resume [--json]`（交互别名 `/back`）：当前已知列表上存在在线简历弹层时关闭并核验；列表无弹层时返回 `action=noop`，不执行历史回退。独立 `/web/frame/c-resume/...` 页面仅在前一条历史属于同域的推荐、搜索、深度搜索或沟通列表时回退一步，并核验最终 URL。无历史、未知历史目标、未知当前页面或关闭失败直接报错，不以历史回退兜底。无检查开关且未打开简历时报错。
+- 2026-10-26：`selectRecommendJob()` 内部默认比较当前岗位，所有调用均生效，包括普通recommend及greet --job，不依赖--ensure-job。完整岗位名忽略空白和大小写后相同，直接返回，不打开下拉、不搜索、不点击；简称搜索后匹配到当前岗位时，仅收起下拉并核验关闭，不点击岗位项。匹配到不同岗位时才选择一次；比较或关闭失败直接报错，不重试。
+
+- `boss recommend "岗位完整名称" --ensure-job [--json]`：先读取当前岗位，忽略空白和大小写后完整相等则不打开下拉、不搜索、不点击；不相等时只选择完整相等的岗位。该开关需要岗位名称，不接受赋值。未带开关仍保留原来的关键词选择语义。
+- `boss back --if-open [--json]`（交互别名 `/back`）：当前已知列表上存在在线简历弹层时关闭并核验；列表无弹层时返回 `action=noop`，不执行历史回退。独立 `/web/frame/c-resume/...` 页面仅在前一条历史属于同域的推荐、搜索、深度搜索或沟通列表时回退一步，并核验最终 URL。无历史、未知历史目标、未知当前页面或关闭失败直接报错，不以历史回退兜底。无检查开关且未打开简历时报错。
 - 公共层不自动调用 back。出现异常后先检查当前状态，再显式执行返回命令；不得盲目重试刚才的选岗、预览或发送动作。
 - `greet` 不再临时拉高视口或恢复视口尺寸；读取当前已挂载卡片，找不到目标直接报错。已可见页面不再重复 bringToFront。
 - 简历截图采用当前可见视口截图，`fullPage=false`、`captureBeyondViewport=false`，不传浏览器 clip；按实际 DPR 在本地裁剪所需区域、拼接，裁剪边界或视口变化直接报错。外层滚动时复用首屏，避免重复截图。保留原有阅读等待、分段等待、完整性校验及关闭等待。此改动减少浏览器裁剪渲染干扰，不宣称未经现场验证的闪烁已完全消失。
@@ -74,7 +88,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 搜索页立即沟通（2026-10-20，本地实现）
 
-- `boss greet "完整显示姓名" --check --json`：仅常规搜索页支持预检；读取当前候选人身份、作用域和按钮状态，不点击、不关闭简历、不搜索、不切岗位。默认检查当前已打开的在线简历；无可见在线简历时检查搜索卡片。两条路径按页面状态明确选择，失败不切换另一条路径。
+- `boss greet "完整显示姓名" --check --json`：只读判断当前搜索页在线简历身份与可用联系按钮，返回 true/false；未打开简历为 false，不打开或切换候选人。
 - `boss greet "完整显示姓名" --json`：搜索页要求已加载卡片中姓名严格唯一；搜索卡片组件的姓名须与显示姓名一致，并提供非空 `encryptGeekId`；若简历已打开，主页面唯一 `.resume-middle-wrap` 须包含该简历 iframe，右侧唯一 `.resume-simple-box` 的 `geekInfo.encryptGeekId` 和 `resumeInfo.encryptGeekId` 必须同时与卡片 ID 一致。按钮仅在该右侧操作区内定位。Canvas 简历不以 iframe 内姓名 DOM 核验身份，不调用组件方法或接口。仅点击唯一、可见、可用且未被遮挡的「立即沟通」或「打招呼」，支持带额度数字的按钮文字。搜索页拒绝 `--job`，普通 greet 不代选联系岗位；选岗使用下述 --select-job 独立步骤。不处理购买或二次确认。
 - 返回 `ready` 表示预检可点击；`already-contacted` 表示按钮已为「继续沟通」，不再点击；只有点击后同一身份的按钮变为「继续沟通」才返回 `contact-confirmed`。该状态不证明消息3已发送或账本已写入。
 - 点击后按钮消失、页面跳转、出现确认弹层或超时等无法确认结果时，明确报出“已点击一次，禁止自动重试”；应先人工核对，不连续执行 greet。平台可能自动发送默认问候并消耗权益，预检不会消耗这些点击权益。
@@ -109,11 +123,11 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 继续沟通要求当前在线简历已打开，ID 必须来自先前成功回执，并与当前简历的两处 ID 一致；此路径不依赖联系后可能移除目标的搜索列表，不自动回退到姓名匹配。
 
-`boss chat "姓名" --check --json` 只读核对当前沟通页：唯一选中行姓名、data-id 与详情姓名必须匹配，返回当前摘要和消息；不导航、不点击、不切筛选，不与 index/data-id 定位选项混用。
+`boss chat "姓名" --check [--data-id ID] --json` 只读比较当前沟通页选中行与详情身份，返回 true/false；摘要和消息使用 `status --json`。不接受 index 定位。
 
 已联系后打开会话：`boss greet "姓名" --continue-chat --candidate-id "成功回执中的候选人ID" --json`。要求当前简历仍打开，核对该 ID 的两处组件数据；不依赖联系后可能移除候选人的搜索列表。可加 `--check` 只读核对。`continue-clicked` 只确认点击，不证明已打开独立沟通页。
 
-已知边界：2026-10-20 实测“继续沟通”打开了搜索页内聊天窗口，姓名可能由掩码变为完整显示名。当前 `chat --check` 与 `send` 仅支持 `/web/chat/index`，尚未支持该搜索页内窗口；禁止据点击回执直接发送，需先解决该窗口的身份核验和发送支持。本轮消息未发送。
+搜索页内嵌聊天使用显式 `--embedded` 入口核验身份及发送；普通 chat/send 使用独立沟通页。继续沟通点击回执不能证明会话或消息成功。
 
 
 ## 搜索页内嵌聊天（2026-10-22）
@@ -137,6 +151,10 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 真实验证：同一搜索列表中两位唐**按不同 candidateId 区分，指定6年/新南威尔士大学者的完整 preview 返回 identityVerified=true；无再次查询。该候选人未达到岗位证据要求，未实际测试此 ID 的联系或发送。
 
+## 2026-10-23 check语义统一
 
+以 [只读check/status规范](../skills/boss-recruitment/references/check-status.md) 为当前定义。所有业务 --check 和旧检查别名只返回true/false；异常报错。status输出info。实际业务调用去掉--check；原条件选岗/返回分别为--ensure-job、--if-open。独立检查连接不会安装页面守卫、启动浏览器或导航。此次只本地验证，无真实页面验收。
 
-- 2026-10-26：沟通姓名、序号与联合键定位已替换为全部职位昵称搜索，原分段滚动定位实现及对应测试已删除。check/status继续严格只读；在线简历截图及明确全量对账的滚动不属于候选人查找回退。
+- 2026-10-26：沟通姓名、序号与联合键定位已替换为昵称搜索，原分段滚动定位实现及对应测试已删除。check/status继续严格只读；在线简历截图及明确全量对账的滚动不属于候选人查找回退。
+
+- 2026-10-27：沟通昵称搜索区分初始布尔false与完成数字0，完成零结果返回not-found，业务定位抛CandidateNotFound停止；不将加载中或搜索框消失视为零结果。人才搜索关键词waitForFunction修正为执行字符串IIFE并比较实际输入；此修复只证明输入条件，不证明结果列表已随关键词更新，SOP仍要求核对新结果。账本命名由Agent保留完整职称与城市、去掉薪资后传入collect；已有账本不自动迁移。

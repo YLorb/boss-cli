@@ -33,7 +33,7 @@ export const RESUME_SCROLL_ROOT_SCRIPT = `(() => {
 export const RESUME_SCROLL_METRICS_SCRIPT = `((el, sourceUrl) => {
   const source = new URL(sourceUrl);
   const warnOnFixedOverlay = source.origin === 'https://www.zhipin.com' &&
-    source.pathname.replace(/\\/+$/, '') === '/web/chat/recommend';
+    ['/web/chat/recommend', '/web/chat/search'].includes(source.pathname.replace(/\\/+$/, ''));
   const obstructionMessages = [];
   if (!el.isConnected) throw new Error('在线简历滚动容器已被替换');
   const documentRoot = el === document.scrollingElement;
@@ -190,14 +190,15 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
   if (!root) { await rootHandle.dispose(); throw new Error('未找到在线简历滚动容器'); }
   const reportedObstructions = new Set<string>();
   const read = async (): Promise<Metrics> => {
+    const sourceUrl = page.url();
     const { obstructionMessages, ...metrics } = await rootFrame.evaluate(
-      `${RESUME_SCROLL_METRICS_SCRIPT}(globalThis[${key}], ${JSON.stringify(page.url())})`,
+      `${RESUME_SCROLL_METRICS_SCRIPT}(globalThis[${key}], ${JSON.stringify(sourceUrl)})`,
     ) as Metrics & { obstructionMessages: string[] };
     for (const detail of obstructionMessages) {
       if (reportedObstructions.has(detail)) continue;
       reportedObstructions.add(detail);
       // Warnings remain visible even without tracing, and never contaminate JSON stdout.
-      console.error('[boss-cli][resume] 推荐页检测到固定/吸顶元素，继续截图并保留完整性校验；' + detail);
+      console.error('[boss-cli][resume] 在线简历检测到固定/吸顶元素，继续截图并保留完整性校验；page=' + new URL(sourceUrl).pathname + '；' + detail);
     }
     return metrics;
   };

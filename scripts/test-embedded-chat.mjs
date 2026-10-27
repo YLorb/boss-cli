@@ -2,6 +2,7 @@ import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
 let page;
+mock.module('../dist/toolset/check.js',{namedExports:{runCheck:async()=> 'true',runStatus:async()=> '{}'}});
 mock.module('../dist/common/boss_session_page.js',{namedExports:{withBossSessionPage:async(fn,opts)=>{assert.deepEqual(opts,{ensureChatShell:false,ensureMenuList:false});return fn(page);}}});
 const {sendEmbeddedChat,validateEmbeddedState,EMBEDDED_STATE_SCRIPT}=await import('../dist/toolset/embedded-chat.js');
 const {CHAT_INPUT_TEXT_READER}=await import('../dist/common/chat_input_text.js');
@@ -24,7 +25,7 @@ test('identity requires candidate, exact name/job, editor and root association',
  validateEmbeddedState(base(),target);
 });
 test('readonly check and identity failure never type or send',async()=>{
- let result=setup();assert.equal(JSON.parse(await sendEmbeddedChat(target,'hello',true)).status,'ready');assert.equal(result().pastes,0);
+ let result=setup();assert.equal(JSON.parse(await sendEmbeddedChat(target,'hello',true)),true);assert.equal(result().pastes,0);
  result=setup({mismatch:true});await assert.rejects(sendEmbeddedChat(target,'hello'),/校验失败/);assert.equal(result().enters,0);
 });
 test('preserves drafts and respects send disable after paste',async()=>{
@@ -45,9 +46,9 @@ test('missing message ID cannot confirm successful send or trigger a retry',asyn
 test('CLI embedded check routes read-only and rejects missing identity/side-effect flags',async()=>{
  const result=setup();
  const answer=JSON.parse(await executeCommand(['chat','测试','--embedded','--check','--candidate-id','encrypted-1','--job','测试岗位','--json']));
- assert.equal(answer.identityVerified,true);assert.equal(result().pastes,0);
+ assert.equal(answer,true);assert.equal(result().pastes,0);
  const ready=JSON.parse(await executeCommand(['send','--embedded','--check','--name','测试','--candidate-id','encrypted-1','--job','测试岗位','--text','消息','--json']));
- assert.equal(ready.status,'ready');assert.equal(result().pastes,0);
+ assert.equal(ready,true);assert.equal(result().pastes,0);
  await assert.rejects(executeCommand(['send','--embedded','--name','测试','--text','消息']),/candidate-id/);
  await assert.rejects(executeCommand(['send','--embedded','--name','测试','--candidate-id','encrypted-1','--job','测试岗位','--text','消息','--request-resume']),/candidate-id/);
 });

@@ -22,12 +22,14 @@ scope: "runtime-paths"
 
 ## collect启动核验
 
-1. 启动前记录完整岗位名、固定ledgerDir、cliDir、workspaceDir。目录通过绝对路径规范化；不要用岗位展示中的城市／薪资后缀替代账本完整岗位名。
-2. 使用UTF-8岗位名计算SHA-256，得到 `expectedLedgerFile = resolve(ledgerDir, sha256(job) + '.json')`。该值在启动前确定，不得根据工具返回file反向改成“匹配”。
+1. 启动前从已核验的完整岗位展示名确定账本岗位名：保留完整职称和城市，去掉末尾薪资部分。例如页面「全栈软件开发工程师 _ 深圳 15-30K」对应账本job「全栈软件开发工程师 _ 深圳」；西安单独为「全栈软件开发工程师 _ 西安」。只去掉已识别的薪资字段，不截断职称、不省略城市、不猜补城市。Agent保存页面完整label与账本job的对应关系；CLI按传入job原文计算文件名，不自动裁剪。固定ledgerDir、cliDir、workspaceDir按绝对路径规范化。
+2. 使用上一步保留城市、去掉薪资的UTF-8账本岗位名计算SHA-256，得到 `expectedLedgerFile = resolve(ledgerDir, sha256(job) + '.json')`。该值在启动前确定，不得根据工具返回file反向改成“匹配”。
 3. 在cliDir运行 `node ./dist/cli/index.js collect --job '完整岗位名' --ledger-dir '固定绝对目录'`，保持stdin。等待 `ok:true,event:started`。
 4. 必须核验：返回job与预期完全一致；file是绝对路径，规范化后与expectedLedgerFile为同一文件路径；检查recoveryRequired。只核对文件名或岗位哈希不够，因为不同目录可有同名账本。符号链接／junction产生歧义时，明确解析到同一物理路径再继续，不猜测。
 5. 通过后才发送show和后续业务指令。路径或岗位不符时，不add、不decision、不round、不处理候选人；记录错误与两条绝对路径，只对刚创建的会话正常stop并等待退出，不直接杀进程，不删除生成文件。
 6. stop返回file也必须与预期一致，确认stopped及进程退出。回执保存expectedLedgerFile、started.file、stopped.file及本轮实际CLI版本和路径，供恢复核查。
+
+已存在不含城市或含薪资的历史账本时，先报告旧新键及路径，未经明确迁移指令不改名、不合并，也不直接新建空账本绕过历史去重。岗位薪资变化不改变上述账本键。
 
 岗位账本锁只在所属目录有效；同岗不同目录的两个进程不会互斥。文件名相同不代表共享账本。
 

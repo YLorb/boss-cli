@@ -24,6 +24,7 @@ export async function implChatSearch(options: ChatSearchOptions, json = false): 
   const result = await withBossSessionPage(page => searchChatCandidate(page, options));
   return json ? JSON.stringify(result) : result.status === 'needs-confirmation'
     ? `已暂停：${result.reason}\n${JSON.stringify(result.matches)}`
+    : result.status === 'not-found' ? `搜索完成，无匹配候选人：${result.name}`
     : `已打开并核验：${result.name} / ${result.dataId} / ${result.job}`;
 }
 export type { DeepSearchGeekItem } from './deep-search.js';

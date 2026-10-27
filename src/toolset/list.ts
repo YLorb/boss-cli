@@ -272,7 +272,7 @@ async function readAllChattingCandidateItems(page: Page): Promise<CandidateItem[
     traceListStep(`扫描第 ${round + 1} 轮：累计 ${found.size} 个会话，${moved ? '继续滚动' : '已到列表末尾'}`);
     idle = moved ? 0 : idle + 1;
     if (idle >= 2) return [...found.values()];
-    await sleepRandom(350, 550);
+    await sleepRandom(350, 1550);
   }
   throw new Error('扫描「沟通中」列表超过 160 轮，无法确认已读取完整列表。');
 }

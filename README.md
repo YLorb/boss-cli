@@ -251,3 +251,7 @@ Cloudflare Workers Builds 配置：
 - npm：[@joohw/boss-cli](https://www.npmjs.com/package/@joohw/boss-cli)
 - GitHub：[joohw/boss-cli](https://github.com/joohw/boss-cli)
 - 问题反馈：[Issues](https://github.com/joohw/boss-cli/issues)
+
+## 本地招聘调用说明
+
+当前调用语法、参数、前置条件、返回结果与停止规则见[逐项调用手册](skills/boss-recruitment/references/invocation-guide.md)。岗位名、城市、薪资与会话岗位的区分，以及collect常驻stdin协议均在手册中明确。

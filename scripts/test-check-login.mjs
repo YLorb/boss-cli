@@ -42,7 +42,8 @@ test('CLI distinguishes visible workspace, login page, verification page and mis
   ]) {
     scenario = { url: `https://www.zhipin.com${path}`, shell };
     const before = disconnected;
-    assert.deepEqual(JSON.parse(await executeCommand(['--check-login', '--json'])), { status, loggedIn, url: scenario.url });
+    if(loggedIn===null)await assert.rejects(executeCommand(['--check-login','--json']),/无法判断/);
+    else assert.equal(JSON.parse(await executeCommand(['--check-login','--json'])),loggedIn);
     assert.equal(disconnected, before + 1);
   }
 });
@@ -58,6 +59,6 @@ test('connection, missing-tab and detached-frame failures are errors, not logged
 
 test('text output and invalid flags', async () => {
   scenario = { url: 'https://www.zhipin.com/web/user/' };
-  assert.match(await executeCommand(['--check-login']), /^未登录\n/);
+  assert.equal(await executeCommand(['--check-login']), 'false');
   await assert.rejects(executeCommand(['--check-login', 'extra']), /用法/);
 });

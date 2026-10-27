@@ -88,7 +88,7 @@ async function ensureBossChatShellUrlBeforeMenuList(page: Page): Promise<void> {
   if (isBossChatShellUrl(page.url())) {
     return;
   }
-  throw new Error(`当前不在 BOSS 工作台：${page.url()}；不会自动导航。在线简历请使用 back --check-in_online_resume 返回。`);
+  throw new Error(`当前不在 BOSS 工作台：${page.url()}；不会自动导航。在线简历请使用 back --if-open 返回。`);
 }
 
 async function ensureMenuListMountedAfterLoad(page: Page): Promise<void> {

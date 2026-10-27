@@ -25,9 +25,13 @@ export async function readSelectedConversation(page: Page): Promise<SelectedConv
   })()`)) as SelectedConversation;
 }
 
+export function matchesConversationIdentity(actual: SelectedConversation, target: ConversationTarget): boolean {
+  return actual.count === 1 && actual.dataId === target.dataId &&
+    actual.name === target.name && actual.detailName === target.name;
+}
+
 function assertConversationIdentity(actual: SelectedConversation, target: ConversationTarget): void {
-  if (actual.count !== 1 || actual.dataId !== target.dataId ||
-      actual.name !== target.name || actual.detailName !== target.name) {
+  if (!matchesConversationIdentity(actual, target)) {
     throw new Error(`会话身份校验失败：期望「${target.name} / ${target.dataId}」，当前选中「${actual.name} / ${actual.dataId}」，详情「${actual.detailName}」，选中行数 ${actual.count}。`);
   }
 }

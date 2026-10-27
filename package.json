@@ -44,11 +44,16 @@
     "README.md",
     "AGENTS.md",
     "LICENSE",
-    "scripts/switch-job.mjs"
+    "scripts/switch-job.mjs",
+    "docs/boss-url-map.md",
+    "docs/collection-ledger.md",
+    "docs/workbuddy-recruitment-runbook.md"
   ],
   "scripts": {
     "build": "tsc",
     "dev": "npm run build && node dist/cli/index.js",
+    "test:check-dom": "node --test scripts/test-check-dom.mjs",
+    "test:readonly-check": "node --experimental-test-module-mocks --test scripts/test-readonly-check.mjs",
     "test:json": "node --experimental-test-module-mocks --test scripts/test-cli-json.mjs",
     "test:paste": "node --experimental-test-module-mocks --test scripts/test-send-paste.mjs",
     "test:send-contenteditable": "node --experimental-test-module-mocks --test scripts/test-send-contenteditable.mjs",

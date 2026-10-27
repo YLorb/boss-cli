@@ -54,8 +54,8 @@ export async function readStatus(page: Page): Promise<any> {
  const pageType=paths[u.pathname]||(u.pathname.startsWith('/web/frame/c-resume/')?'online-resume':u.pathname.startsWith('/web/user')?'login':'other');
  const info:any=await page.evaluate(STATUS_SCRIPT);
  if(pageType==='search'||pageType==='recommend') {
-  const frames=page.frames().filter(f=>new URL(f.url()||'about:blank').pathname===(pageType==='search'?'/web/frame/search':'/web/frame/recommend'));
-  if(frames.length!==1)throw new Error('搜索 frame 缺失或不唯一，无法读取状态');
+  const frames=page.frames().filter(f=>new URL(f.url()||'about:blank').pathname.replace(/\/+$/,'')===(pageType==='search'?'/web/frame/search':'/web/frame/recommend'));
+  if(frames.length!==1)throw new Error(`${pageType==='recommend'?'推荐':'搜索'} frame 缺失或不唯一，无法读取状态；main=${u.origin+u.pathname}；frames=${JSON.stringify(page.frames().map(f=>{const url=new URL(f.url()||'about:blank');return url.origin+url.pathname;}))}`);
   const search:any=await frames[0]!.evaluate(STATUS_SCRIPT);
   info.keyword=search.keyword;info.searchJob=pageType==='search'?search.searchJob:search.recommendJob;info.cards=search.cards;
  }

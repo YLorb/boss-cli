@@ -168,7 +168,7 @@ function printHelp(): void {
   boss login
       打开登录页（需要用户在浏览器中自行完成登录，这个命令会直接返回）
   boss --check-login [--json]
-      只读检查现有浏览器中的首个 BOSS 标签页；返回已登录/未登录/无法判定，不打开或跳转页面
+      只读检查现有浏览器中的首个 BOSS 标签页；返回true/false，无法判定时报错，不打开或跳转页面
   boss check --page <chat|search|recommend|deep-search|online-resume|positions|login|other> [--state <状态>] [--name <姓名>] [--data-id <ID>] [--candidate-id <ID>] [--job <完整岗位>] [--text <正文>]
   boss status [--json]
       check 和业务 --check 严格只读，输出 true/false；status 输出当前页面信息。读取失败报错。
@@ -179,20 +179,22 @@ function printHelp(): void {
   boss send --embedded --name <实际姓名> --candidate-id <搜索候选人ID> --job <完整岗位> --text <正文> [--check]
     只处理当前搜索页内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
   boss chat <姓名> [--strict]
-      在全部职位按完整昵称搜索，唯一匹配才打开；重名暂停等待用户确认，--strict 保留兼容且始终精确核验
+      直接按完整昵称搜索，不主动切换或恢复岗位；按姓名和会话ID核验成功，重名保持搜索现场暂停；--strict 保留兼容
   boss chat-search <完整昵称> [--data-id <预期会话ID>] [--job <预期完整岗位>] [--json]
-      须已在沟通页；选择全部职位，按昵称搜索，唯一匹配才点击并核验会话；重名暂停等待用户确认
+      须已在沟通页；直接搜索，唯一匹配打开并核验姓名和会话ID；BOSS自行重置筛选不算定位失败；重名保持搜索现场暂停
+      零匹配且查询已完成返回not-found；查询未完成仍超时，业务定位遇零匹配抛CandidateNotFound停止
+      BOSS_CHAT_SEARCH_TIMEOUT_MS 设置每次搜索/身份等待上限，默认20000ms，范围1000–60000；错误附阶段和只读DOM诊断，不自动重试
       --job/--data-id 仅定位后比较，不用于自动挑选重名；不支持 --check，不发送消息
   boss chat [姓名] --index <序号> [--unread] [--strict]
       从当前列表 1-based 序号读取姓名、ID及岗位，再按昵称搜索定位；--unread 用于读取未读列表的序号对象
       同时提供姓名时精确校验；序号或ID不能绕过重名暂停，不滚动查找
       仅用于已建立联系的候选人（即在 list 里可见的会话对象）
   boss chat <姓名> --data-id <会话ID>
-      在全部职位按昵称搜索，再核验会话ID和详情；重名即使提供ID也暂停，无滚动回退
+      先核验当前姓名、会话ID及详情姓名，一致则直接使用；不一致才搜索定位，不主动切换或恢复岗位，搜索重名暂停，无失败回退
   boss accept-resume <姓名> --data-id <会话ID> [--check]
       在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
   boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]
-      沟通-全部定位后，依次检查附件、已发送求简历消息；--download 同时下载已收到附件
+      复用或昵称定位指定会话后检查附件、已发送求简历消息，不主动切岗；--download 同时下载已收到附件
       probe-resume / accept-resume / download-resume 整条命令限时 15 秒，超时终止子进程并返回错误
   boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]
       下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
@@ -209,11 +211,11 @@ function printHelp(): void {
       读取当前职位列表（含开放/待开放/已关闭状态）
   boss jd <name>
       抓取指定职位详情并缓存到项目目录同名 .md
-  boss back [--check-in_online_resume]
+  boss back [--if-open]；back --check-in_online_resume 只判断是否打开简历
       关闭在线简历弹层；独立在线简历页仅向已核验的列表历史回退一步。检查开关在列表上不操作。
 
-  boss recommend [岗位关键字] [--check-job]
-      进入推荐页并读取推荐列表；带岗位关键字时选择岗位；--check-job 与当前完整岗位名匹配时跳过选择
+  boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
+      进入推荐页并读取推荐列表；同岗位默认不重复选择；--ensure-job 在需要切换时要求完整岗位名匹配
   boss search [关键词]
       进入「搜索」页并读取 Boss 默认常规搜索结果；带关键词时填入搜索框并回车搜索
   boss preview <姓名> [--candidate-id <ID>] [--open-only]
@@ -225,7 +227,7 @@ function printHelp(): void {
       点击目标的“打招呼/立即沟通”；搜索页 --check 只核对身份及按钮，不点击；搜索页不支持 --job
       --select-job 仅选择联系岗位；--confirm-contact 确认已选岗位；--continue-chat 配合回执 ID 打开已联系会话
       chat <姓名> --check 只读返回身份匹配 true/false；读取详情用 status
-      可选 --job 先在岗位下拉中模糊匹配并切换（与 recommend 共用同一套选择逻辑）
+      可选 --job 先在岗位下拉中模糊匹配；同岗位不重复选择（与 recommend 共用同一套选择逻辑）
       会消耗打招呼次数且单次成本较高，请谨慎使用
   boss deep-search [岗位关键字] [--job <岗位关键字>] [--core <核心要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]
       进入「深度搜索」页并输出当前表单、剩余匹配次数和按钮状态；--core/--bonus 可重复，并按传入列表同步对应分组；--clear-* 清空对应分组
@@ -701,22 +703,24 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'back') {
-    const { rest, opts, flags } = parseOpts(tail, new Set(['check-in_online_resume']));
-    if (rest.length || Object.keys(opts).length || [...flags].some(f => f !== 'check-in_online_resume')) die('❌ 用法: back [--check-in_online_resume]');
-    return runBack(flags.has('check-in_online_resume'), json);
+    const { rest, opts, flags } = parseOpts(tail, new Set(['check-in_online_resume','if-open']));
+    if (rest.length || Object.keys(opts).length || [...flags].some(f => !['check-in_online_resume','if-open'].includes(f))) die('❌ 用法: back [--if-open | --check-in_online_resume]');
+    if(flags.has('check-in_online_resume')) {if(flags.has('if-open'))die('检查不能与返回动作混用');return runCheck({state:'online-resume-open'});}
+    return runBack(flags.has('if-open'), json);
   }
 
   if (cmd === 'recommend') {
-    const { rest, opts, flags } = parseOpts(tail, new Set(['check-job']));
+    const { rest, opts, flags } = parseOpts(tail, new Set(['check-job','ensure-job']));
     if (rest[0] === 'preview') {
       die('❌ 请改用: boss preview <姓名>（已不再使用 recommend preview）');
     }
-    if (Object.keys(opts).length > 0 || [...flags].some(f => f !== 'check-job')) {
-      die('❌ 用法: recommend [岗位完整名称] [--check-job]');
+    if (Object.keys(opts).length > 0 || [...flags].some(f => !['check-job','ensure-job'].includes(f))) {
+      die('❌ 用法: recommend [岗位完整名称] [--check-job | --ensure-job]');
     }
     const jobKeyword = rest.join(' ').trim();
     if (flags.has('check-job') && !jobKeyword) die('❌ --check-job 需要岗位完整名称');
-    return implRecommend(jobKeyword || undefined, json, flags.has('check-job'));
+    if(flags.has('check-job')) {if(flags.has('ensure-job'))die('检查不能与选岗混用');return runCheck({page:'recommend',job:jobKeyword});}
+    return implRecommend(jobKeyword || undefined, json, flags.has('ensure-job'));
   }
 
   if (cmd === 'greet') {

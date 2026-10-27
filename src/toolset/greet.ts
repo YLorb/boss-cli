@@ -1,3 +1,4 @@
+import { runCheck } from './check.js';
 import {
   GREET_PAYWALL_WAIT_MAX_MS,
   sleepRandom,
@@ -66,6 +67,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
   if (!t) {
     throw new Error('请提供打招呼目标（姓名）。');
   }
+  if(options.check) return runCheck({page:'search',state:options.selectJob?'job-selected':options.continueChat?'contacted':'contact-ready',name:t,candidateId:options.candidateId,job:options.selectJob||options.jobKeyword});
   try {
     return await withBossSessionPage(async (page) => {
       const url = page.url();

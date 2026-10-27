@@ -1,3 +1,4 @@
+import { runCheck } from './check.js';
 import type { Page } from 'puppeteer-core';
 import { CHAT_INPUT_TEXT_READER } from '../common/chat_input_text.js';
 import { selectAllModifierKey } from '../browser/index.js';
@@ -48,19 +49,19 @@ export async function inspectEmbeddedChat(): Promise<string> {
   return withBossSessionPage(async page=>JSON.stringify({status:'diagnostic-only',identityVerified:false,...await readEmbeddedState(page)}),{ensureChatShell:false,ensureMenuList:false});
 }
 export async function checkEmbeddedChat(target: EmbeddedTarget): Promise<string> {
-  return withBossSessionPage(async page=>JSON.stringify({status:'verified',identityVerified:true,...await assertEmbeddedConversation(page,target)}),{ensureChatShell:false,ensureMenuList:false});
+  return runCheck({page:'search',state:'conversation',embedded:true,...target});
 }
 
 /** Same-window send; never navigates, contacts, or falls back to the independent chat page. */
 export async function sendEmbeddedChat(target: EmbeddedTarget, rawText: string, check=false): Promise<string> {
   const text=rawText.replace(/\r\n/g,'\n').trim();
   if(!text) throw new Error('消息正文不能为空');
+  if(check) return runCheck({page:'search',state:'send-ready',embedded:true,...target,text});
   return withBossSessionPage(async page=>{
     const before=await assertEmbeddedConversation(page,target);
     if(!before.editable) throw new Error('内嵌输入框不可编辑，未发送');
     if(before.messages.some(m=>m.self&&m.text.replace(/\r\n/g,'\n').trim()===text))
       return JSON.stringify({status:'already-visible',target,sent:false});
-    if(check) return JSON.stringify({status:'ready',identityVerified:true,target,sent:false});
     const readInput=`(() => { const read=${CHAT_INPUT_TEXT_READER};return read(document.querySelector('#boss-chat-global-input'));})()`;
     if(String(await page.evaluate(readInput)).trim()) throw new Error('内嵌输入框已有草稿，停止以避免覆盖');
     const input=await page.$('#boss-chat-global-input');

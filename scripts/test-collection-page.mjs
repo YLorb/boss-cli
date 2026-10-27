@@ -6,7 +6,7 @@ let page;
 const order = [];
 mock.module('../dist/common/boss_session_page.js', { namedExports: {
   withBossSessionPage: async (callback, options) => {
-    assert.equal(options.retryOnContextDestroyed, false);
+    assert.equal(options, undefined);
     return callback(page);
   },
 } });
@@ -32,6 +32,8 @@ test('probe distinguishes observed attachment and outgoing request from missing 
     assert.equal(result.attachment, 'RECEIVED');
     assert.equal(result.attachmentName, '测试.pdf');
     assert.equal(result.request, 'SENT');
+    await page.evaluate("document.querySelector('.item-myself .text').textContent = '你好，方便发一份你的简历过来吗？'");
+    assert.equal(JSON.parse(await runProbeTargetResume(target)).request, 'SENT');
     assert.equal(result.download, null);
     assert.deepEqual(order.slice(-2).map(item => item[0]), ['open', 'assert']);
     await page.setContent(`<div class="chat-message-list"><div class="message-item"><div class="item-friend"><div class="text">方便发一份你的简历过来吗？</div></div></div></div>`);

@@ -37,7 +37,7 @@ test('reading and segment delays include their specified endpoints', () => {
   assert.equal(resumeScrollIntervalMs(() => 1 - Number.EPSILON), 3000);
 });
 
-test('capture pauses between wheel segments, retains pulse pacing, restores scroll and writes a complete image', async t => {
+for (const pageName of ['recommend', 'search']) test(`${pageName} capture pauses between wheel segments, retains pulse pacing, restores scroll and writes a complete image`, async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'boss-capture-timing-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   // Run the actual capture loop with virtual waits and a deterministic scroll surface.
@@ -69,7 +69,7 @@ test('capture pauses between wheel segments, retains pulse pacing, restores scro
   const iframe = { frame: parent, contentFrame: async () => frame,
     boundingBox: async () => ({ x: 0, y: 0, width: 100, height: 100 }) };
   const page = {
-    url: () => 'https://www.zhipin.com/web/chat/recommend',
+    url: () => 'https://www.zhipin.com/web/chat/' + pageName,
     evaluate: async () => ({ width: 100, height: 100, x: 0, y: 0, pixelRatio: 1, scale: 1 }),
     mouse: {
       move: async () => { events.push({ kind: 'segment', now }); },
@@ -88,7 +88,8 @@ test('capture pauses between wheel segments, retains pulse pacing, restores scro
   const file = path.join(dir, 'resume.png');
   await captureResumeByWheel(page, iframe, file);
   assert.equal(warnings.length, 1, 'same obstruction is reported once per capture');
-  assert.match(warnings[0], /推荐页.*继续截图.*element=DIV.status/);
+  assert.match(warnings[0], /在线简历.*继续截图.*element=DIV.status/);
+  assert.ok(warnings[0].includes('page=/web/chat/' + pageName));
   assert.ok(Math.abs(top) <= 0.5, 'original position restored within capture tolerance');
   assert.equal(PNG.sync.read(await readFile(file)).height, 300);
   const firstPulse = events.findIndex(event => event.kind === 'pulse');

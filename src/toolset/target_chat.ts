@@ -1,7 +1,7 @@
 import type { Page } from 'puppeteer-core';
 import { requireChatSearch } from './chat_search.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
-import { requireConversationTarget, assertSelectedConversation, type ConversationTarget } from './conversation_identity.js';
+import { requireConversationTarget, readSelectedConversation, matchesConversationIdentity, assertSelectedConversation, type ConversationTarget } from './conversation_identity.js';
 export { requireConversationTarget, readSelectedConversation, assertSelectedConversation, type ConversationTarget } from './conversation_identity.js';
 
 export const ATTACHMENT_PREVIEW_CONTENT_SELECTOR = '.resume-detail-chat iframe.attachment-iframe, .resume-detail-chat img';
@@ -22,11 +22,13 @@ export async function closeAttachmentPreview(page: Page): Promise<void> {
   if (closed) await page.waitForSelector(ATTACHMENT_PREVIEW_CONTENT_SELECTOR, { hidden: true, timeout: 10_000 });
 }
 
-/** All targeted business actions locate through nickname search; never scan the chat list. */
+/** Reuse a verified current conversation; search only when the initial identity differs. */
 export async function openConversationByTarget(page: Page, input: ConversationTarget): Promise<void> {
   const target = requireConversationTarget(input);
   if (!isBossChatIndexUrl(page.url())) throw new Error('候选人定位必须已在沟通页 /web/chat/index；当前=' + page.url());
+  const reuseCurrent = matchesConversationIdentity(await readSelectedConversation(page), target);
   await closeAttachmentPreview(page);
-  await requireChatSearch(page, target);
+  if (!reuseCurrent) await requireChatSearch(page, target);
+  // A later read/identity failure is terminal; never retry it through search.
   await assertSelectedConversation(page, target);
 }
