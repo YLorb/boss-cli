@@ -28,7 +28,8 @@ import {
 } from './recommend.js';
 import { isBossChatSearchUrl, assertNormalSearchPageReadyForPreview } from './normal-search.js';
 import { selectSearchContactJob } from './search-contact-job.js';
-import { greetNormalSearch } from './search-greet.js';
+import { greetNormalSearch, visibleResumeFrame } from './search-greet.js';
+import { readRecommendCandidateId } from './recommend_identity.js';
 import { inspectSearchContactFrames } from './search-contact-diagnostics.js';
 import type { Page } from 'puppeteer-core';
 
@@ -67,7 +68,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
   if (!t) {
     throw new Error('请提供打招呼目标（姓名）。');
   }
-  if(options.check) return runCheck({page:'search',state:options.selectJob?'job-selected':options.continueChat?'contacted':'contact-ready',name:t,candidateId:options.candidateId,job:options.selectJob||options.jobKeyword});
+  if(options.check) return runCheck({...(options.selectJob||options.continueChat?{page:'search'}:{}),state:options.selectJob?'job-selected':options.continueChat?'contacted':'contact-ready',name:t,candidateId:options.candidateId,job:options.selectJob||options.jobKeyword});
   try {
     return await withBossSessionPage(async (page) => {
       const url = page.url();
@@ -88,12 +89,11 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
         }
         return options.json ? JSON.stringify(result) : `候选人：${t}；入口：${result.source}；状态：${result.status}；clicked=${result.clicked}`;
       }
-      if (options.candidateId) throw new Error('--candidate-id 仅支持搜索页');
       if (options.continueChat) throw new Error('--continue-chat 仅支持搜索页');
       if (options.selectJob) throw new Error('--select-job 仅支持搜索页已打开的联系岗位弹层');
-      if (options.check) throw new Error('greet --check 当前仅支持常规搜索页及其在线简历');
-      await closeBossModalIfPresent(page);
       if (isBossChatAiFormUrl(url)) {
+        if(options.candidateId)throw new Error('--candidate-id 仅支持搜索或推荐页');
+        await closeBossModalIfPresent(page);
         await ensureInDeepSearchPage(page);
         let jobLine = '';
         if (kw) {
@@ -116,16 +116,19 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
       }
 
       const frame = await assertRecommendPageReady(page, '打招呼');
+      if(await visibleResumeFrame(page))throw new Error('推荐打招呼须先返回列表，停止；不点击被简历覆盖的卡片');
+      const candidateId=await readRecommendCandidateId(frame,t,options.candidateId);
       const selectedJob = await selectRecommendJob(frame, kw);
+      await readRecommendCandidateId(frame,t,candidateId);
       const jobLine = selectedJob ? `当前岗位：${selectedJob}` : '当前岗位：默认';
       const before = await readRecommendList(frame);
-      const greetResult = await clickGreet(frame, t);
+      const greetResult = await clickGreet(frame, t, candidateId);
       await assertNoGreetPaywallPopup(page);
       await sleepRandom(380, 1000);
       const after = await readRecommendList(frame);
       markGreetProduced(before, after);
       await cleanupGreetModalIfPresent(page);
-      if (options.json) return JSON.stringify({ source: 'recommend', ...greetResult, job: selectedJob, status: 'clicked', candidates: after });
+      if (options.json) return JSON.stringify({ source: 'recommend', ...greetResult, candidateId, identityVerified:true, job: selectedJob, status: 'clicked', candidates: after });
       return [jobLine, greetResult.message, '', '当前推荐列表（来源分组）：', renderRecommendList(after)].join('\n');
     }, { ensureChatShell: false, ensureMenuList: false });
   } catch (e) {

@@ -2,10 +2,10 @@ import type { Frame, Page } from 'puppeteer-core';
 import { RESUME_PREVIEW_OPEN_GAP_MS, sleepRandom } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { ensurePage } from '../common/ensure_page.js';
+import { SEARCH_STATE_SCRIPT, submitSearchQuery, searchMatchesEvidenceScript, type SearchQueryEvidence } from './search_query.js';
 
 const BOSS_CHAT_SEARCH_URL = 'https://www.zhipin.com/web/chat/search';
 const SEARCH_FRAME_READY_TIMEOUT_MS = 18_000;
-const SEARCH_RESULT_SETTLE_MS = { min: 900, max: 1600 } as const;
 
 type NormalSearchCandidate = {
   candidateId: string;
@@ -66,10 +66,10 @@ async function ensureSearchFrameReady(frame: Frame): Promise<void> {
     `(() => {
       const input = document.querySelector(".search-input");
       if (!(input instanceof HTMLInputElement)) return false;
-      const list = document.querySelector(".geek-list-wrap, .card-list");
       const hasCard = document.querySelectorAll(".geek-info-card").length > 0;
       const empty = document.querySelector(".empty-tips");
-      return !!list || hasCard || !!empty;
+      const s=${SEARCH_STATE_SCRIPT};
+      return !s.loading && s.initializing===false && (hasCard || !!empty) && JSON.stringify(s.cards)===JSON.stringify(s.rendered);
     })()`,
     { timeout: SEARCH_FRAME_READY_TIMEOUT_MS },
   );
@@ -95,8 +95,9 @@ export async function assertNormalSearchPageReadyForPreview(page: Page): Promise
   return frame;
 }
 
-async function runKeywordSearch(frame: Frame, keyword: string): Promise<void> {
+async function runKeywordSearch(frame: Frame, keyword: string): Promise<SearchQueryEvidence> {
   const kwLiteral = JSON.stringify(keyword);
+  return submitSearchQuery(frame,keyword,async()=>{
   const ok = (await frame.evaluate(`(() => {
     const input = document.querySelector(".search-input");
     if (!(input instanceof HTMLInputElement)) return false;
@@ -127,15 +128,7 @@ async function runKeywordSearch(frame: Frame, keyword: string): Promise<void> {
     throw new Error('未找到常规搜索关键词输入框（.search-input）。');
   }
 
-  await frame.waitForFunction(
-    `(() => {
-      const input = document.querySelector(".search-input");
-      return input instanceof HTMLInputElement && input.value === ${kwLiteral};
-    })()`,
-    { timeout: 5_000 },
-  );
-  await sleepRandom(SEARCH_RESULT_SETTLE_MS.min, SEARCH_RESULT_SETTLE_MS.max);
-  await ensureSearchFrameReady(frame);
+  });
 }
 
 async function readNormalSearchKeyword(frame: Frame): Promise<string> {
@@ -263,8 +256,9 @@ export async function runNormalSearch(keyword?: string, json = false): Promise<s
   try {
     return await withBossSessionPage(async (page) => {
       const frame = await ensureInNormalSearchPage(page);
+      let evidence:SearchQueryEvidence|undefined;
       if (kw) {
-        await runKeywordSearch(frame, kw);
+        evidence=await runKeywordSearch(frame, kw);
       }
 
       const [currentKeyword, currentJob, candidates] = await Promise.all([
@@ -272,6 +266,8 @@ export async function runNormalSearch(keyword?: string, json = false): Promise<s
         readCurrentSearchJob(frame),
         readNormalSearchCandidates(frame),
       ]);
+      if(evidence && !(await frame.evaluate(searchMatchesEvidenceScript(evidence))))throw Error('读取结果期间搜索条件或列表已变化，停止');
+      if(evidence && JSON.stringify(candidates.map(x=>x.candidateId))!==JSON.stringify(evidence.cards.map(x=>x.id)))throw Error('输出候选人与本次搜索响应不一致');
       if (json) return JSON.stringify({ keyword: currentKeyword || kw, job: currentJob, candidates });
       return renderNormalSearchCandidates(candidates, {
         keyword: currentKeyword || kw,

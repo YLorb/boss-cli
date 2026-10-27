@@ -15,6 +15,8 @@ mock.module('../dist/common/c_resume_capture.js', { namedExports: {
 } });
 const { backFromOnlineResume } = await import('../dist/toolset/back.js');
 const { selectRecommendJob } = await import('../dist/toolset/recommend.js');
+const {recommendJobKey,recommendJobQuery}=await import('../dist/toolset/recommend_job.js');
+const {matchesStatus}=await import('../dist/toolset/check.js');
 const { captureVisibleRegion } = await import('../dist/common/resume_scroll_capture.js');
 
 test('same complete job never clicks or waits, with default, false or true mode', async () => {
@@ -30,6 +32,13 @@ test('same complete job never clicks or waits, with default, false or true mode'
   let checks = 0;
   await assert.rejects(selectRecommendJob({evaluate:async () => ++checks === 1 ? '当前岗位' : false}, '其他岗位', true), /未找到岗位下拉入口/);
   assert.equal(checks, 2);
+  const salaryFrame={evaluate:async()=> 'LLM 推理网关 _ 深圳 15-30K'};
+  assert.equal(await selectRecommendJob(salaryFrame,'LLM 推理网关 _ 深圳',true),'LLM 推理网关 _ 深圳 15-30K');
+  assert.equal(await selectRecommendJob(salaryFrame,'LLM 推理网关 _ 深圳 20-40K',true),'LLM 推理网关 _ 深圳 15-30K');
+  assert.notEqual(recommendJobKey('全栈开发 _ 深圳 15-30K'),recommendJobKey('全栈开发 _ 西安 15-30K'));
+  assert.equal(recommendJobQuery('LLM 推理网关 / 计费平台工程师（Bifrost） _ 深圳 15-30K'),'LLM 推理网关 / 计费平台工程师（Bifrost）');
+  assert.equal(matchesStatus({pageType:'recommend',recommendJob:'全栈开发 _ 深圳 15-30K'},{page:'recommend',job:'全栈开发 _ 深圳'}),true);
+  assert.equal(matchesStatus({pageType:'recommend',recommendJob:'全栈开发 _ 深圳 15-30K'},{page:'recommend',job:'全栈开发 _ 西安'}),false);
 });
 
 test('different jobs select once; partial current-job matches only close dropdown; exact duplicates fail', async () => {
@@ -67,6 +76,11 @@ test('different jobs select once; partial current-job matches only close dropdow
   label='旧岗位';rows=[row('行政专员'),row('行政专员')];
   await assert.rejects(selectRecommendJob(frame,'行政专员',true),/ambiguous/);
   assert.equal(selected,2);
+  await assert.rejects(selectRecommendJob(frame,'行政'),/ambiguous/);
+  assert.equal(selected,2);
+  rows=[row('全栈开发 _ 深圳 15-30K'),row('全栈开发 _ 西安 15-30K')];
+  assert.equal(await selectRecommendJob(frame,'全栈开发 _ 深圳',true),'全栈开发 _ 深圳 15-30K');
+  assert.equal(input.value,'全栈开发');assert.equal(selected,3);
 });
 
 test('back closes a panel; checked list is a no-op; close failure never triggers history', async () => {

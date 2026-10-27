@@ -23,6 +23,14 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 约定
 
+- 推荐选岗按“岗位名称＋城市”比较，忽略薪资后缀；如 `recommend '全栈软件开发工程师 _ 深圳' --ensure-job --json`。下拉搜索只输入岗位名称，读取选项后再比较名称和城市；任何模式出现多项匹配均停止。当前岗位键相同不重复点击；`check --page recommend --job`／`recommend --check-job` 使用同一比较口径，返回的岗位标签仍保留页面原文。
+
+- 推荐列表只读取 `.candidate-card-wrap`，不同时把外层列表项作为候选人；新增 `work`、`education` 数组，`experience` 保留两者合并的文字。字段为空不阻止查看简历。推荐 preview/greet 支持 `--candidate-id`：完整姓名精确匹配，无 ID 重名暂停；提供 ID 时要求联合唯一、该 ID 在列表唯一，且卡片 DOM 和组件姓名/ID 一致。preview 打开后再核对两处简历组件 ID；缺失、不符或重复直接报错，不尝试其他卡片。推荐 greet 只在列表执行，`--check` 不点击；简历覆盖列表时为 false。
+- 常规搜索带关键词时仅提交一次，等待该 frame 本次关键词、当前岗位 ID、第1页对应的 geeks.json 响应成功，再比较组件及 DOM 列表的候选人 ID 和查询标识 lid。只有成功响应的空数组且页面同步为空才是零结果；响应超时、接口错误、列表不一致分别报错，无固定延迟、旧结果或重新查询回退。无关键词只等待当前列表加载完成后读取；不主动设置搜索岗位。
+- `status` 在推荐页输出 `recommendJob`，`searchJob` 为空；常规搜索页使用 `searchJob`。`check --page recommend --job` 比较 `recommendJob`，不是设置岗位。
+
+- 昵称搜索匹配项统一输出 `name`、`uniqueId`、`label`、`info`、`tag`：`info` 直接取组件 `workDesc`（可为公司或院校描述），`tag` 直接取 `exchangeDesc`（交换信息提示），保留原字符串，缺失为null、空字符串仍为空字符串、非字符串时报错。不拆分label推测字段。覆盖chat-search的match/matches、status.chatSearch.matches及失败diagnostics.search[].matches；status无需重搜即可读取当前结果。chat-search及chat --data-id支持可选 --info：仅使用此前已获取并与目标关联的原文，在昵称查询返回后按完整姓名和info精确筛选，不向页面输入公司关键词。筛选后唯一且ID相符才点击；同名同info或群聊歧义仍暂停；零匹配停止，不退回仅姓名。tag仅输出，不支持--tag。当前会话身份一致仍直接复用，不因info再次搜索。
+
 
 - 2026-10-27 诊断：昵称搜索每次等待默认20000ms，可用环境变量 `BOSS_CHAT_SEARCH_TIMEOUT_MS` 设置1000–60000的整数毫秒（例如30000），不是整条命令总时限，不改变附件命令独立的15秒总时限。`ChatLocateError` 表示尚未完成候选人定位核验；`ChatStateError` 表示候选人身份曾核验成功，但定位结束时的页面或身份复核失败。chat/chat-search/send的JSON错误保留 `error.details`：stage、timeoutMs、clickState、locationVerified、verifiedConversation及diagnostics。locationVerified只代表此前身份核验的历史事实，不保证错误发生后的当前身份，也不表示业务动作成功。附件子进程保留错误名称及含诊断的message，受总时限约束可能先退出。
 - 失败诊断仅执行一次只读DOM快照，记录关键选择器total/visible数量、当前选中行姓名/ID、详情姓名/岗位、职位标签、搜索输入及组件匹配、主页面路径和视口；不读取聊天正文、不包含URL查询参数。诊断读取失败单独标注diagnosticError，保留原异常，不重试业务。重名规则及身份比较条件未因诊断而放宽；尚不将“10秒超时”解释为根因，不采用跨页面往返恢复或按同公司自动合并会话。
@@ -37,7 +45,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 - 2026-10-26 `chat-search` 真实验证：按用户指定搜索“刘海罗”，唯一结果打开成功，返回 `status=opened`，搜索uniqueId与会话data-id一致，岗位已读取核验。重名暂停已通过隔离测试，尚无真实重名验收；未发送消息，未关闭浏览器。
 
-- 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。不操作岗位下拉，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，比较参数不用于自动选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
+- 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--info "已知原文"] [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。不操作岗位下拉，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，比较参数不用于自动选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
 
 - 沟通岗位切换使用 `node scripts/switch-job.mjs --list` 读取实时完整label，再用 `--job "完整label"` 唯一匹配并核验；要求已登录、仅一个BOSS标签且当前在 `/web/chat/index`。可显式传 `--cdp-url` 和 `--timeout-ms`，不导航、不改分类、不联系候选人、不重试；错误非零退出。完整操作规范见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
 
@@ -79,7 +87,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 - 2026-10-26：`selectRecommendJob()` 内部默认比较当前岗位，所有调用均生效，包括普通recommend及greet --job，不依赖--ensure-job。完整岗位名忽略空白和大小写后相同，直接返回，不打开下拉、不搜索、不点击；简称搜索后匹配到当前岗位时，仅收起下拉并核验关闭，不点击岗位项。匹配到不同岗位时才选择一次；比较或关闭失败直接报错，不重试。
 
-- `boss recommend "岗位完整名称" --ensure-job [--json]`：先读取当前岗位，忽略空白和大小写后完整相等则不打开下拉、不搜索、不点击；不相等时只选择完整相等的岗位。该开关需要岗位名称，不接受赋值。未带开关仍保留原来的关键词选择语义。
+- `boss recommend "岗位名称 _ 城市" --ensure-job [--json]`：先读取当前岗位，去除薪资后缀并忽略空白和大小写后比较；同键不打开下拉、不搜索、不点击，不同才搜索岗位名称并按名称＋城市唯一选择。该开关需要岗位名称，不接受赋值。未带开关保留关键词匹配，但多匹配也暂停。
 - `boss back --if-open [--json]`（交互别名 `/back`）：当前已知列表上存在在线简历弹层时关闭并核验；列表无弹层时返回 `action=noop`，不执行历史回退。独立 `/web/frame/c-resume/...` 页面仅在前一条历史属于同域的推荐、搜索、深度搜索或沟通列表时回退一步，并核验最终 URL。无历史、未知历史目标、未知当前页面或关闭失败直接报错，不以历史回退兜底。无检查开关且未打开简历时报错。
 - 公共层不自动调用 back。出现异常后先检查当前状态，再显式执行返回命令；不得盲目重试刚才的选岗、预览或发送动作。
 - `greet` 不再临时拉高视口或恢复视口尺寸；读取当前已挂载卡片，找不到目标直接报错。已可见页面不再重复 bringToFront。

@@ -19,9 +19,11 @@ test('every business command forwards --json to its reader, including aliases an
   const cases = [
     [['login','--json'],'implLogin',[true]],
     [['chat-search','黄子佳','--data-id','123-0','--job','目标岗位','--json'],'implChatSearch',[{name:'黄子佳',dataId:'123-0',job:'目标岗位'},true]],
+    [['chat-search','黄子佳','--data-id','123-0','--info',' 已知公司 ','--json'],'implChatSearch',[{name:'黄子佳',dataId:'123-0',job:undefined,info:' 已知公司 '},true]],
     [['list','--unread','--json'],'implListCandidates',[{unreadOnly:true,chattingOnly:false,json:true}]],
     [['list-candidates','--json','--chatting'],'implListCandidates',[{unreadOnly:false,chattingOnly:true,json:true}]],
     [['chat','--json','测试候选人','--data-id','123'],'implOpenTargetChat',[{name:'测试候选人',dataId:'123'},true]],
+    [['chat','测试候选人','--data-id','123','--info','已知公司','--json'],'implOpenTargetChat',[{name:'测试候选人',dataId:'123',info:'已知公司'},true]],
     [['chat','测试候选人','--strict','--json'],'implOpenChat',['测试候选人',true,true]],
     [['chat','--index','2','--unread','--json'],'implOpenChatByIndex',[{index:2,unreadOnly:true,expectedName:undefined,exact:true,json:true}]],
     [['action','remark','--remark','包含换行\n和引号"','--json'],'implChatAction',[{action:'remark',remark:'包含换行\n和引号"',json:true}]],
@@ -44,6 +46,20 @@ test('every business command forwards --json to its reader, including aliases an
     assert.equal(result.reader,name);
     assert.deepEqual(calls.at(-1),{name,args});
   }
+});
+
+test('info cannot be silently ignored by readonly, index or unsupported commands',async()=>{
+  const before=calls.length;
+  for(const args of [
+    ['chat','候选人','--info','公司'],
+    ['chat','候选人','--data-id','id','--info'],
+    ['chat','候选人','--data-id','id','--info',' '],
+    ['chat','候选人','--data-id','id','--info','公司','--check'],
+    ['chat','候选人','--index','1','--info','公司'],
+    ['chat-search','候选人','--info',' '],
+    ['check','--page','chat','--info','公司'],
+  ]) await assert.rejects(executeCommand(args));
+  assert.equal(calls.length,before);
 });
 
 test('recommend check-job and guarded back parse flags without swallowing positional names', async () => {

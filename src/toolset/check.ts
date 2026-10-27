@@ -1,6 +1,9 @@
 import puppeteer from 'puppeteer-core';
 import { REMOTE_DEBUGGING_PORT } from '../browser/cdp_browser.js';
 import type { Page } from 'puppeteer-core';
+import { CHAT_SEARCH_MATCH_SCRIPT } from './chat_search_match.js';
+import { RECOMMEND_CARD_IDENTITY_SCRIPT } from './recommend_identity.js';
+import { recommendJobKey } from './recommend_job.js';
 
 export type CheckCriteria = { page?: string; overlay?: string; state?: string; name?: string; dataId?: string; candidateId?: string; job?: string; keyword?: string; text?: string; embedded?: boolean };
 export const PAGE_TYPES = ['chat','search','recommend','deep-search','online-resume','positions','login','other'];
@@ -23,7 +26,8 @@ export const STATUS_SCRIPT = `(() => {
  const detail=norm(document.querySelector('.base-info-single-container .name-box')?.textContent);
  const chatSearchRoot=one('.chat-top-search');
  const chatSearchVm=chatSearchRoot?.__vue__;
- const chatSearch=chatSearchRoot?{keyword:chatSearchRoot.querySelector('input.search-input')?.value,content:chatSearchVm?.content,showSearchResult:chatSearchVm?.showSearchResult,showClose:chatSearchVm?.showClose,matches:chatSearchVm?.searchList?.map(x=>({name:x.name,uniqueId:x.uniqueId})),groupCount:chatSearchVm?.searchGroupList?.length,rows:[...chatSearchRoot.querySelectorAll('.geek-search-list li')].map(e=>norm(e.textContent))}:null;
+ const chatSearchRows=chatSearchRoot?[...chatSearchRoot.querySelectorAll('.geek-search-list li')]:[];
+ const chatSearch=chatSearchRoot?{keyword:chatSearchRoot.querySelector('input.search-input')?.value,content:chatSearchVm?.content,showSearchResult:chatSearchVm?.showSearchResult,showClose:chatSearchVm?.showClose,matches:chatSearchVm?.searchList?.map((x,i)=>${CHAT_SEARCH_MATCH_SCRIPT}(x,chatSearchRows[i])),groupCount:chatSearchVm?.searchGroupList?.length,rows:chatSearchRows.map(e=>norm(e.textContent))}:null;
  const editorText=input?.innerText||input?.textContent||'';
  const buttons=Array.from((box||document).querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(visible);
  const contact=buttons.filter(e=>/^(立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?$/.test(norm(e.textContent)));
@@ -33,8 +37,9 @@ export const STATUS_SCRIPT = `(() => {
  const activeJob=jobDialog&&one('.select-list > li.active',jobDialog);
  const friends=Array.from(document.querySelectorAll('.chat-message-list .message-item .item-friend'));
  const cards=Array.from(document.querySelectorAll('.geek-info-card')).map(e=>{const g=e.__vue__?.$props?.geek?.geekCard;return {name:norm(e.querySelector('.name-label')?.textContent),candidateId:g?.encryptGeekId||'',componentName:norm(g?.name)};});
+ const recommendCards=[...document.querySelectorAll('.candidate-card-wrap')].map(e=>{const identity=${RECOMMEND_CARD_IDENTITY_SCRIPT}(e);const b=e.querySelector('.button-chat-wrap .btn.btn-greet');return {...identity,contactText:norm(b?.textContent),contactUsable:usable(b)&&visible(b)};});
  return {
-  chatSearch,chatFilterJob:norm(document.querySelector('.chat-top-job .ui-dropmenu-label')?.textContent),
+  chatSearch,recommendCards,chatFilterJob:norm(document.querySelector('.chat-top-job .ui-dropmenu-label')?.textContent),
   resume:!!panel,resumeId:props?.geekInfo?.encryptGeekId||'',resumeInfoId:props?.resumeInfo?.encryptGeekId||'',
   embedded:!!chat,embeddedIdentity:c?{name:c.name,candidateId:c.encryptUid,job:c.toPosition,conversationId:c.uniqueId,editorId:host?.$props?.uniqueId,friendId:c.friendId,rootFriendId:chat.__vue__?.$props?.friendId}:null,
   conversation:selected?{name:norm(selected.querySelector('.geek-name')?.textContent),dataId:selected.getAttribute('data-id')||'',detailName:detail}:null,
@@ -57,8 +62,10 @@ export async function readStatus(page: Page): Promise<any> {
   const frames=page.frames().filter(f=>new URL(f.url()||'about:blank').pathname.replace(/\/+$/,'')===(pageType==='search'?'/web/frame/search':'/web/frame/recommend'));
   if(frames.length!==1)throw new Error(`${pageType==='recommend'?'推荐':'搜索'} frame 缺失或不唯一，无法读取状态；main=${u.origin+u.pathname}；frames=${JSON.stringify(page.frames().map(f=>{const url=new URL(f.url()||'about:blank');return url.origin+url.pathname;}))}`);
   const search:any=await frames[0]!.evaluate(STATUS_SCRIPT);
-  info.keyword=search.keyword;info.searchJob=pageType==='search'?search.searchJob:search.recommendJob;info.cards=search.cards;
+  if(pageType==='search'){info.keyword=search.keyword;info.searchJob=search.searchJob;info.recommendJob='';info.cards=search.cards;}
+  else {info.keyword=null;info.searchJob='';info.recommendJob=search.recommendJob;info.cards=search.recommendCards;}
  }
+ delete info.recommendCards;
  return {url,pageType,overlayType:info.resume?'online-resume':null,...info};
 }
 export function validateCriteria(c:CheckCriteria):void {
@@ -77,22 +84,25 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
  if(c.overlay&&(s.overlayType||'none')!==c.overlay)return false;
  if(c.embedded!==undefined&&s.embedded!==c.embedded)return false;
  if(c.keyword!==undefined&&s.keyword!==c.keyword)return false;
- if(!c.name&&!c.dataId&&!c.candidateId&&!c.state&&c.embedded===undefined) return !c.job||(s.pageType==='chat'?s.chatJob:s.searchJob)===c.job;
- let identity=s.conversation,job=s.pageType==='chat'?s.chatJob:s.searchJob;
+ const pageJob=s.pageType==='chat'?s.chatJob:s.pageType==='recommend'?s.recommendJob:s.searchJob;
+ const sameJob=(actual:string,expected:string)=>s.pageType==='recommend'?recommendJobKey(actual||'')===recommendJobKey(expected):actual===expected;
+ if(!c.name&&!c.dataId&&!c.candidateId&&!c.state&&c.embedded===undefined) return !c.job||sameJob(pageJob,c.job);
+ let identity=s.conversation,job=pageJob;
  if(c.embedded) {
   identity=s.embeddedIdentity;job=identity?.job;
   if(!identity||!identity.conversationId||identity.conversationId!==identity.editorId||!identity.friendId||identity.friendId!==identity.rootFriendId)return false;
- } else if(c.candidateId||(s.resume&&c.name)) {
+ } else if(c.candidateId||(s.resume&&c.name)||(s.pageType==='recommend'&&c.name)) {
   const cards=s.cards.filter((x:any)=>x.name===c.name&&(!c.candidateId||x.candidateId===c.candidateId));
   if(cards.length!==1)return false;
   identity=cards[0];
   if(!identity.candidateId||identity.componentName!==identity.name)return false;
+  if(s.pageType==='recommend'&&(identity.componentId!==identity.candidateId||s.cards.filter((x:any)=>x.candidateId===identity.candidateId).length!==1))return false;
   if(s.resume&&(s.resumeId!==identity.candidateId||s.resumeInfoId!==identity.candidateId))return false;
  } else if(identity&&identity.name!==identity.detailName)return false;
  if(c.name&&identity?.name!==c.name)return false;
  if(c.dataId&&identity?.dataId!==c.dataId)return false;
  if(c.candidateId&&identity?.candidateId!==c.candidateId)return false;
- if(c.job&&(c.state==='job-selected'?s.selectedJob:job)!==c.job)return false;
+ if(c.job&&!sameJob(c.state==='job-selected'?s.selectedJob:job,c.job))return false;
  const norm=(v:string)=>(v||'').replace(/\r\n/g,'\n').trim();
  const seen=c.text!==undefined&&s.messages.some((m:string)=>norm(m)===norm(c.text!));
  switch(c.state){
@@ -100,7 +110,7 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
   case 'conversation':return !!identity&&(c.embedded?s.embedded:s.pageType==='chat');
   case 'send-ready':return !!identity&&s.editable&&!norm(s.draft)&&!seen;
   case 'message-visible':return !!seen;
-  case 'contact-ready':return s.resume&&s.contactUsable&&/^(立即沟通|打招呼)/.test(s.contactText);
+  case 'contact-ready':return s.pageType==='recommend'?!s.resume&&!!identity?.contactUsable&&/^打招呼/.test(identity.contactText):s.pageType==='search'&&s.resume&&s.contactUsable&&/^(立即沟通|打招呼)/.test(s.contactText);
   case 'contacted':return s.resume&&s.contactText==='继续沟通';
   case 'job-selected':return !!s.selectedJob&&s.selectedJob===c.job;
   case 'resume-received':return s.resumeReceived;

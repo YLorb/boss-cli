@@ -30,8 +30,8 @@ boss jd "模型评估工程师" --json
 | `--check-login` | `url,status,loggedIn` | status 为 logged-in/logged-out/unknown，对应 loggedIn 为 true/false/null；正常检查退出 0，连接/页面错误退出 1。只读页面信号，不验证服务端会话有效期 |
 | `list` | `category,filter,candidates` | 每行 `dataId,name,job,time,message,unreadCount` |
 | `chat`（姓名、序号或 data-id） | `name,dataId,summary,messages,hasFriendResumeAttachment` | summary 保留摘要数组；messages 含 `text,time,from`；仅页面已加载内容 |
-| `recommend` | `job,candidates` | 保留 `geekId,name,salary,baseInfo,expect,experience,advantage,highlights,canGreet,hasHistoryChat,hasViewed` |
-| `search` | `keyword,job,candidates` | 保留 `name,active,labels,basicInfo,summary,tags,expectation,work,education,reason,contactText`；当前没有候选人 ID |
+| `recommend` | `job,candidates` | 每张实际卡片一项，保留 `geekId,name,salary,baseInfo,expect,experience,advantage,highlights,canGreet,hasHistoryChat,hasViewed`，新增work/education数组；缺失不阻止preview |
+| `search` | `keyword,job,candidates` | `candidateId,name,active,labels,basicInfo,summary,tags,expectation,work,education,reason,contactText`；带关键词时等待本次响应并核验ID/查询标识，成功空数组才是零结果 |
 | `deep-search` | `matched,form` | form 保留岗位、要求、剩余次数文字/数值、按钮文字和禁用状态 |
 | `deep-search --match` | `matched,form,candidates` | candidates 含 `name,meta,work,edu,reason`，最新 20 条；排除“继续沟通”候选人 |
 | `positions` | `jobs,totalText,url` | 每项 `id,title,label,status,meta,viewed,chatted,interested` |
@@ -39,9 +39,9 @@ boss jd "模型评估工程师" --json
 | `accept-resume` / `action agree-resume` | `action,kind,which,target,attachmentReceived` | 返回 clicked，且已等到新附件卡片；已处理请求仍报错 |
 | `download-resume` | `name,dataId,geekId,attachmentName,fileName,path,bytes,sha256` | 默认即 JSON；`--json` 同样接受；图片 geekId 为 null |
 | `probe-resume` | `name,dataId,attachment,attachmentName,request,requestEvidence,scope,download` | 默认即 JSON；scope=loaded-messages；未观察到为 NOT_OBSERVED，不代表无附件或未发送；`--download` 才返回下载详情 |
-| `preview` | `name,sourceUrl,job,path,type` | type 为 `online-resume-screenshot`，不是原附件或 OCR 结果 |
+| `preview` | `name,sourceUrl,job,path,type`，搜索／推荐另含candidateId、identityVerified | type 为 `online-resume-screenshot`，不是原附件或 OCR 结果；open-only仅搜索，见调用手册 |
 | `action resume` | `action,name,path,type` | 同上，为在线简历截图 |
-| `greet` | `source,name,message,status,candidates`，推荐页另含 `geekId,job`；深度搜索另含 `jobKeyword` | status 为 clicked，只确认点击，不代表回复；jobKeyword 是输入关键字 |
+| `greet` | `source,name,message,status,candidates`，推荐页另含 `geekId,job,candidateId,identityVerified`；深度搜索另含 `jobKeyword` | 推荐status为clicked，只确认点击，不代表回复；搜索返回独立联系状态，见调用手册；--check只返回布尔值 |
 | `send` | `text,target,status,requestResume`；求简历时另含 `resumeRequest` | status 为 message-visible，已确认页面出现新增匹配正文；不是已读回执。未指定目标时 target 为 null |
 | `action not-fit` | `action,status` | clicked |
 | `action remark` | `action,status,remark` | saved |
@@ -52,9 +52,9 @@ boss jd "模型评估工程师" --json
 
 `probe-resume/accept-resume/download-resume` 总超时错误名为 AttachmentTimeoutError，退出码 1，已确认子进程退出。collect 使用独立逐行 JSON 协议，无需 --json，参见 [岗位账本](collection-ledger.md)。
 
-`download-resume`、`accept-resume`、定向 `send` 可同时加 `--check --json`。`--check` 是无值开关：当前沟通页选中行的 `data-id` 等于目标 `data-id` 时跳过再次定位，仍核对会话身份；不相等时正常定位。不会新增或改变 JSON 输出字段。`send --check` 必须同时提供姓名和 `data-id`。
+`download-resume`、`accept-resume`、定向 `send` 可同时加 `--check --json`。`--check` 是严格只读开关，只返回true/false，不搜索、不定位、不发送；身份不符返回false，读取异常报错。`send --check` 必须同时提供姓名和 `data-id`。
 
-JSON 保留现有页面读取器的内容，包括空字符串、null、数组、布尔值和摘要中的混合文字，不新增推断字段。年龄、学历、经验和岗位匹配由 Agent 自行分析。搜索候选人 ID、消息/附件 ID、来源事件键和完整分页历史尚未补齐。
+JSON 保留现有页面读取器的内容，包括空字符串、null、数组、布尔值和摘要中的混合文字，不新增推断字段。年龄、学历、经验和岗位匹配由 Agent 自行分析。搜索候选人ID已提供；消息/附件ID、来源事件键和完整分页历史尚未补齐。
 
 `--json` 仅改变输出格式，命令原有副作用仍存在：打招呼、发消息、求简历、备注等仍执行对应动作。下载只保存已收到附件，不发送文字。
 

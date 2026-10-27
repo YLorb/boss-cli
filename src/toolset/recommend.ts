@@ -7,6 +7,8 @@ import {
 } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { ensurePage } from '../common/ensure_page.js';
+import { RECOMMEND_CARD_ROOT_SELECTOR, recommendTargetScript } from './recommend_identity.js';
+import { recommendJobKey, recommendJobQuery } from './recommend_job.js';
 
 const BOSS_CHAT_RECOMMEND_URL = 'https://www.zhipin.com/web/chat/recommend';
 
@@ -17,6 +19,8 @@ export type RecommendCandidate = {
   baseInfo: string;
   expect: string;
   experience: string;
+  work: string[];
+  education: string[];
   advantage: string;
   highlights: string[];
   canGreet: boolean;
@@ -28,11 +32,9 @@ export type RecommendCandidate = {
 const sessionGreetProducedGeekIds = new Set<string>();
 
 /**
- * 推荐列表里「一张候选人卡片」的根节点（新版 `.candidate-card-wrap` 与旧版 `.card-item` / `.geek-card` 并存）。
+ * 推荐列表每张候选人只读取 `.candidate-card-wrap`，外层列表项不作为第二张卡片。
  * 在线简历预览：点击卡片主体 `.card-inner`，而非「在线简历」链接或「打招呼」。
  */
-const RECOMMEND_CARD_ROOT_SELECTOR =
-  '.candidate-card-wrap, .card-list .card-item, .geek-list .geek-card';
 
 export function isBossChatRecommendUrl(url: string): boolean {
   try {
@@ -143,13 +145,16 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
     return readCurrentRecommendJobLabel(frame);
   }
   const current = await readCurrentRecommendJobLabel(frame);
-  const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
+  const normalize = recommendJobKey;
   if (normalize(current) === normalize(kw)) return current;
   const kwLiteral = JSON.stringify(kw);
+  const query = recommendJobQuery(kw);
 
   const opened = (await frame.evaluate(`(() => {
     const host = document.querySelector(".job-selecter-wrap .ui-dropmenu-label");
     if (!(host instanceof HTMLElement)) return false;
+    const menu=document.querySelector('.job-selecter-options');
+    if(menu && menu.getBoundingClientRect().width>0 && menu.getBoundingClientRect().height>0 && getComputedStyle(menu).visibility!=='hidden')return true;
     host.scrollIntoView({ block: "center", inline: "nearest" });
     host.click();
     return true;
@@ -161,7 +166,7 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
   await waitForRecommendJobDropdownReady(frame);
 
   const searched = (await frame.evaluate(`(() => {
-    const kw = ${kwLiteral};
+    const kw = ${JSON.stringify(query)};
     const input = document.querySelector(".job-selecter-options .top-chat-search .chat-job-search");
     if (!(input instanceof HTMLInputElement)) return false;
     input.focus();
@@ -174,18 +179,18 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
     throw new Error('已打开岗位下拉，但未找到职位搜索框（.chat-job-search）。');
   }
   await sleepRandom(JOB_SEARCH_ACTION_GAP_MS.min, JOB_SEARCH_ACTION_GAP_MS.max);
-  await waitForRecommendJobSearchResults(frame, kw);
+  await waitForRecommendJobSearchResults(frame, query);
 
   const picked = (await frame.evaluate(`(() => {
     const kw = ${kwLiteral};
-    const norm = (v) => (v ?? "").replace(/\\s+/g, "").trim().toLowerCase();
+    const norm = ${recommendJobKey.toString()};
     const rows = Array.from(document.querySelectorAll(".job-selecter-options .job-list .job-item"));
     if (rows.length === 0) return { ok: false, reason: "empty" };
     const matches = rows.filter((el) => {
       const label = norm(el.querySelector(".label")?.textContent || el.textContent || "");
       return ${checkJob} ? label === norm(kw) : label.includes(norm(kw));
     });
-    if (${checkJob} && matches.length > 1) return { ok: false, reason: "ambiguous" };
+    if (matches.length > 1) return { ok: false, reason: "ambiguous" };
     const target = matches[0];
     if (!(target instanceof HTMLElement)) return { ok: false, reason: "not_found" };
     const label = (target.querySelector(".label")?.textContent ?? target.textContent ?? "")
@@ -280,7 +285,9 @@ export async function readRecommendList(frame: Frame): Promise<RecommendCandidat
       const expect =
         norm(item.querySelector(".expect-wrap .content")?.textContent) ||
         norm(item.querySelector(".expect-wrap .join-text-wrap")?.textContent);
-      const experience = norm(item.querySelector(".experience-wrap .join-text-wrap")?.textContent);
+      const work = [...item.querySelectorAll('.work-exps .timeline-item .content')].map(el=>norm(el.textContent)).filter(Boolean);
+      const education = [...item.querySelectorAll('.edu-exps .timeline-item .content')].map(el=>norm(el.textContent)).filter(Boolean);
+      const experience = [...work,...education].join('；');
       const advantage = norm(item.querySelector(".geek-desc .content")?.textContent);
       const highlightLabels = [
         ...Array.from(item.querySelectorAll(".operate .labels .label")),
@@ -310,6 +317,8 @@ export async function readRecommendList(frame: Frame): Promise<RecommendCandidat
         baseInfo,
         expect,
         experience,
+        work,
+        education,
         advantage,
         highlights,
         canGreet: !disabled,
@@ -375,6 +384,7 @@ export function renderRecommendList(candidates: RecommendCandidate[]): string {
 export async function clickGreet(
   frame: Frame,
   target: string,
+  candidateId?: string,
 ): Promise<{ message: string; name: string; geekId: string }> {
   const targetLiteral = JSON.stringify(target.trim());
   const result = (await frame.evaluate(
@@ -386,24 +396,8 @@ export async function clickGreet(
       if (cards.length === 0) {
         return { kind: "empty" };
       }
-      const targetCard = cards.find((item) => {
-        const name =
-          norm(item.querySelector(".name-wrap .name")?.textContent) ||
-          norm(item.querySelector(".name")?.textContent);
-        return name === raw || name.includes(raw);
-      }) ?? null;
-      if (!targetCard) {
-        return { kind: "not_found", target: raw };
-      }
-
-      const name =
-        norm(targetCard.querySelector(".name-wrap .name")?.textContent) ||
-        norm(targetCard.querySelector(".name")?.textContent);
-      const inner = targetCard.querySelector(".card-inner") || targetCard;
-      const geekId =
-        inner?.getAttribute("data-geekid") ??
-        inner?.getAttribute("data-geek") ??
-        "";
+      const {card:targetCard,identity} = ${recommendTargetScript(target,candidateId)};
+      const {name,candidateId:geekId} = identity;
       const btn = targetCard.querySelector(".button-chat-wrap .btn.btn-greet");
       if (!(btn instanceof HTMLElement)) {
         return { kind: "no_btn", name };
@@ -460,9 +454,9 @@ export function markGreetProduced(
 
 /**
  * 在推荐 iframe 内根据姓名打开在线简历预览：点击候选人卡片主体 `.card-inner`（与侧栏「打招呼」分离）。
- * 父页随后出现 `c-resume` iframe（如 `source=recommend`）。旧版仅有「在线简历」链接时仍尝试点击链接。
+ * 父页随后出现 `c-resume` iframe（如 `source=recommend`）；姓名和 ID 唯一核验后只点击卡片主体。
  */
-export async function openRecommendResumePreview(frame: Frame, target: string): Promise<boolean> {
+export async function openRecommendResumePreview(frame: Frame, target: string, candidateId?: string): Promise<boolean> {
   const raw = target.trim();
   const targetLiteral = JSON.stringify(raw);
   const opened = (await frame.evaluate(`(() => {
@@ -471,23 +465,7 @@ export async function openRecommendResumePreview(frame: Frame, target: string): 
     const cardSel = ${JSON.stringify(RECOMMEND_CARD_ROOT_SELECTOR)};
     const cards = Array.from(document.querySelectorAll(cardSel));
     if (cards.length === 0) return false;
-    const targetCard = cards.find((item) => {
-      const name =
-        norm(item.querySelector(".name-wrap .name")?.textContent) ||
-        norm(item.querySelector(".name")?.textContent);
-      return name === raw || name.includes(raw);
-    }) ?? null;
-    if (!targetCard) return false;
-
-    function tryOpen(el) {
-      if (!(el instanceof HTMLElement)) return false;
-      if (el.classList.contains("disabled")) return false;
-      const st = window.getComputedStyle(el);
-      if (st.pointerEvents === "none" || Number(st.opacity) < 0.3) return false;
-      el.scrollIntoView({ block: "center", inline: "nearest" });
-      el.click();
-      return true;
-    }
+    const targetCard = (${recommendTargetScript(target,candidateId)}).card;
 
     const inner = targetCard.querySelector(".card-inner");
     if (inner instanceof HTMLElement) {
@@ -496,18 +474,7 @@ export async function openRecommendResumePreview(frame: Frame, target: string): 
       return true;
     }
 
-    const resumeOnline = targetCard.querySelector("a.resume-btn-online");
-    if (tryOpen(resumeOnline)) return true;
-    const hrefResume = targetCard.querySelector('a[href*="c-resume"], a[href*="frame/c-resume"]');
-    if (tryOpen(hrefResume)) return true;
-
-    const links = Array.from(targetCard.querySelectorAll("a, button, .btn")).filter((node) => {
-      const t = norm(node.textContent);
-      return /在线简历|查看简历|简历预览|预览/.test(t);
-    });
-    if (links.length > 0 && tryOpen(links[0])) return true;
-
-    return false;
+    throw Error('推荐候选人卡片主体缺失，停止；不尝试备用链接');
   })()`)) as boolean;
   if (opened) {
     await sleepRandom(RESUME_PREVIEW_OPEN_GAP_MS.min, RESUME_PREVIEW_OPEN_GAP_MS.max);

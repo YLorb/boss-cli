@@ -170,7 +170,7 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 
 `search --json` 返回每张卡片的 `candidateId`（组件 encryptGeekId）；无关键词时只读当前搜索页列表。先将姓名、院校、年限与同一卡片 ID 对照保存，不使用旧序号。
 
-- `preview "姓名" --candidate-id "ID" [--open-only] --json`：仅常规搜索页，按姓名和 ID 联合唯一定位，打开后核对简历组件 ID；截图回执也返回 candidateId 和 identityVerified。
+- `preview "姓名" --candidate-id "ID" [--open-only] --json`：常规搜索与推荐支持姓名和 ID 联合唯一定位，打开后核对简历组件 ID；截图回执也返回 candidateId 和 identityVerified。open-only仅常规搜索可用。推荐ID取当前recommend快照geekId，未传ID且重名则暂停；传ID仍不唯一或组件身份不符则停止。
 - `greet "姓名" --candidate-id "ID" [--check] --json`：同一 ID 贯穿首次联系、预检及选岗/确认。继续沟通仍必须携带成功回执 ID。
 - 无 ID 时维持姓名必须唯一；ID 缺失、姓名不符、重复 ID 或目标不在当前列表直接报错，不回退按姓名匹配，不刷新寻找。
-- 此规则替代前文“同名一律不能操作”的限制：只有获得当前卡片的可靠 ID 后才可处理同名者。推荐与深度搜索不支持该参数。
+- 只有获得当前卡片的可靠 ID 后才可处理同名者，仍不唯一则暂停。推荐同样支持姓名＋ID；深度搜索不支持该参数。

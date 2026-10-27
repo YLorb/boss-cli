@@ -1,12 +1,13 @@
 import type { Page } from 'puppeteer-core';
 
-export type ConversationTarget = { name: string; dataId: string };
+export type ConversationTarget = { name: string; dataId: string; info?: string };
 
 export function requireConversationTarget(target: ConversationTarget): ConversationTarget {
   const name = target.name.trim();
   const dataId = target.dataId.trim();
   if (!name || !dataId) throw new Error('必须同时提供候选人显示名称和 data-id。');
-  return { name, dataId };
+  if (target.info !== undefined && !target.info.trim()) throw new Error('已知搜索 info 不能为空。');
+  return { name, dataId, ...(target.info !== undefined ? { info: target.info } : {}) };
 }
 
 type SelectedConversation = { count: number; dataId: string; name: string; detailName: string };

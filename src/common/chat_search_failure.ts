@@ -3,6 +3,7 @@ export type ChatSearchFailureDetails = {
   timeoutMs: number;
   name: string;
   expectedDataId?: string;
+  expectedInfo?: string;
   originalFilterJob?: string;
   clickState: 'not-attempted' | 'attempted' | 'returned';
   locationVerified: boolean;

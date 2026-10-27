@@ -11,6 +11,10 @@ scope: "readonly-state"
 
 `status --json` 返回当前 URL、pageType、overlayType、内嵌/独立会话身份、岗位、关键词、当前草稿和已加载己方消息等 info。status 不修改页面，不证明未加载的历史不存在。主页面与弹层分开：search 页面打开简历时，pageType=search、overlayType=online-resume。
 
+推荐页岗位为recommendJob（searchJob为空），搜索页为searchJob；check按pageType比较对应岗位。推荐岗位按“岗位名称＋城市”比较并忽略薪资后缀，返回标签保留原文。推荐cards包含candidateId、componentId、componentName及按钮状态，只读取实际卡片，不重复读取外层列表项。推荐姓名／ID检查须精确唯一，卡片主体DOM ID与主体组件ID一致；打开简历时还须两处简历ID一致。
+
+沟通搜索展开时，`chatSearch.matches` 每项输出 `name`、`uniqueId`、`label`、`info`、`tag`；info取workDesc原文，tag取exchangeDesc原文，缺失为null，非字符串时报错。公司／院校可出现在info中，可将此前取得且与目标关联的info交给chat-search或chat --data-id的--info精确筛选，但仍核验姓名和会话ID，同名同info仍暂停；check/status本身不接受--info；`rows` 继续保留完整行文本。status仅读取当前结果，不搜索、不清空、不点击，适用于多匹配暂停后的人工核对。
+
 ## 显式比较
 
 ```powershell
@@ -39,7 +43,7 @@ boss status --json
 | send --name 姓名 --data-id ID --text 正文 --check | 当前目标独立会话匹配、输入框可编辑且无草稿、已加载消息没有同文；不表示服务端允许发送 |
 | accept-resume 姓名 --data-id ID --check | 当前目标会话匹配且有可用的待同意附件请求 |
 | download-resume 姓名 --data-id ID --check | 当前目标会话匹配且存在已收到附件卡片；不验证下载完成 |
-| greet 姓名 --candidate-id ID --check | 当前搜索简历身份匹配、按钮为可用的立即沟通/打招呼；未打开简历为false |
+| greet 姓名 --candidate-id ID --check | 搜索：当前简历身份匹配且按钮可用，未打开为false；推荐：当前列表卡片身份唯一且打招呼按钮可用，简历覆盖列表为false；均不点击 |
 | greet ... --continue-chat --check | 当前简历及列表身份匹配，按钮为继续沟通；列表卡片已移除时返回false，不能据此认定未联系 |
 | greet ... --select-job 岗位 [--confirm-contact] --check | 候选人匹配且弹层已选中指定完整岗位；不代选或确认 |
 | chat ... --embedded --check | 内嵌候选人ID、姓名、岗位与编辑器关联匹配 |

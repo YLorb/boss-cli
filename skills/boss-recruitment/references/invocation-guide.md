@@ -30,7 +30,7 @@ node .\dist\cli\index.js help
 | 当前会话岗位 | 全栈软件开发工程师 | chat-search --job、沟通页 check --job；按实际详情值比较 |
 | 搜索联系岗位 | 页面弹层显示的完整名称 | greet --select-job；不用账本键猜测弹层文案 |
 
-`data-id` 是沟通会话ID；`candidate-id` 是搜索卡片候选人ID。两者不能互换。完整岗位键发生变化时不自动迁移旧账本；城市不明确时先核对，不猜补。
+`data-id` 是沟通会话ID；`candidate-id` 是搜索或推荐卡片候选人ID（推荐列表字段为geekId）。两者不能互换。完整岗位键发生变化时不自动迁移旧账本；城市不明确时先核对，不猜补。
 
 ## 2. 登录、状态和只读检查
 
@@ -82,6 +82,8 @@ node .\scripts\switch-job.mjs --job '全栈软件开发工程师 _ 深圳 15-30K
 
 结果处理：
 
+`chat-search` 的 `match`／`matches`、`status.chatSearch.matches` 及失败诊断匹配项统一包含 `name`、`uniqueId`、`label`、`info`、`tag`。info是workDesc原文（公司或院校等补充信息），tag是exchangeDesc原文（交换提示），缺失返回null；不从label拆分猜补。搜索现场已有结果时使用 `boss status --json` 读取，不重新调用chat-search。已获得并与目标关联的info原文可用于 `boss chat-search '张三' --info '已知原文' --data-id '123-0' --json` 或 `boss chat '张三' --data-id '123-0' --info '已知原文' --json`。页面只输入昵称，返回后精确比较完整姓名和info，唯一且ID相符才打开；零匹配停止，同名同info或群聊歧义仍暂停。searchMatches保留全部原始匹配，info保留输入条件。当前会话姓名和ID一致直接复用。chat的--info须带--data-id，不与--index/--check混用；send和附件命令不接受--info，先chat定位后复用。无--tag，不从label猜填，不退回只按姓名搜索。
+
 - `opened`：姓名、会话ID及详情姓名已核验；页面筛选不需要保持不变。
 - `needs-confirmation`：多个联系人或群聊等歧义，clicked=false，保留现场等用户，不继续下一人。
 - `not-found`：本次查询明确完成且零匹配，clicked=false。普通chat及发送／附件共用定位会抛CandidateNotFound，不继续后续动作。
@@ -131,7 +133,7 @@ probe-resume不支持--check。request=SENT指我方求简历话术，不代表�
 | 调用 | 前置条件／作用 | 核验 |
 | --- | --- | --- |
 | `boss recommend '岗位关键字' --json` | 按需进入推荐页，关键词选岗、读取列表 | 核对返回完整岗位；同岗位不重复选中 |
-| `boss recommend '完整岗位名' --ensure-job --json` | 需要换岗时精确匹配完整岗位 | 不是只读检查；循环不要重复调用刷新候选人 |
+| `boss recommend '岗位名称 _ 城市' --ensure-job --json` | 下拉搜索岗位名称，再用名称＋城市唯一精确匹配，忽略薪资后缀 | 同键不重复选岗；多项匹配暂停；不是只读检查 |
 | `boss recommend '完整岗位名' --check-job --json` | 只读比较当前推荐岗位 | true／false，不能与ensure-job混用 |
 | `boss search '关键词' --json` | 按需进入人才搜索页、输入并提交关键词 | 最多20字符；核对keyword、job与新卡片，不能只凭输入框正确判定结果更新 |
 | `boss search --json` | 已在搜索页时读取当前卡片；其他页会导航 | 返回candidateId、education、work、tags等，不是沟通昵称搜索 |
@@ -139,9 +141,9 @@ probe-resume不支持--check。request=SENT指我方求简历话术，不代表�
 | `boss deep-search --clear-core --clear-bonus --json` | 清空指定要求分组 | 属于修改动作 |
 | `boss deep-search '岗位关键词' --match --json` | 选岗并点击匹配，消耗匹配额度 | 也可用--job传岗位；返回顶部最新20条，不能推断全量 |
 
-search不支持--job、自动加载更多或自动设置“不限职位”。指定搜索筛选由用户在页面设置后核验。deep-search不带--match不点击匹配。普通搜索关键词等待只验证输入条件，结果完成信号仍存在验收缺口；不要拿旧卡片作新查询证据。
+search不支持--job、自动加载更多或自动设置“不限职位”。指定搜索筛选由用户在页面设置后核验。deep-search不带--match不点击匹配。普通搜索提交一次，等待本次关键词、岗位第1页的响应成功，再核验页面及组件的ID/查询标识与响应一致；成功空数组才为零结果，超时、接口错误或未同步直接报错，不重复查询。
 
-卡片提供可核验院校信息时，Agent先按用户硬性条件预筛；明确不符合才记录原因并跳过preview，未知按用户规则处理。卡片预筛数与实际打开简历数N分开计数，不能用摘要冒充完整简历评估。
+卡片提供可核验院校信息时，Agent先按用户硬性条件预筛；明确不符合才记录原因并跳过preview，未知按用户规则处理。推荐新增work/education数组，experience保留合并文本；字段仅辅助预筛，缺失允许preview，不直接判淘汰。卡片预筛数与实际打开简历数N分开计数，不能用摘要冒充完整简历评估。
 
 ## 8. 预览、返回与搜索联系
 
@@ -150,13 +152,15 @@ preview/greet须已在对应推荐、常规搜索或深度搜索页，不负责�
 | 调用 | 方法与结果 |
 | --- | --- |
 | `boss preview '唯一显示姓名' --json` | 推荐／深度搜索按唯一姓名；成功截图后关闭简历，消耗查看次数 |
-| `boss preview '显示姓名' --candidate-id '卡片ID' --json` | 常规搜索按姓名＋ID定位、核验、截图；ID不能移用到推荐／深度搜索 |
+| `boss preview '显示姓名' --candidate-id '当前卡片ID' --json` | 常规搜索／推荐按姓名＋ID唯一定位，核验卡片及简历ID后截图；深度搜索不支持ID |
 | `boss preview '显示姓名' --candidate-id '卡片ID' --open-only --json` | 仅常规搜索，打开／复用并核验，保持展开，不截图、不联系 |
 | `boss back --check-in_online_resume --json` | 只读判断简历是否打开 |
 | `boss back --if-open --json` | 有简历则关闭／经历史核验返回，列表上不操作；失败不回退到其他页面 |
 | `boss back --json` | 明确要求返回；未打开简历时报错 |
 | `boss greet '唯一姓名' --job '推荐岗位关键字' --json` | 推荐页选择岗位后打招呼；先核对对象，本动作可能发平台默认问候 |
 | `boss greet '唯一姓名' --json` | 当前推荐／深度搜索候选人联系；常规搜索按下列带ID步骤执行 |
+| `boss greet '姓名' --candidate-id '快照geekId' --check --json` | 推荐列表只读核验姓名、唯一ID、组件身份及可用按钮；简历覆盖列表时false |
+| `boss greet '姓名' --candidate-id '快照geekId' --json` | 推荐列表核验通过且已获联系授权后点击一次，回执candidateId/identityVerified/status=clicked；不能视为联系已确认 |
 
 截图提示固定层不代表正文一定无遮挡。推荐／常规搜索允许提示后继续，仍需通过拼接完整性检查并检查成图；其他页面同类遮挡可能停止。
 
@@ -177,7 +181,7 @@ boss greet '显示姓名' --candidate-id '卡片ID' --select-job '联系岗位�
 boss greet '显示姓名' --continue-chat --candidate-id '联系成功回执ID' --json
 ```
 
-select-job只选岗；confirm-contact只确认一次；continue-clicked只证明点击继续沟通，不证明窗口身份。常规搜索greet不支持--job。首次点击出现弹层后，不重复首次greet，不把购买提示当作沟通成功。不同页面的重名处理不能混用：沟通昵称搜索遇多匹配一律暂停；常规搜索卡片可在取得可靠candidateId后联合唯一核验。
+select-job只选岗；confirm-contact只确认一次；continue-clicked只证明点击继续沟通，不证明窗口身份。常规搜索greet不支持--job。首次点击出现弹层后，不重复首次greet，不把购买提示当作沟通成功。不同页面的重名处理不能混用：沟通昵称搜索遇多匹配一律暂停；常规搜索和推荐卡片可在取得可靠candidateId后联合唯一核验，仍不唯一就暂停。
 
 ## 9. 搜索页内嵌会话
 

@@ -1,4 +1,5 @@
 import type { Page } from 'puppeteer-core';
+import { CHAT_SEARCH_MATCH_SCRIPT } from './chat_search_match.js';
 
 export function chatSearchTimeoutMs(): number {
   const value = process.env.BOSS_CHAT_SEARCH_TIMEOUT_MS;
@@ -22,9 +23,9 @@ export const CHAT_SEARCH_DIAGNOSTICS_SCRIPT = `(() => {
   const details = [...document.querySelectorAll('.base-info-single-container')].map(el => ({name:norm(el.querySelector('.name-box')?.textContent), job:norm(el.querySelector('.position-item .position-name')?.textContent), visible:visible(el)}));
   const jobLabels = [...document.querySelectorAll('.chat-top-job .ui-dropmenu-label')].map(el => ({label:norm(el.textContent), visible:visible(el)}));
   const search = [...document.querySelectorAll('.chat-top-search')].map(el => {
-    const vm=el.__vue__;
+    const vm=el.__vue__, rows=[...el.querySelectorAll('.geek-search-list li')];
     return {visible:visible(el), keyword:el.querySelector('input.search-input')?.value ?? null, content:vm?.content ?? null, resultSignal:vm?.showSearchResult ?? null, ready:vm ? Boolean(vm.showSearchResult) : null,
-      matches:Array.isArray(vm?.searchList) ? vm.searchList.map(x => ({name:x.name,uniqueId:x.uniqueId})) : null,
+      matches:Array.isArray(vm?.searchList) ? vm.searchList.map((x,i) => ${CHAT_SEARCH_MATCH_SCRIPT}(x,rows[i])) : null,
       groupCount:Array.isArray(vm?.searchGroupList) ? vm.searchGroupList.length : null};
   });
   return {at:new Date().toISOString(), url:location.origin+location.pathname, readyState:document.readyState, viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio}, counts, selected, details, jobLabels, search};

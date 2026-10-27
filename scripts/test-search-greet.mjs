@@ -134,8 +134,9 @@ test('search greeting verifies identity, checks without clicking and never retri
       await page.goto('https://www.zhipin.com/web/chat/search');
       await reset('<iframe name="searchFrame" style="width:600px;height:150px" src="https://fixture.invalid/web/frame/search"></iframe>'+panelHtml);
       const search=await (await page.$('iframe[name="searchFrame"]')).contentFrame();
-      await search.setContent('<input class="search-input"><div class="geek-list-wrap">'+card()+'</div>');
+      await search.setContent('<div class="search-container"></div><input class="search-input"><div class="geek-list-wrap">'+card()+'</div>');
       await search.evaluate(`document.querySelector('.geek-info-card').__vue__={$props:{geek:{geekCard:{name:'n**',encryptGeekId:'candidate-1'}}}}`);
+      await search.evaluate(`document.querySelector('.search-container').__vue__={$options:{name:'SearchCandidatesIndex'},loadding$:false,isInitPage$:false,params$:{keywords:'',jobId:'job',page:1},renderList$:[document.querySelector('.geek-info-card').__vue__.$props.geek]}`);
       await bindPanel();
       const resume=await (await page.$('iframe[src*="c-resume"]')).contentFrame();
       await resume.setContent('<canvas id="resume" width="300" height="100"></canvas>');

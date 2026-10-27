@@ -44,7 +44,10 @@ test('pure comparison uses supplied expectations, never assumes a match',()=>{
 test('status matches search and recommend iframe paths with or without a trailing slash',async()=>{
  for(const kind of ['search','recommend'])for(const slash of ['','/']){
   reset();url='https://www.zhipin.com/web/chat/'+kind;frameUrl='https://www.zhipin.com/web/frame/'+kind+slash+'?source=test';snapshot.recommendJob='推荐岗位';
-  const result=JSON.parse(await runStatus());assert.equal(result.pageType,kind);assert.equal(result.searchJob,kind==='recommend'?'推荐岗位':'岗位');
+  snapshot.recommendCards=[];
+  const result=JSON.parse(await runStatus());assert.equal(result.pageType,kind);assert.equal(result.searchJob,kind==='recommend'?'':'岗位');assert.equal(result.recommendJob,kind==='recommend'?'推荐岗位':'');
+  assert.equal(await runCheck({page:kind,job:kind==='recommend'?'推荐岗位':'岗位'}),'true');
+  assert.equal(await runCheck({page:kind,job:'other'}),'false');
  }
  frameUrl='https://www.zhipin.com/web/frame/search';reset();
 });

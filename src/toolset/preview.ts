@@ -2,6 +2,8 @@
  * 在线简历预览：须在「推荐」页、「深度搜索 aiform」页或「常规搜索」页且列表已加载；不自动跳转，否则报错。
  */
 import { openSearchResumeOnly } from './open-search-resume.js';
+import { readRecommendCandidateId, assertRecommendResumeIdentity } from './recommend_identity.js';
+import { visibleResumeFrame } from './search-greet.js';
 import { join } from 'node:path';
 import { ONLINE_RESUME_IFRAME_WAIT_MAX_MS } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
@@ -50,7 +52,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
   try {
     return await withBossSessionPage(async (page) => {
       const url = page.url();
-      if (options.candidateId && !isBossChatSearchUrl(url)) throw new Error('--candidate-id 仅支持常规搜索页');
+      if (options.candidateId && !isBossChatSearchUrl(url) && !isBossChatRecommendUrl(url)) throw new Error('--candidate-id 仅支持常规搜索页或推荐页');
       let verifiedCandidateId: string | undefined;
       if (options.openOnly) {
         if (!isBossChatSearchUrl(url)) throw new Error('preview --open-only 当前仅支持常规搜索页');
@@ -71,7 +73,11 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         const frame = await assertRecommendPageReadyForPreview(page);
         job = options.json ? await readCurrentRecommendJobLabel(frame) : '';
         jobLine = '当前岗位：当前推荐列表';
-        opened = await openRecommendResumePreview(frame, target);
+        verifiedCandidateId = await readRecommendCandidateId(frame,target,options.candidateId);
+        if(await visibleResumeFrame(page)) {
+          await assertRecommendResumeIdentity(page,verifiedCandidateId);
+          opened = true;
+        } else opened = await openRecommendResumePreview(frame,target,verifiedCandidateId);
       } else if (isBossChatSearchUrl(url)) {
         const frame = await assertNormalSearchPageReadyForPreview(page);
         const label = await readNormalSearchSelectedJobLabel(frame);
@@ -100,6 +106,11 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const ready = await waitForVisibleCResumeIframeReady(page);
       if (!ready) {
         throw new Error('在线简历 iframe 已出现，但内容未在预期时间内渲染完成。');
+      }
+      if(isBossChatRecommendUrl(url)) {
+        const frame=await assertRecommendPageReadyForPreview(page);
+        await readRecommendCandidateId(frame,target,verifiedCandidateId);
+        await assertRecommendResumeIdentity(page,verifiedCandidateId!);
       }
       ensureAppDataLayout();
       const fileName = `preview-${safeResumeScreenshotFileBase(target)}-${Date.now()}.png`;

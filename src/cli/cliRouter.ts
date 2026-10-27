@@ -180,17 +180,18 @@ function printHelp(): void {
     只处理当前搜索页内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
   boss chat <姓名> [--strict]
       直接按完整昵称搜索，不主动切换或恢复岗位；按姓名和会话ID核验成功，重名保持搜索现场暂停；--strict 保留兼容
-  boss chat-search <完整昵称> [--data-id <预期会话ID>] [--job <预期完整岗位>] [--json]
+  boss chat-search <完整昵称> [--info <已知原文>] [--data-id <预期会话ID>] [--job <预期完整岗位>] [--json]
       须已在沟通页；直接搜索，唯一匹配打开并核验姓名和会话ID；BOSS自行重置筛选不算定位失败；重名保持搜索现场暂停
       零匹配且查询已完成返回not-found；查询未完成仍超时，业务定位遇零匹配抛CandidateNotFound停止
+      匹配项含name/uniqueId/label/info/tag；info为原始workDesc，tag为exchangeDesc，缺失返回null；--info 按完整姓名和已获取的info原文精确筛选，不向页面输入info
       BOSS_CHAT_SEARCH_TIMEOUT_MS 设置每次搜索/身份等待上限，默认20000ms，范围1000–60000；错误附阶段和只读DOM诊断，不自动重试
-      --job/--data-id 仅定位后比较，不用于自动挑选重名；不支持 --check，不发送消息
+      --job 比较实际岗位，--data-id 核验会话ID；不用于自动挑选重名；不支持 --check，不发送消息
   boss chat [姓名] --index <序号> [--unread] [--strict]
       从当前列表 1-based 序号读取姓名、ID及岗位，再按昵称搜索定位；--unread 用于读取未读列表的序号对象
       同时提供姓名时精确校验；序号或ID不能绕过重名暂停，不滚动查找
       仅用于已建立联系的候选人（即在 list 里可见的会话对象）
-  boss chat <姓名> --data-id <会话ID>
-      先核验当前姓名、会话ID及详情姓名，一致则直接使用；不一致才搜索定位，不主动切换或恢复岗位，搜索重名暂停，无失败回退
+  boss chat <姓名> --data-id <会话ID> [--info <已知原文>]
+      先核验当前姓名、会话ID及详情姓名，一致则直接使用；不一致才搜索定位，不主动切换或恢复岗位，搜索可用已知info精确筛选；仍多匹配则暂停，无匹配即停止，无失败回退
   boss accept-resume <姓名> --data-id <会话ID> [--check]
       在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
   boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]
@@ -215,16 +216,17 @@ function printHelp(): void {
       关闭在线简历弹层；独立在线简历页仅向已核验的列表历史回退一步。检查开关在列表上不操作。
 
   boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
-      进入推荐页并读取推荐列表；同岗位默认不重复选择；--ensure-job 在需要切换时要求完整岗位名匹配
+      进入推荐页并读取推荐列表；岗位名称＋城市作为匹配键，忽略薪资后缀；同岗位不重复选择；--ensure-job 要求该键唯一精确匹配
   boss search [关键词]
-      进入「搜索」页并读取 Boss 默认常规搜索结果；带关键词时填入搜索框并回车搜索
+      进入「搜索」页并读取当前结果；带关键词时提交一次，等待本次响应成功并核对页面候选人 ID/查询标识；失败不重试
   boss preview <姓名> [--candidate-id <ID>] [--open-only]
       在线简历预览：须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
+      --candidate-id 支持推荐及常规搜索：姓名和 ID 联合唯一核验；无 ID 时重名暂停；深度搜索不支持该参数
       --open-only 仅搜索页：打开并核验候选人 ID，保持展开，不截图、不沟通；已打开同一人时复用
       注意：平台对在线简历每日可查看次数有限，请按需使用、谨慎查看
   boss greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]
       须在推荐、深度搜索或常规搜索页；常规搜索支持当前在线简历，不自动跳转
-      点击目标的“打招呼/立即沟通”；搜索页 --check 只核对身份及按钮，不点击；搜索页不支持 --job
+      点击目标的“打招呼/立即沟通”；--check 只读核对推荐列表或搜索在线简历的身份及按钮；搜索页不支持 --job
       --select-job 仅选择联系岗位；--confirm-contact 确认已选岗位；--continue-chat 配合回执 ID 打开已联系会话
       chat <姓名> --check 只读返回身份匹配 true/false；读取详情用 status
       可选 --job 先在岗位下拉中模糊匹配；同岗位不重复选择（与 recommend 共用同一套选择逻辑）
@@ -496,8 +498,8 @@ export async function executeCommand(argv: string[]): Promise<string> {
 
   if (cmd === 'chat-search') {
     const { rest, opts, flags } = parseOpts(tail);
-    if (rest.length !== 1 || !rest[0]!.trim() || flags.size || Object.keys(opts).some(k => !['data-id', 'job'].includes(k)) || Object.values(opts).some(v => !v.trim())) die('用法: chat-search <完整昵称> [--data-id <预期ID>] [--job <预期岗位>] [--json]');
-    return implChatSearch({ name: rest[0]!, dataId: opts['data-id'], job: opts.job }, json);
+    if (rest.length !== 1 || !rest[0]!.trim() || flags.size || Object.keys(opts).some(k => !['data-id', 'job', 'info'].includes(k)) || Object.values(opts).some(v => !v.trim())) die('用法: chat-search <完整昵称> [--info <已知原文>] [--data-id <预期ID>] [--job <预期岗位>] [--json]');
+    return implChatSearch({ name: rest[0]!, dataId: opts['data-id'], job: opts.job, ...(opts.info !== undefined ? { info: opts.info } : {}) }, json);
   }
 
   if (cmd === 'chat') {
@@ -516,7 +518,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if ((opts.action ?? '').trim().length > 0 || (opts.remark ?? '').trim().length > 0) {
       die('❌ chat 不再支持 --action/--remark。请改用: action <操作> [--remark <备注>]');
     }
-    const allowedOpts = new Set(['index', 'i', 'action', 'remark', 'data-id']);
+    const allowedOpts = new Set(['index', 'i', 'action', 'remark', 'data-id', 'info']);
     const unsupportedOpts = Object.keys(opts).filter((key) => !allowedOpts.has(key));
     if (unsupportedOpts.length > 0) {
       die(`❌ chat 不支持参数: --${unsupportedOpts.join(', --')}`);
@@ -525,6 +527,9 @@ export async function executeCommand(argv: string[]): Promise<string> {
     const exact = true;
     const indexRaw = (opts.index ?? opts.i ?? '').trim();
     const dataId = (opts['data-id'] ?? '').trim();
+    if (flags.has('info') || (opts.info !== undefined && (!opts.info.trim() || !dataId || !!indexRaw || flags.has('check')))) {
+      die('chat --info 需要非空原文及 --data-id，不与 --check/--index 混用');
+    }
     if (flags.has('data-id')) {
       die('❌ chat --data-id 必须提供会话 ID。');
     }
@@ -537,7 +542,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       if (indexRaw || flags.has('unread') || !nameArg || Array.from(flags).some((f) => f !== 'strict')) {
         die('❌ 用法: chat <姓名> --data-id <会话ID>');
       }
-      return implOpenTargetChat({ name: nameArg, dataId }, json);
+      return implOpenTargetChat({ name: nameArg, dataId, ...(opts.info !== undefined ? { info: opts.info } : {}) }, json);
     }
     if (indexRaw) {
       const index = Number(indexRaw);
