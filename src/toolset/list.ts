@@ -9,6 +9,7 @@ import { BOSS_CHAT_INDEX_URL, isBossChatIndexUrl } from '../common/auth.js';
 import { ensurePage } from '../common/ensure_page.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { closeAttachmentPreview } from './target_chat.js';
+import { INVENTORY_LIST_SELECTOR, INVENTORY_STATE_SCRIPT } from './chat_inventory.js';
 
 type CandidateItem = {
   dataId: string;
@@ -34,24 +35,21 @@ export async function runFullCandidateInventory(shouldStop: () => boolean = () =
     let resetToTop = false;
     for (let round = 0; round < 400; round++) {
       if (shouldStop()) throw new Error('全量列表扫描已停止，尚未完成对账。');
-      const state = await page.evaluate(`(() => {
-        const list = document.querySelector('.chat-global-list .user-list');
-        if (!list) {
-          const empty = Array.from(document.querySelectorAll('.common-no-data')).some(el =>
-            el.getBoundingClientRect().width && el.getBoundingClientRect().height && el.textContent.trim() === '暂无牛人');
-          if (!empty) throw new Error('完整列表容器缺失，不能确认全量候选人。');
-          return { empty: true };
+      let state = await page.evaluate(INVENTORY_STATE_SCRIPT) as { loading: boolean; empty: boolean; end?: boolean; top?: boolean; expectedIds: string[]; x: number; y: number };
+      if(state.loading) {
+        try {
+          await page.waitForFunction(`(() => ![1,2].includes(document.querySelector('.chat-user')?.__vue__?.loading$))()`, {timeout:20_000,polling:100});
+        } catch(error) {
+          throw new Error(`全量盘点等待列表加载超时或失败（20秒），round=${round}；${error instanceof Error?error.message:String(error)}`);
         }
-        const rect = list.getBoundingClientRect();
-        if (!rect.width || !rect.height) throw new Error('完整列表容器不可见。');
-        const footer = list.querySelector('.bottom-text');
-        if (!footer) throw new Error('完整列表缺少 bottom-text 结束标志。');
-        const footerRect = footer.getBoundingClientRect();
-        const end = !footer.classList.contains('active') && footer.textContent.trim().length > 0 &&
-          footerRect.height > 0 && footerRect.top >= rect.top && footerRect.bottom <= rect.bottom + 2;
-        return { empty: false, end, x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-      })()`) as { empty: boolean; end?: boolean; x: number; y: number };
-      if (state.empty) return JSON.stringify({ category: 'all', filter: 'all', candidates: [] });
+        state = await page.evaluate(INVENTORY_STATE_SCRIPT) as typeof state;
+      }
+      if (shouldStop()) throw new Error('全量列表扫描已停止，尚未完成对账。');
+      if (state.loading) throw new Error('读取全量盘点状态时列表重新加载，停止对账。');
+      if (state.empty) {
+        if(found.size)throw new Error('盘点期间列表变空，停止；不返回部分列表。');
+        return JSON.stringify({ category: 'all', filter: 'all', candidates: [] });
+      }
       await page.mouse.move(state.x, state.y);
       if (!resetToTop) {
         await page.mouse.wheel({ deltaY: -10_000_000 });
@@ -59,13 +57,18 @@ export async function runFullCandidateInventory(shouldStop: () => boolean = () =
         resetToTop = true;
         continue;
       }
-      for (const item of await readCandidateItems(page)) {
+      if (found.size===0&&!state.top) throw new Error('全量盘点未确认回到列表顶部，停止；不返回部分列表。');
+      for (const item of await readCandidateItems(page, `${INVENTORY_LIST_SELECTOR} .geek-item`)) {
         if (!item.dataId || !item.name || !item.job) throw new Error(`全量候选人缺少身份或岗位：${JSON.stringify(item)}`);
         const previous = found.get(item.dataId);
         if (previous && (previous.name !== item.name || previous.job !== item.job)) throw new Error(`扫描期间候选人身份发生变化：${item.dataId}`);
         found.set(item.dataId, item);
       }
-      if (state.end) return JSON.stringify({ category: 'all', filter: 'all', candidates: [...found.values()] });
+      if (state.end) {
+        const missing = state.expectedIds.filter(id=>!found.has(id));
+        if(missing.length)throw new Error(`全量盘点仍缺少 ${missing.length} 个已加载会话，不能确认完整；dataIds=${JSON.stringify(missing)}`);
+        return JSON.stringify({ category: 'all', filter: 'all', candidates: [...found.values()] });
+      }
       await page.mouse.wheel({ deltaY: 400 });
       await sleepRandom(450, 650);
     }
@@ -219,11 +222,11 @@ export async function ensureChatListReady(
   traceListStep(`列表「${filterLabel}」已加载`);
 }
 
-async function readCandidateItems(page: Page): Promise<CandidateItem[]> {
+async function readCandidateItems(page: Page, selector = '.geek-item'): Promise<CandidateItem[]> {
   return (await page.evaluate(
         `(() => {
           const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-          return Array.from(document.querySelectorAll(".geek-item")).map((el) => {
+          return Array.from(document.querySelectorAll(${JSON.stringify(selector)})).map((el) => {
             const dataId = norm(el.getAttribute("data-id"));
             const name = norm(el.querySelector(".geek-name")?.textContent);
             const job = norm(el.querySelector(".source-job")?.textContent);

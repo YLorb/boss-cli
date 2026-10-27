@@ -23,6 +23,8 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 约定
 
+- `collect reconcile` 的完整盘点使用主沟通列表 `.chat-user .user-container > .user-list`，不依赖内嵌聊天的 `.chat-global-list`。读取唯一可见根节点的 `loading$`／`hasMore$`，仅在加载结束、无后续页、`.load-tips` 非加载态可见且滚动到底后完成；已加载组件会话ID必须全部出现在盘点结果中。空态须同时有零数据、无更多页及可见“暂无牛人”。结构缺失、状态异常、漏项或加载超时明确报错，不返回部分列表、不回退旧容器。
+
 - 推荐选岗按“岗位名称＋城市”比较，忽略薪资后缀；如 `recommend '全栈软件开发工程师 _ 深圳' --ensure-job --json`。下拉搜索只输入岗位名称，读取选项后再比较名称和城市；任何模式出现多项匹配均停止。当前岗位键相同不重复点击；`check --page recommend --job`／`recommend --check-job` 使用同一比较口径，返回的岗位标签仍保留页面原文。
 
 - 推荐列表只读取 `.candidate-card-wrap`，不同时把外层列表项作为候选人；新增 `work`、`education` 数组，`experience` 保留两者合并的文字。字段为空不阻止查看简历。推荐 preview/greet 支持 `--candidate-id`：完整姓名精确匹配，无 ID 重名暂停；提供 ID 时要求联合唯一、该 ID 在列表唯一，且卡片 DOM 和组件姓名/ID 一致。preview 打开后再核对两处简历组件 ID；缺失、不符或重复直接报错，不尝试其他卡片。推荐 greet 只在列表执行，`--check` 不点击；简历覆盖列表时为 false。
