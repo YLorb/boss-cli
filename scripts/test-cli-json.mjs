@@ -6,6 +6,7 @@ import path from 'node:path';
 import { splitJsonFlag } from '../dist/cli/output.js';
 
 const calls = [];
+mock.module('../dist/toolset/contact-notice.js',{namedExports:{dismissContactNotice:async(...args)=>{calls.push({name:'dismissContactNotice',args});return JSON.stringify({status:'contact-notice-dismissed'});}}});
 mock.module('../dist/toolset/check.js',{namedExports:{runCheck:async (...args)=>{calls.push({name:'runCheck',args});return 'true';},runStatus:async()=>'{"pageType":"chat"}'}});
 const names = ['implChatAction','implChatSearch','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
 mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries(names.map(name => [name, async (...args) => {
@@ -18,6 +19,20 @@ mock.module('../dist/toolset/search-more.js', { namedExports: {
   runSearchMore: async (...args) => { calls.push({name:'runSearchMore',args}); return JSON.stringify({args}); },
 }});
 const { executeCommand } = await import('../dist/cli/cliRouter.js');
+
+test('contact notice route requires explicit identity and forwards only its scoped target',async()=>{
+  const target={name:'测试',candidateId:'candidate-1',job:'测试岗位'};
+  const result=JSON.parse(await executeCommand(['dismiss-contact-notice','测试','--candidate-id','candidate-1','--job','测试岗位','--json']));
+  assert.equal(result.status,'contact-notice-dismissed');
+  assert.deepEqual(calls.at(-1),{name:'dismissContactNotice',args:[target]});
+  const before=calls.length;
+  for(const argv of [
+    ['dismiss-contact-notice','测试','--job','测试岗位'],
+    ['dismiss-contact-notice','测试','--candidate-id','candidate-1','--job','测试岗位','--check'],
+    ['dismiss-contact-notice','测试','--candidate-id','candidate-1','--job','测试岗位','--continue-chat'],
+  ])await assert.rejects(executeCommand(argv));
+  assert.equal(calls.length,before);
+});
 
 test('new bounded search and explicit history-back routes forward JSON and reject mixed back flags', async () => {
   await executeCommand(['search-more','--max-scrolls','2','--max-candidates','40','--json']);

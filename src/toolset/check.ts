@@ -30,9 +30,13 @@ export const STATUS_SCRIPT = `(() => {
  const chatSearch=chatSearchRoot?{keyword:chatSearchRoot.querySelector('input.search-input')?.value,content:chatSearchVm?.content,showSearchResult:chatSearchVm?.showSearchResult,showClose:chatSearchVm?.showClose,matches:chatSearchVm?.searchList?.map((x,i)=>${CHAT_SEARCH_MATCH_SCRIPT}(x,chatSearchRows[i])),groupCount:chatSearchVm?.searchGroupList?.length,rows:chatSearchRows.map(e=>norm(e.textContent))}:null;
  const editorText=input?.innerText||input?.textContent||'';
  const buttons=Array.from((box||document).querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(visible);
- const contact=buttons.filter(e=>/^(立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?$/.test(norm(e.textContent)));
+ const contact=buttons.filter(e=>/^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|搜索畅聊卡[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])$/.test(norm(e.textContent)));
  if(box&&contact.length>1)throw new Error('沟通按钮不唯一');
  const usable=e=>!!e&&!e.matches(':disabled,[disabled],[aria-disabled="true"]')&&!/disabled|forbid|ban/i.test(e.className)&&getComputedStyle(e).pointerEvents!=='none';
+ const describe=e=>e?{tag:e.tagName,className:e.getAttribute('class')||'',text:norm(e.textContent).slice(0,160),title:e.getAttribute('title'),ariaLabel:e.getAttribute('aria-label')}:null;
+ const contactGeometry=box&&contact[0]?(()=>{const e=contact[0],r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);return {rect:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:innerWidth,height:innerHeight},inViewport:x>=0&&y>=0&&x<innerWidth&&y<innerHeight,exposed:!!hit&&(hit===e||e.contains(hit)),hit:describe(hit),hitParent:describe(hit?.parentElement)};})():null;
+ const embeddedControls=chat?Array.from(chat.querySelectorAll('button,a,[role="button"],[title],[aria-label],[class*="close"]')).filter(visible).slice(0,40).map(describe):[];
+ const contactNotices=Array.from(document.querySelectorAll('.dialog-wrap.active')).filter(visible).slice(0,5).map(e=>({className:e.className,text:norm(e.textContent).slice(0,1000),controls:Array.from(e.querySelectorAll('*')).filter(x=>visible(x)&&/^(关闭|查看对话)$/.test(norm(x.textContent))).slice(0,20).map(x=>({...describe(x),parent:describe(x.parentElement)}))}));
  const jobDialog=one('.common-job-list-dialog');
  const activeJob=jobDialog&&one('.select-list > li.active',jobDialog);
  const friends=Array.from(document.querySelectorAll('.chat-message-list .message-item .item-friend'));
@@ -45,7 +49,7 @@ export const STATUS_SCRIPT = `(() => {
   conversation:selected?{name:norm(selected.querySelector('.geek-name')?.textContent),dataId:selected.getAttribute('data-id')||'',detailName:detail}:null,
   editable:!!input&&(input.isContentEditable||input.tagName==='TEXTAREA')&&usable(input),draft:editorText,
   messages:chat?Array.from(chat.querySelectorAll('.message-item')).map(e=>e.__vue__?.$props?.message).filter(m=>m?.isSelf===true).map(m=>m.text||''):Array.from(document.querySelectorAll('.chat-message-list .item-myself .text span')).map(e=>e.innerText||''),
-  contactText:box?norm(contact[0]?.textContent):'',contactUsable:!!box&&usable(contact[0]),
+  contactText:box?norm(contact[0]?.textContent):'',contactUsable:!!box&&usable(contact[0]),contactGeometry,embeddedControls,contactNotices,
   selectedJob:activeJob?norm(activeJob.querySelector('h3')?.textContent):null,
   resumeReceived:friends.some(e=>!!e.querySelector('.resume-icon')),
   resumeRequest:friends.some(e=>norm(e.querySelector('.message-card-top-title')?.textContent).includes('附件简历')&&Array.from(e.querySelectorAll('.message-card-buttons .card-btn')).some(b=>visible(b)&&norm(b.textContent).startsWith('同意')&&usable(b))),
@@ -110,7 +114,7 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
   case 'conversation':return !!identity&&(c.embedded?s.embedded:s.pageType==='chat');
   case 'send-ready':return !!identity&&s.editable&&!norm(s.draft)&&!seen;
   case 'message-visible':return !!seen;
-  case 'contact-ready':return s.pageType==='recommend'?!s.resume&&!!identity?.contactUsable&&/^打招呼/.test(identity.contactText):s.pageType==='search'&&s.resume&&s.contactUsable&&/^(立即沟通|打招呼)/.test(s.contactText);
+  case 'contact-ready':return s.pageType==='recommend'?!s.resume&&!!identity?.contactUsable&&/^打招呼/.test(identity.contactText):s.pageType==='search'&&s.resume&&s.contactUsable&&/^(立即沟通|打招呼|搜索畅聊卡)/.test(s.contactText);
   case 'contacted':return s.resume&&s.contactText==='继续沟通';
   case 'job-selected':return !!s.selectedJob&&s.selectedJob===c.job;
   case 'resume-received':return s.resumeReceived;

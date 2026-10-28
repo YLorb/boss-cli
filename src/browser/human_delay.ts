@@ -16,7 +16,7 @@ export const CONTEXT_DESTROY_RETRY_MS = { min: 900, max: 1800 } as const;
 export const SIDEBAR_NAV_AFTER_CLICK_MS = { min: 420, max: 1100 } as const;
 
 /** 列表滚动查找候选人时，每轮之间的间隔 */
-export const OPEN_CHAT_SCROLL_GAP_MS = { min: 240, max: 760 } as const;
+export const OPEN_CHAT_SCROLL_GAP_MS = { min: 350, max: 1550 } as const;
 
 /** 点击会话行后，等待右侧面板出现的短停顿 */
 export const OPEN_CHAT_AFTER_ROW_CLICK_MS = { min: 420, max: 1200 } as const;

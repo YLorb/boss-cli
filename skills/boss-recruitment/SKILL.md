@@ -2,15 +2,21 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.14"
+  version: "1.0.15"
   updated: "2026-10-28"
   language: "zh-CN"
-  cli-baseline: "0.6.9-local-check-unification"
+  cli-version: "0.6.9"
+  cli-compatibility: "2026-10-28-search-card-controls-v1"
+  cli-baseline: "0.6.9-dev-search-card-controls"
 ---
 
 # BOSS 招聘流程
 
 这是本机 CLI 的操作规范，不是独立浏览器驱动。执行需要可运行 shell 的 Agent、Node.js、Chrome 和使用者自己的 BOSS 登录态。仅能对话的 GPT 无法直接执行。不要因加载本 Skill 自动开始操作。
+
+## 启动前版本校验（强制）
+
+每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.9 与 Skill 1.0.15 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
 
 ## SOP 执行约束（必读）
 
@@ -69,6 +75,7 @@ metadata:
 - 一轮固定起始对象范围，逐人完成。循环内不刷新列表、不重复查询同一关键词；不要使用变化后的旧序号。确需追加搜索页时按搜索 SOP 显式使用有上限的 search-more，返回池按 candidateId 去重且不联系。失败后的显式 back --previous 只返回已核验的上一条历史，不自动重跑失败动作，见逐项调用手册。
 - “仅查看／评估”不包含联系、入正式候选人账本、求附件或上传；本轮评估记录可单独保存。既有授权按其范围执行，不额外制造确认步骤。
 - 同一浏览器页面串行操作。失败保留上下文并报告，不加备用点击路径，不盲重试。现有 CLI 的未修复限制见各 SOP，不能把规范写成已实现功能。
+- 搜索内嵌聊天完成后使用带候选人 ID、姓名及岗位的 `chat --embedded --close`；有草稿则保留并停止。畅聊卡使用提示与聊天小窗是不同控件，前者使用独立的 dismiss-contact-notice 命令，仅处理已核验的使用成功提示，不能用关闭小窗命令代替，详见搜索 SOP。
 - 发送前保存意图，发送后核对正确会话中的完整消息；不确定则停止，不能用报错推断未发送。消息3不是附件请求。
 - 人工停止时停止业务动作并保存进度；不把停止当成继续上传或对账的授权。
 

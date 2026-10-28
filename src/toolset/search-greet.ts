@@ -35,7 +35,7 @@ function contactScript(name: string, resume: boolean, click: boolean, candidateI
       root = cards[0];
     }
     const buttons = Array.from(root.querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(el =>
-      visible(el) && /^(立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?$/.test(norm(el.textContent)));
+      visible(el) && /^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|搜索畅聊卡[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])$/.test(norm(el.textContent)));
     if (buttons.length !== 1) throw new Error('目标沟通按钮缺失或不唯一：' + name + '；matches=' + buttons.length);
     const button = buttons[0], text = norm(button.textContent);
     if (${continueChat} && text !== '继续沟通') throw new Error('当前按钮不是继续沟通，停止操作');

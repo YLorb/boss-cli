@@ -11,6 +11,7 @@ mock.module('../dist/common/boss_paywall_popup.js', { namedExports: {
 const { openSearchResumeOnly } = await import('../dist/toolset/open-search-resume.js');
 const { selectSearchContactJob } = await import('../dist/toolset/search-contact-job.js');
 const { greetNormalSearch } = await import('../dist/toolset/search-greet.js');
+const { STATUS_SCRIPT, matchesStatus } = await import('../dist/toolset/check.js');
 
 test('search greeting verifies identity, checks without clicking and never retries uncertain actions', async t => {
   const browser = await puppeteer.launch({
@@ -89,6 +90,30 @@ test('search greeting verifies identity, checks without clicking and never retri
     const bindPanel = async () => page.evaluate(`(() => {
       document.querySelector('.resume-simple-box').__vue__={$props:{geekInfo:{encryptGeekId:'candidate-1'},resumeInfo:{encryptGeekId:'candidate-1'}}};
     })()`);
+    await t.test('observed search card label supports read-only check and one verified contact', async () => {
+      const panel = panelHtml.replace('立即沟通(30/75)', '搜索畅聊卡(2/25)');
+      await reset(card()+panel); await bindPanel();
+      const criteria={state:'contact-ready',name:'n**',candidateId:'candidate-1'};
+      const status={...await page.evaluate(STATUS_SCRIPT),pageType:'search'};
+      assert.equal(status.contactText,'搜索畅聊卡(2/25)');
+      assert.equal(matchesStatus(status,criteria),true);
+      assert.equal((await greetNormalSearch(page,frame,'n**',true,false,'candidate-1')).clicked,false);
+      assert.equal(await page.evaluate('window.clicks'),0);
+      assert.equal((await greetNormalSearch(page,frame,'n**',false,false,'candidate-1')).status,'contact-confirmed');
+      assert.equal((await greetNormalSearch(page,frame,'n**',false,false,'candidate-1')).status,'already-contacted');
+      assert.equal(await page.evaluate('window.clicks'),1);
+      for(const html of [panel.replace('<button ', '<button disabled '),panel.replace('搜索畅聊卡(2/25)','购买搜索畅聊卡(2/25)'),panel.replace('搜索畅聊卡(2/25)','搜索畅聊卡')]) {
+        await reset(card()+html); await bindPanel();
+        assert.equal(matchesStatus({...await page.evaluate(STATUS_SCRIPT),pageType:'search'},criteria),false);
+        await assert.rejects(greetNormalSearch(page,frame,'n**',false,false,'candidate-1'));
+        assert.equal(await page.evaluate('window.clicks'),0);
+      }
+      await reset(card()+panel); await bindPanel();
+      await page.evaluate("document.querySelector('.resume-simple-box').__vue__.$props.resumeInfo.encryptGeekId='wrong'");
+      assert.equal(matchesStatus({...await page.evaluate(STATUS_SCRIPT),pageType:'search'},criteria),false);
+      await assert.rejects(greetNormalSearch(page,frame,'n**',false,false,'candidate-1'),/ID/);
+      assert.equal(await page.evaluate('window.clicks'),0);
+    });
     await t.test('Canvas resume uses only its parent operation box and verifies both IDs', async () => {
       await reset(card()+panelHtml+'<button onclick="window.wrong=true">立即沟通</button>');
       await bindPanel();

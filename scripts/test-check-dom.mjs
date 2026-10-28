@@ -21,5 +21,16 @@ test('DOM snapshot separates incoming acceptance from outgoing requests and neve
   s=await page.evaluate(STATUS_SCRIPT);assert.equal(s.resumeRequest,false);assert.equal(s.resumeReceived,false);assert.equal(s.messages.length,1);
   await page.setContent(`<div class="chat-message-list"><div class="message-item"><div class="item-friend"><i class="resume-icon"></i><div class="message-card-top-title">简历.pdf</div></div></div></div>`);
   s=await page.evaluate(STATUS_SCRIPT);assert.equal(s.resumeRequest,false);assert.equal(s.resumeReceived,true);
+  await page.setContent(`<div class="resume-middle-wrap"><div class="resume-right-side"><div class="resume-simple-box"><button>继续沟通</button></div></div></div><div class="chat-global-conversation"><div class="iboss iboss-close" style="width:20px;height:20px"></div></div>`);
+  const diagnosticBefore=await page.content();
+  s=await page.evaluate(STATUS_SCRIPT);
+  assert.equal(s.contactGeometry.inViewport,true);assert.equal(s.contactGeometry.exposed,true);
+  assert.equal(s.embeddedControls[0].className,'iboss iboss-close');
+  assert.equal(await page.content(),diagnosticBefore);
+  await page.evaluate(`(() => {const overlay=document.createElement('div');overlay.className='test-overlay';overlay.style='position:fixed;inset:0;z-index:999';document.body.appendChild(overlay);})()`);
+  const blockedBefore=await page.content();
+  s=await page.evaluate(STATUS_SCRIPT);
+  assert.equal(s.contactGeometry.exposed,false);assert.equal(s.contactGeometry.hit.className,'test-overlay');
+  assert.equal(await page.content(),blockedBefore);
  }finally{await browser.close();}
 });

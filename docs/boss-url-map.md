@@ -1,5 +1,21 @@
 # Boss URL 与功能对照
 
+## 启动前配套版本检查
+
+每轮先设置实际加载的 Skill 路径，再运行离线检查（不连接浏览器、不写账本）：
+
+```powershell
+$env:BOSS_SKILL_DIR = 'C:\Recruitment\workspace\.workbuddy\skills\boss-recruitment'
+node .\dist\cli\index.js version-check --json
+```
+
+CLI 0.6.9 配套 Skill 1.0.15，兼容标识为 `2026-10-28-search-card-controls-v1`。独立版本号按配套关系比较。未设置 BOSS_SKILL_DIR 时明确使用当前 CLI 安装附带的 Skill；加载外部 Skill 的 Agent 必须指定外部实际目录，不能以包内版本替代检查。文件缺失、格式错误直接报错，不搜索其他路径。
+
+匹配返回 compatible:true，退出码 0；不匹配返回 compatible:false、requiresConfirmation:true、实际与期望版本、路径及 confirmationToken，退出码 2。所有业务命令（含 login、只读 status/check、附件子进程和 collect）在连接浏览器或写账本前阻止启动。help、version、update、version-check 可用于诊断和修复。
+
+不匹配时将结果展示给用户，**等待用户明确确认后**，才可在本轮命令末尾附加 `--confirm-version-mismatch <返回令牌>`；不得自行确认、写入长期默认参数或从旧任务沿用授权。令牌绑定 CLI 版本、Skill 路径和完整正文，任一改变都会失效。确认仅解除版本门槛，不解除会话锁、身份校验或其他守护。CLI 校验令牌，执行 Agent 负责取得并记录用户确认。优先同步配套版本；确认不意味着兼容性已验证。
+
+
 各入口的完整语法、参数语义、返回判断和顺序，见[逐项调用手册](../skills/boss-recruitment/references/invocation-guide.md)。
 
 本文件记录 boss-cli 已知页面 URL、对应命令和当前位置要求。修改页面导航、命令入口或报错文案前，先对照这里，避免把某个命令改成隐式跳转或多路径兜底。
@@ -109,7 +125,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 ## 搜索页立即沟通（2026-10-20，本地实现）
 
 - `boss greet "完整显示姓名" --check --json`：只读判断当前搜索页在线简历身份与可用联系按钮，返回 true/false；未打开简历为 false，不打开或切换候选人。
-- `boss greet "完整显示姓名" --json`：搜索页要求已加载卡片中姓名严格唯一；搜索卡片组件的姓名须与显示姓名一致，并提供非空 `encryptGeekId`；若简历已打开，主页面唯一 `.resume-middle-wrap` 须包含该简历 iframe，右侧唯一 `.resume-simple-box` 的 `geekInfo.encryptGeekId` 和 `resumeInfo.encryptGeekId` 必须同时与卡片 ID 一致。按钮仅在该右侧操作区内定位。Canvas 简历不以 iframe 内姓名 DOM 核验身份，不调用组件方法或接口。仅点击唯一、可见、可用且未被遮挡的「立即沟通」或「打招呼」，支持带额度数字的按钮文字。搜索页拒绝 `--job`，普通 greet 不代选联系岗位；选岗使用下述 --select-job 独立步骤。不处理购买或二次确认。
+- `boss greet "完整显示姓名" --json`：搜索页要求已加载卡片中姓名严格唯一；搜索卡片组件的姓名须与显示姓名一致，并提供非空 `encryptGeekId`；若简历已打开，主页面唯一 `.resume-middle-wrap` 须包含该简历 iframe，右侧唯一 `.resume-simple-box` 的 `geekInfo.encryptGeekId` 和 `resumeInfo.encryptGeekId` 必须同时与卡片 ID 一致。按钮仅在该右侧操作区内定位。Canvas 简历不以 iframe 内姓名 DOM 核验身份，不调用组件方法或接口。仅点击唯一、可见、可用且未被遮挡的「立即沟通」「打招呼」或带数字后缀的「搜索畅聊卡」，前两种支持带额度数字的按钮文字。2026-10-28 已在同一候选人的右侧操作区核验实际文案「搜索畅聊卡(2/25)」；只识别此类完整文案，不推断数字含义，不自动购买或确认弹层。只读状态与实际联系采用相同文案范围，身份、唯一性、遮挡、单次点击和成功核验保持不变。搜索页拒绝 `--job`，普通 greet 不代选联系岗位；选岗使用下述 --select-job 独立步骤。不处理购买或二次确认。
 - 返回 `ready` 表示预检可点击；`already-contacted` 表示按钮已为「继续沟通」，不再点击；只有点击后同一身份的按钮变为「继续沟通」才返回 `contact-confirmed`。该状态不证明消息3已发送或账本已写入。
 - 点击后按钮消失、页面跳转、出现确认弹层或超时等无法确认结果时，明确报出“已点击一次，禁止自动重试”；应先人工核对，不连续执行 greet。平台可能自动发送默认问候并消耗权益，预检不会消耗这些点击权益。
 - 姓名不唯一、候选人 ID 缺失或不符、按钮结构与现有依据不符、按钮在视口外等情况直接停止。选择器与组件字段依据为 2026-10-20 真实搜索页面只读检查；n** 的真实预检已返回 `identityVerified=true`、`status=ready`、`clicked=false`，随后按用户授权点击一次，出现联系岗位选择弹层；未选岗或二次确认，尚未完成沟通。组件字段变化直接报错，不退回按姓名或全局按钮猜测。
@@ -119,7 +135,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 `boss preview "完整显示姓名" --open-only --json` 仅支持当前常规搜索页。先唯一精确匹配卡片；已有可见简历时不再点卡片，等待 Canvas 就绪并按候选人 ID 核验当前简历；没有简历时只点击匹配卡片的 `.name-label`，等待可见 iframe 和 Canvas 加载后按同一 ID 规则核验。ID 不符、姓名重复或超时直接报错，不自动关闭重开。
 
-返回 `status=open`、`reused`、`candidateId`、`identityVerified=true`、`controls`（该简历右侧已核验按钮的文字）、`screenshot=false`、`closed=false`。不截图、不滚动简历、不点击沟通按钮，不执行截图成功后的自动关闭。加载就绪与身份核验分开执行，等待条件不能吞掉身份错误。后续使用 `greet --check` 预检，确认后再执行真实沟通。不带 `--open-only` 的 preview 仍是原截图流程。
+返回 `status=open`、`reused`、`candidateId`、`identityVerified=true`、`controls`（该简历右侧可见控件文字，仅供观察，可为空，不证明允许联系）、`screenshot=false`、`closed=false`。不截图、不滚动简历、不点击沟通按钮，不执行截图成功后的自动关闭。加载就绪与身份核验分开执行，等待条件不能吞掉身份错误。预览独立核验卡片姓名／ID、主页面唯一简历面板及关联 iframe、右侧组件的两处 ID，不再要求沟通按钮存在或可用；畅聊卡等按钮差异不阻止读取简历，也不会自动放宽 greet 的联系校验。后续使用 `greet --check` 预检，确认后再执行真实沟通。不带 `--open-only` 的 preview 仍是原截图流程。离线身份回归：`node --experimental-test-module-mocks --test scripts/test-search-preview-identity.mjs`。
 
 2026-10-20 点击后验证：`common-job-list-dialog` 提示“请选择与牛人沟通的职位”，不是沟通成功。现有公共付费提示检测因文案“VVIP账号沟通权益”将其归类为付费弹层，仍须依据只读诊断正文区分；普通 greet 的付费提示分类仍可能误报选岗弹层；选岗与二次确认使用下述显式入口。
 
@@ -152,12 +168,16 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 搜索页内嵌聊天（2026-10-22）
 
+- `status --json` 额外只读返回 `contactGeometry`（按钮矩形、视口、中心点命中元素及父元素）、`embeddedControls`（当前内嵌窗口可见控件的有限属性）和 `contactNotices`（最多5个可见 `.dialog-wrap.active` 的有限文本及“关闭／查看对话”控件属性）。用于记录畅聊卡后遮挡和人工操作前后状态；不点击、不隐藏遮挡、不构成连续鼠标录制，也不放宽联系校验。
+
 - `chat --inspect-embedded --json` 只读输出当前窗口的最小身份及已加载消息，不代表身份核验通过；无窗口或多窗口报错。
 - `chat "实际姓名" --embedded --check --candidate-id "触达回执ID" --job "完整岗位" --json`：仅 `/web/chat/search`，核对卡片 conversation.encryptUid/name/toPosition、容器 friendId 和输入组件 uniqueId；不依赖脱敏姓名猜测。
+- `chat "实际姓名" --embedded --close --candidate-id "触达回执ID" --job "完整岗位" --json`：在现有会话锁和页面守护内，核验同一身份及会话，保护未发送草稿，仅点击该窗口唯一可见、启用且未遮挡的 `.iboss.iboss-close` 一次；5 秒内确认窗口消失且 URL 不变。无窗口、多窗口、超时或身份变化直接报错，不刷新、不导航、不重试。`--close` 与 `--check` 互斥，后者只做身份检查，不代表关闭可执行。
 - `send --embedded --name "实际姓名" --candidate-id "触达回执ID" --job "完整岗位" --text "正文" [--check] --json`：同一身份核验后发送一次；此入口的 `--check` 严格只读，不输入或发送。已有同文消息返回 already-visible，不重复发送；已有草稿拒绝覆盖。聚焦页面后粘贴，核对换行、发送禁用状态和身份，再按 Enter；发送后要求新消息 ID、己方、接收者、可见正文均匹配。超时不重试。
 - 不导航、不刷新、不重新打招呼、不修改页面禁用状态，不支持在此入口请求附件。独立沟通页命令行为不变。
 - 返回 conversationId 是内嵌组件原生 uniqueId。尚未核对它与沟通列表 DOM data-id 的映射时，不能直接作为 collect dataId；先保留待关联回执。
-- 验证：内嵌真实身份读取已通过；离线覆盖多行粘贴、身份错配、去重、草稿与禁用保护。首次发送在剪贴板焦点阶段失败（未输入/发送），已补焦点步骤；之后用户窗口已关闭，完整真实发送待下一位合适人选验证。
+- 验证：2026-10-28 内嵌真实发送及新消息核验通过；关闭入口离线验证通过，并在真实同人窗口完成单次关闭验证。
+- 畅聊卡现场记录（2026-10-28）：用户确认步骤为“关闭畅聊卡使用提示 → 继续沟通 → 小窗聊天 → 关闭小窗”。CLI 已记录联系成功、继续沟通因遮挡而未点击，以及人工打开后的同一候选人会话；随后通过正式 status 在新候选人现场采集到已知成功文案及 `.boss-dialog__footer .boss-dialog__button` 的“关闭”控件。正式入口 `dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位> --json` 仅在当前 `/web/chat/search`、同人简历、岗位及已联系状态一致时，点击已知成功提示的关闭一次；复用会话锁／页面守护，5 秒核验提示消失及搜索条件未变。失败不重复联系，不将未知付费／确认弹窗当作此提示；不点“查看对话”，不自动继续。离线测试通过，2026-10-28 已在真实成功提示上关闭一次并核验，随后继续沟通、发送消息3及关闭内嵌小窗均成功。
 
 
 ## 搜索同名候选人定位（2026-10-22）

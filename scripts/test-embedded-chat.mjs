@@ -2,6 +2,7 @@ import test, {mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
 let page;
+mock.module('../dist/toolset/contact-notice.js',{namedExports:{dismissContactNotice:async()=>{throw Error('embedded chat must not dismiss contact notices');}}});
 mock.module('../dist/toolset/check.js',{namedExports:{runCheck:async()=> 'true',runStatus:async()=> '{}'}});
 mock.module('../dist/common/boss_session_page.js',{namedExports:{withBossSessionPage:async(fn,opts)=>{assert.deepEqual(opts,{ensureChatShell:false,ensureMenuList:false});return fn(page);}}});
 const {sendEmbeddedChat,validateEmbeddedState,EMBEDDED_STATE_SCRIPT}=await import('../dist/toolset/embedded-chat.js');

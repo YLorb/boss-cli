@@ -52,6 +52,60 @@ export async function checkEmbeddedChat(target: EmbeddedTarget): Promise<string>
   return runCheck({page:'search',state:'conversation',embedded:true,...target});
 }
 
+/** A single scoped close click; identity and draft are checked in the same browser task. */
+export function embeddedCloseScript(target: EmbeddedTarget, conversationId: string): string {
+  return `(() => {
+    if(location.hostname!=='www.zhipin.com'||location.pathname!=='/web/chat/search')
+      throw new Error('关闭前已离开 BOSS 搜索页，未点击');
+    const target=${JSON.stringify(target)}, expectedConversation=${JSON.stringify(conversationId)};
+    const s=${EMBEDDED_STATE_SCRIPT};
+    if(s.name!==target.name||s.candidateId!==target.candidateId||s.job!==target.job||
+      s.conversationId!==expectedConversation||s.editorId!==s.conversationId||!s.friendId||s.rootFriendId!==s.friendId)
+      throw new Error('关闭前内嵌会话身份变化，未点击');
+    const visible=e=>{const r=e.getBoundingClientRect(),v=getComputedStyle(e);return r.width>0&&r.height>0&&v.display!=='none'&&v.visibility!=='hidden';};
+    const root=Array.from(document.querySelectorAll('.chat-global-conversation')).filter(visible)[0];
+    const read=${CHAT_INPUT_TEXT_READER};
+    if(read(root.querySelector('#boss-chat-global-input')).trim()) throw new Error('内嵌输入框已有草稿，未关闭');
+    const buttons=Array.from(root.querySelectorAll('.iboss.iboss-close')).filter(visible);
+    if(buttons.length!==1) throw new Error('内嵌关闭按钮不唯一：'+buttons.length);
+    const button=buttons[0],r=button.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2;
+    if(button.matches(':disabled,[disabled],[aria-disabled="true"]')||getComputedStyle(button).pointerEvents==='none')
+      throw new Error('内嵌关闭按钮不可用，未点击');
+    const hit=document.elementFromPoint(x,y);
+    if(x<0||y<0||x>=innerWidth||y>=innerHeight||!hit||(hit!==button&&!button.contains(hit)))
+      throw new Error('内嵌关闭按钮在视口外或被遮挡，未点击');
+    button.click();
+    return {clicked:true};
+  })()`;
+}
+
+export async function closeEmbeddedChat(target: EmbeddedTarget): Promise<string> {
+  return withBossSessionPage(async page=>{
+    const url=page.url();
+    const before=await assertEmbeddedConversation(page,target);
+    await page.evaluate(embeddedCloseScript(target,before.conversationId));
+    const outcomeHandle=await page.waitForFunction(`(() => {
+      if(location.href!==${JSON.stringify(url)}) return {error:'关闭后页面发生导航，停止且不重试'};
+      const roots=Array.from(document.querySelectorAll('.chat-global-conversation')).filter(e=>{
+        const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';
+      });
+      if(!roots.length) return {closed:true};
+      try {
+        const s=${EMBEDDED_STATE_SCRIPT};
+        if(s.candidateId!==${JSON.stringify(target.candidateId)}||s.name!==${JSON.stringify(target.name)}||s.job!==${JSON.stringify(target.job)}||s.conversationId!==${JSON.stringify(before.conversationId)}||s.editorId!==s.conversationId||s.rootFriendId!==s.friendId)
+          return {error:'关闭后内嵌会话变化，停止且不重试'};
+      } catch(error) { return {error:'关闭后状态读取失败：'+error.message}; }
+      return false;
+    })()`,{timeout:5000});
+    try {
+      const outcome=await outcomeHandle.jsonValue() as {error?:string;closed?:boolean};
+      if(outcome.error) throw new Error(outcome.error);
+      if(outcome.closed!==true) throw new Error('未确认内嵌窗口已关闭');
+    } finally {await outcomeHandle.dispose();}
+    return JSON.stringify({status:'embedded-closed',closed:true,target,conversationId:before.conversationId});
+  },{ensureChatShell:false,ensureMenuList:false});
+}
+
 /** Same-window send; never navigates, contacts, or falls back to the independent chat page. */
 export async function sendEmbeddedChat(target: EmbeddedTarget, rawText: string, check=false): Promise<string> {
   const text=rawText.replace(/\r\n/g,'\n').trim();

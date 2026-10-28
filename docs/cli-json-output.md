@@ -30,6 +30,8 @@ boss jd "模型评估工程师" --json
 | `--check-login` | `url,status,loggedIn` | status 为 logged-in/logged-out/unknown，对应 loggedIn 为 true/false/null；正常检查退出 0，连接/页面错误退出 1。只读页面信号，不验证服务端会话有效期 |
 | `list` | `category,filter,candidates` | 每行 `dataId,name,job,time,message,unreadCount` |
 | `chat`（姓名、序号或 data-id） | `name,dataId,summary,messages,hasFriendResumeAttachment` | summary 保留摘要数组；messages 含 `text,time,from`；仅页面已加载内容 |
+| `chat --embedded --close` | `status,closed,target,conversationId` | status 为 embedded-closed；核验目标身份及无草稿后仅关闭对应小窗一次，不导航；--close 与 --check 互斥 |
+| `dismiss-contact-notice` | `status,clicked,target,contactConfirmed` | status 为 contact-notice-dismissed；只关闭已核验候选人的已知畅聊卡使用成功提示，不触达或打开聊天；不支持 --check |
 | `recommend` | `job,candidates` | 每张实际卡片一项，保留 `geekId,name,salary,baseInfo,expect,experience,advantage,highlights,canGreet,hasHistoryChat,hasViewed`，新增work/education数组；缺失不阻止preview |
 | `search` | `keyword,job,candidates` | `candidateId,name,active,labels,basicInfo,summary,tags,expectation,work,education,reason,contactText`；带关键词时等待本次响应并核验ID/查询标识，成功空数组才是零结果 |
 | `deep-search` | `matched,form` | form 保留岗位、要求、剩余次数文字/数值、按钮文字和禁用状态 |
@@ -68,3 +70,7 @@ npm run test:json
 定向测试覆盖业务命令参数传递、字面量与默认行为、失败 JSON/退出码、推荐和搜索原字段、聊天消息和附件标记、JD 缓存、深度搜索未知次数、发送确认、附件接收/已处理边界。
 
 真实账号已验证 `chat 张袁僖 --data-id 580745010-0 --json`：成功返回一个 JSON 对象，包含摘要、10 条页面已加载消息和附件存在标记；未发送消息。其余动作 JSON 使用隔离替身验证，本轮未在真实账号重复发送、打招呼或接收请求。
+
+## version-check
+
+`boss version-check --json` 离线返回 `{compatible, requiresConfirmation, skillDir, actual:{cliVersion,skillVersion,skillCliVersion,compatibilityId}, expected:{cliVersion,skillVersion,compatibilityId}, confirmationToken}`。匹配退出码 0 且令牌为 null；不匹配退出码 2，业务启动被阻止，需用户明确确认后携带当前令牌。读取失败输出标准错误 JSON，退出码 1。外部 Skill 通过 BOSS_SKILL_DIR 指定绝对目录。

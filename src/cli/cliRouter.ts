@@ -35,7 +35,9 @@ import { runProbeTargetResume } from '../toolset/attachment.js';
 import { runCollectionSession } from '../collection/session.js';
 import { runBack } from '../toolset/back.js';
 import { parseSearchMoreArgs, runSearchMore } from '../toolset/search-more.js';
-import { inspectEmbeddedChat, checkEmbeddedChat, sendEmbeddedChat } from '../toolset/embedded-chat.js';
+import { inspectEmbeddedChat, checkEmbeddedChat, sendEmbeddedChat, closeEmbeddedChat } from '../toolset/embedded-chat.js';
+import { dismissContactNotice } from '../toolset/contact-notice.js';
+import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
 import { join } from 'node:path';
@@ -162,7 +164,10 @@ function printHelp(): void {
       显示当前版本并检查 npm 是否有更新
   boss update
       使用 npm 安装最新版 boss-cli
-  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/search-more/deep-search/preview/greet/back）
+  boss version-check [--json]
+      离线校验 CLI 与实际加载的 Skill 配套版本；外部 Skill 必须设置绝对路径 BOSS_SKILL_DIR
+      不匹配返回退出码 2，业务启动被阻止；用户确认后本轮业务命令可加 --confirm-version-mismatch <令牌>
+  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/search-more/deep-search/preview/greet/dismiss-contact-notice/back）
       输出各命令的原始字段；JSON 模式 stdout 仅输出结果，诊断日志写 stderr
       失败输出 {ok:false,command,error:{name,message}} 并返回非零退出码
       jd --json 返回 Markdown 正文与缓存路径；download-resume 默认已输出 JSON
@@ -176,6 +181,10 @@ function printHelp(): void {
   boss list [--unread] [--chatting] [--json]
       --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
   boss chat --inspect-embedded
+  boss dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位>
+    仅关闭当前搜索简历的已知畅聊卡使用成功提示；核验身份及已联系状态，点一次关闭，不点查看对话。
+  boss chat <实际姓名> --embedded --close --candidate-id <ID> --job <完整岗位>
+    仅关闭当前已核验的搜索页内嵌窗口；有草稿、遮挡或身份不符则停止，不刷新或重试。
   boss chat <实际姓名> --embedded --check --candidate-id <搜索候选人ID> --job <完整岗位>
   boss send --embedded --name <实际姓名> --candidate-id <搜索候选人ID> --job <完整岗位> --text <正文> [--check]
     只处理当前搜索页内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
@@ -441,7 +450,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back'].includes(cmd)) {
+  if (json && !['check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if(cmd==='status') {
@@ -510,18 +519,26 @@ export async function executeCommand(argv: string[]): Promise<string> {
     return implChatSearch({ name: rest[0]!, dataId: opts['data-id'], job: opts.job, ...(opts.info !== undefined ? { info: opts.info } : {}) }, json);
   }
 
+  if (cmd === 'dismiss-contact-notice') {
+    const {rest,flags,opts}=parseOpts(tail);
+    if(!rest.join(' ').trim()||flags.size||!opts['candidate-id']?.trim()||!opts.job?.trim()||Object.keys(opts).some(k=>!['candidate-id','job'].includes(k)))
+      die('dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位> [--json]');
+    return dismissContactNotice({name:rest.join(' ').trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()});
+  }
   if (cmd === 'chat') {
-    const { rest, flags, opts } = parseOpts(tail, new Set(['check', 'embedded', 'inspect-embedded']));
+    const { rest, flags, opts } = parseOpts(tail, new Set(['check', 'embedded', 'inspect-embedded', 'close']));
     if (flags.has('inspect-embedded')) {
       if(rest.length || Object.keys(opts).length || flags.size!==1) die('chat --inspect-embedded 不能与其他选项混用');
       return inspectEmbeddedChat();
     }
     if (flags.has('embedded')) {
-      if(!flags.has('check') || !rest.length || !opts['candidate-id'] || !opts.job ||
-        [...flags].some(f=>!['embedded','check'].includes(f)) || Object.keys(opts).some(k=>!['candidate-id','job'].includes(k)))
-        die('chat <实际姓名> --embedded --check --candidate-id <ID> --job <完整岗位>');
-      return checkEmbeddedChat({name:rest.join(' ').trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()});
+      if(flags.has('check')===flags.has('close') || !rest.join(' ').trim() || !opts['candidate-id']?.trim() || !opts.job?.trim() ||
+        [...flags].some(f=>!['embedded','check','close'].includes(f)) || Object.keys(opts).some(k=>!['candidate-id','job'].includes(k)))
+        die('chat <实际姓名> --embedded (--check 或 --close) --candidate-id <ID> --job <完整岗位>');
+      const target={name:rest.join(' ').trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()};
+      return flags.has('close') ? closeEmbeddedChat(target) : checkEmbeddedChat(target);
     }
+    if(flags.has('close')) die('chat --close 必须配合 --embedded、姓名、candidate-id和job');
     const nameArg = rest.join(' ').trim();
     if ((opts.action ?? '').trim().length > 0 || (opts.remark ?? '').trim().length > 0) {
       die('❌ chat 不再支持 --action/--remark。请改用: action <操作> [--remark <备注>]');
@@ -785,10 +802,22 @@ export async function runOneCommand(argv: string[]): Promise<void> {
 }
 
 async function executeManagedCommand(argv: string[]): Promise<string> {
+  if (argv[0] === 'version-check') {
+    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss version-check [--json]；通过 BOSS_SKILL_DIR 指定实际加载的 Skill');
+    const report = await checkSkillCompatibility();
+    if (!report.compatible) process.exitCode = 2;
+    return JSON.stringify(report);
+  }
+  if (argv[0] !== 'update') {
+    const parsed = splitVersionConfirmation(argv);
+    await requireSkillCompatibility(parsed.confirmation);
+    argv = parsed.argv;
+  }
   return isAttachmentCommand(argv) ? runCommandProcess(argv) : executeCommand(argv);
 }
 
 async function runInteractiveLoop(): Promise<void> {
+  await requireSkillCompatibility();
   const rl = createInterface({ input, output, terminal: true });
   await printPackageUpdateNoticeIfDue();
   printBossInteractiveBanner();
@@ -839,6 +868,9 @@ async function runInteractiveLoop(): Promise<void> {
 
 export async function runCli(argv: string[]): Promise<void> {
   if (argv[0] === 'collect') {
+    const parsed = splitVersionConfirmation(argv);
+    await requireSkillCompatibility(parsed.confirmation);
+    argv = parsed.argv;
     const { rest, opts, flags } = parseOpts(argv.slice(1));
     if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir'].includes(key))) {
       die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>]');
@@ -868,7 +900,7 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
-  if (!argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['update', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
+  if (!argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['update', 'version-check', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
     await printPackageUpdateNoticeIfDue();
   }
 

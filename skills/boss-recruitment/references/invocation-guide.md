@@ -183,9 +183,11 @@ boss chat '实际姓名' --embedded --check --candidate-id '触达回执ID' --jo
 boss send --embedded --name '实际姓名' --candidate-id '触达回执ID' --job '实际沟通岗位' --text '已确认正文' --check --json
 # 上述检查通过且已获发送授权才执行：
 boss send --embedded --name '实际姓名' --candidate-id '触达回执ID' --job '实际沟通岗位' --text '已确认正文' --json
+# 沟通完成、回执保存后关闭当前小窗（有草稿则停止）：
+boss chat '实际姓名' --embedded --close --candidate-id '触达回执ID' --job '实际沟通岗位' --json
 ```
 
-inspect仅诊断；check返回true才通过。内嵌conversationId不能直接当作列表dataId。草稿、ID／岗位不符、多窗口均停止，不跳到独立会话重试。入口已实现，完整真实发送链路尚未验收，不宣称已完成。
+inspect仅诊断；check返回true才通过。内嵌conversationId不能直接当作列表dataId。草稿、ID／岗位不符、多窗口均停止，不跳到独立会话重试。`--close` 复用会话锁／守护，原子核验身份、草稿和按钮后只点击一次，5 秒内确认窗口消失且未导航；失败不重试，不与 `--check` 混用。2026-10-28 真实发送链路已验证；关闭入口已在真实同人窗口验证关闭成功。畅聊卡使用成功提示用 `boss dismiss-contact-notice "姓名" --candidate-id "已联系ID" --job "完整岗位" --json` 单独关闭；先核对 status 的 contactNotices，仅接受已知成功文案、同人简历及继续沟通状态，5 秒确认关闭及搜索条件未变。没有 --check 或自动继续功能，失败不重试；不得误用小窗关闭命令处理提示。
 
 ## 10. 岗位、JD和账本
 
@@ -243,3 +245,7 @@ boss back --previous --expect-url 'https://www.zhipin.com/web/chat/search' --jso
 expect-url 必须是实际前一条历史的完整 URL，包含原有查询参数，不是任意想去的页面。仅当前已知 BOSS 列表、独立在线简历或权益页可用；登录／验证／未知页面不返回。目标只接受已知列表（沟通、推荐、常规搜索、深度搜索）。前后历史 ID、索引及 URL 核验不符则报错；最多一次 goBack，不刷新、不 goto、不自动重跑失败动作。弹层仍打开时应显式使用现有 back --if-open，不能混用模式或在其失败后切换模式兜底。
 
 两个入口均复用 CLI 会话锁和页面守护。此次仅通过离线测试，未连接真实 BOSS；页面结构不兼容时按错误停止，不生成临时脚本。
+
+### 启动前版本门槛
+
+每轮业务开始前执行 `boss version-check --json`，外部 Skill 设置实际绝对路径 `BOSS_SKILL_DIR`。不匹配时业务命令和 collect 阻止启动；必须展示差异并取得用户明确确认后，才在本轮命令携带 `--confirm-version-mismatch <confirmationToken>`。详见[启动与使用](start-and-use.md#启动前配套版本检查)。
