@@ -9,7 +9,7 @@ scope: "collect-unread"
 
 读取[共用规则](common-rules.md)、[账本](ledger-and-recovery.md)。输入目标岗位、JD及评估条件、获准消息、输出目录和本轮范围。禁止把 collect round 当成本 SOP。
 
-1. 确认登录；按[岗位切换脚本规范](switch-job.md)读取实时选项、唯一定位并核验目标沟通岗位，不把 collect --job 当成页面切换。启动 collect，等待 started，核对 job 和恢复状态，show 读取账本。
+1. 确认登录；按[岗位切换边界](switch-job.md)由用户切换后通过公开 CLI 的 status.chatFilterJob 核验目标沟通岗位，不把 collect --job 当成页面切换。启动 collect，等待 started，核对 job 和恢复状态，show 读取账本。
 2. **本轮只获取一次起始未读快照**：`node .\dist\cli\index.js list --unread --json`，核对岗位，保存姓名、data-id及顺序。本轮不反复刷新列表，新到未读留下一轮。
 3. 仅按起始快照中的姓名、data-id及目标岗位定位下一人。依照用户确认的新[定位流程](chat-candidate-location.md)，`chat "完整昵称" --data-id "快照ID"` 直接按昵称搜索，不主动切换或恢复岗位，唯一匹配才打开，再核验原对象ID及岗位；搜索范围不构成新增候选人授权。此前已取得并与该对象关联的info，可通过chat的--info传入原文，按完整姓名和info精确筛选；不重新取未读、不猜填、不因无匹配移除条件。筛选后仍重名时暂停等待用户手动确认或进一步指令，不按ID挑选、不滚动查找、不处理下一人。`chat --index` 仅从调用时列表取得身份再搜索，不能直接套用保存的旧序号；搜索后BOSS可能重置岗位及未读视图，后续使用原快照联合键，不刷新未读或重新取序号。无法维持快照边界时停止并报告。
 4. 进入后核对实际 data-id、姓名、目标岗位。打开使未读消失不影响继续处理已核对的当前人。依照获准范围读取摘要／在线简历及评估；新对象 add 到当前账本，保存结论；FAIL 从正式账本移除但本轮保留原因，不点页面“不合适”。

@@ -4,7 +4,7 @@
 
 本文件记录 boss-cli 已知页面 URL、对应命令和当前位置要求。修改页面导航、命令入口或报错文案前，先对照这里，避免把某个命令改成隐式跳转或多路径兜底。
 
-招聘 Agent 必须遵守[工具使用边界](../skills/boss-recruitment/references/tool-boundary.md)：真实页面默认仅用公开 CLI 及列明的岗位切换脚本。本文的源码位置、CDP 技术说明或开发测试命令不授予直接连接浏览器的权限；非 CLI 线上监测、截图和测试均需用户明确特殊声明。
+招聘 Agent 必须遵守[工具使用边界](../skills/boss-recruitment/references/tool-boundary.md)：真实页面只允许公开 CLI；岗位切换脚本的直连许可已撤销。本文的源码位置、CDP 技术说明或开发测试命令不授予直接连接浏览器的权限；非 CLI 线上监测、截图和测试全部拒绝，不提供临时绕过路径。
 
 WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招聘采集执行手册](workbuddy-recruitment-runbook.md)。
 
@@ -49,7 +49,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 - 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--info "已知原文"] [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。不操作岗位下拉，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，比较参数不用于自动选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
 
-- 沟通岗位切换使用 `node scripts/switch-job.mjs --list` 读取实时完整label，再用 `--job "完整label"` 唯一匹配并核验；要求已登录、仅一个BOSS标签且当前在 `/web/chat/index`。可显式传 `--cdp-url` 和 `--timeout-ms`，不导航、不改分类、不联系候选人、不重试；错误非零退出。完整操作规范见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
+- 沟通岗位切换由用户在 `/web/chat/index` 手动完成，Agent 通过公开 CLI `status --json` 的 `chatFilterJob` 核验；当前没有 `boss switch-job` 子命令。`scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，禁止作为替代入口。完整边界见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
 
 - 正常招聘SOP只从指定岗位未读列表逐人处理，评估一人后完成其发送/收件或等待，再处理下一人；本轮附件收集完成后统一上传。对账、复查、仅收集须人工明确指定。当前 `collect round` 遍历全账本、`chat --data-id` 通过昵称搜索已指定对象、`--check` 未命中只返回false，不能保证严格未读边界；不得将这些技术能力作为正常SOP扩大范围的授权。
 

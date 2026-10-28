@@ -13,6 +13,6 @@
 - 卡片院校信息可核验时先按用户条件预筛，证据缺失不直接否决；完整评估仍须读简历，分别记录卡片数和打开人数。
 - 推荐同岗位不重复选岗；返回简历使用back --if-open。搜索内嵌会话入口已实现，完整真实发送仍待验收。
 
-真实BOSS操作默认仅公开CLI及scripts/switch-job.mjs岗位脚本。完整限制见[工具边界](../skills/boss-recruitment/references/tool-boundary.md)。不把旧日志、历史临时脚本或说明中的源码路径当成替代操作许可。
+真实BOSS操作只允许公开CLI；scripts/switch-job.mjs直连真实浏览器的旧许可已撤销，沟通岗位由用户切换、CLI核验。完整限制见[工具边界](../skills/boss-recruitment/references/tool-boundary.md)。不把旧日志、历史临时脚本或说明中的源码路径当成替代操作许可。
 
 本轮范围、筛选条件、话术、输出位置和外部动作由用户确认。手册不是自动执行全部命令的授权；不将“可调用”当作“已验证整套招聘流程”。

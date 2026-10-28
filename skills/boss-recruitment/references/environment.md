@@ -55,7 +55,7 @@ $env:CHROME_PATH = $chromePath
 | 配置 | 默认／使用规则 |
 | --- | --- |
 | CHROME_PATH | 可省略，由CLI发现本机浏览器；设置时必须是已安装可执行文件的绝对路径，不是浏览器数据目录 |
-| BOSS_BROWSER_REMOTE_DEBUGGING_PORT | 默认53470；使用1–65535有效整数。与config.cdpUrl和switch-job的--cdp-url一致 |
+| BOSS_BROWSER_REMOTE_DEBUGGING_PORT | 默认53470；使用1–65535有效整数。与config.cdpUrl一致；不调用独立岗位切换脚本 |
 | BOSS_BROWSER_HEADLESS | 正常登录使用false，需要可见页面完成扫码；不把无头模式当成绕过验证的方法 |
 | BOSS_BROWSER_USER_DATA_DIR | 默认用户目录下 `.boss-cli/.cache/browser-data`；可选指定自己的专用目录，不复用他人配置或日常Chrome目录。故障时不得自动换目录 |
 | BOSS_CLI_TRACE | 需要排错时设true；主要覆盖登录、会话和列表日志，写stderr，不保证覆盖所有命令 |
@@ -68,12 +68,12 @@ $env:CHROME_PATH = $chromePath
 
 复制[config.example.json](../assets/config.example.json)并填写：cliDir指向含package.json和构建后dist的源码根目录；resumeDir、ledgerDir、runDir指向当前用户可写目录。目录可在首次运行创建，不需要携带示例账本。下载--output-dir和collect --ledger-dir由Agent显式传递。
 
-config.cdpUrl不是CLI原生参数；CLI用端口环境变量，岗位切换脚本用--cdp-url。timeoutBudgetSec不会改变CLI内部超时。不要输出或提交Cookie、浏览器数据、真实简历及凭据。
+config.cdpUrl不是CLI原生参数；CLI用端口环境变量，岗位切换脚本直连真实浏览器的旧许可已撤销。timeoutBudgetSec不会改变CLI内部超时。不要输出或提交Cookie、浏览器数据、真实简历及凭据。
 
 ## 安装验收
 
 1. node和npm命令可用；进入正确源码目录执行npm.cmd ci、npm.cmd run build，任一步失败停止。
-2. help含所需入口，`scripts/switch-job.mjs`存在；版本核验可用 `node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version"`，无需Git。
+2. help含所需公开入口；版本核验可用 `node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version"`，无需Git。
 3. 按[启动规范](start-and-use.md)通过boss-cli login启动并由用户完成登录，再用--check-login确认。禁止替代启动或自写CDP登录脚本。
 4. 用真实岗位确认页面条件后才开始业务SOP；安装成功不等于真实账号全部业务已验收。
 

@@ -33,7 +33,7 @@ boss status --json
 - 普通沟通页：比较当前候选人详情里的沟通岗位 `chatJob`，不是顶部筛选 `chatFilterJob`；没有当前会话时不能据此确认筛选。
 - 搜索／推荐页：比较页面当前搜索／推荐岗位条件。
 - `--embedded`：比较内嵌会话岗位；`--state job-selected`：比较联系选岗弹层的已选岗位。
-- 核验顶部沟通筛选应读取 `status --json` 的 `chatFilterJob`，或使用岗位切换脚本的明确回执。账本完整岗位键（含城市、去薪资）不得直接当作无城市的 `chatJob` 比较值。
+- 核验顶部沟通筛选应读取 `status --json` 的 `chatFilterJob`；岗位切换脚本的直连许可已撤销。账本完整岗位键（含城市、去薪资）不得直接当作无城市的 `chatJob` 比较值。
 
 ## 业务命令的默认比较标准
 

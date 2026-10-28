@@ -25,7 +25,7 @@ node .\dist\cli\index.js help
 
 | 值 | 例子 | 用在哪 |
 | --- | --- | --- |
-| 岗位下拉完整 label | 全栈软件开发工程师 _ 深圳 15-30K | switch-job，必须与实际选项完全一致 |
+| 岗位下拉完整 label | 全栈软件开发工程师 _ 深圳 15-30K | 用户手动选岗及 status.chatFilterJob 核验，必须与实际岗位一致 |
 | 账本 job | 全栈软件开发工程师 _ 深圳 | collect、add、账本文件名；保留城市、去掉薪资，由 Agent 确定 |
 | 当前会话岗位 | 全栈软件开发工程师 | chat-search --job、沟通页 check --job；按实际详情值比较 |
 | 搜索联系岗位 | 页面弹层显示的完整名称 | greet --select-job；不用账本键猜测弹层文案 |
@@ -49,15 +49,7 @@ check 可组合 `--page`、`--overlay`、`--state`、`--name`、`--data-id`、`-
 
 ## 3. 选择沟通岗位和获取起始列表
 
-这两个是仓库脚本调用，不是 `boss switch-job` 子命令；必须在沟通页。`--list` 会展开下拉，虽不换岗也不是纯只读。
-
-```powershell
-node .\scripts\switch-job.mjs --list --cdp-url 'http://127.0.0.1:53470'
-# 从上一步options取完整且唯一可用的label，再按用户目标选岗：
-node .\scripts\switch-job.mjs --job '全栈软件开发工程师 _ 深圳 15-30K' --cdp-url 'http://127.0.0.1:53470' --timeout-ms 20000
-```
-
-脚本返回 `ok=true` 且 job 与预期相同才视为选岗成功。相同岗位不重复点击；缺失、重名、关闭、超时均停止。脚本不读取 CLI 端口环境变量，端口用 `--cdp-url` 明确传入。
+沟通岗位由用户手动切换，Agent 通过公开 CLI `status --json` 的 `chatFilterJob` 核验。当前没有 `boss switch-job` 子命令；独立 `scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，不运行或包装该脚本。岗位不符或无法核实时停止依赖步骤，详见[岗位切换边界](switch-job.md)。
 
 | 调用 | 行为 | 结果 |
 | --- | --- | --- |

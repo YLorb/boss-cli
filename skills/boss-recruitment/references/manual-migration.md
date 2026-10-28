@@ -34,4 +34,4 @@ scope: "provenance-and-limitations"
 
 因此这是可安装的规范包和已推送源码快照，不是宣称所有流程均已自动化验收的产品。交付者在目标账号上验证登录、岗位、读取和单人预览后，才逐步验收已获准的联系流程。
 
-CLI仓库已提供并以隔离页面验证 `scripts/switch-job.mjs`；Skill不携带脚本副本，使用前必须读取[岗位切换规范](switch-job.md)。旧临时脚本不再作为正式入口。cut_screenshot、merge-receipts、export-resumes未形成通用验证版本，不附带；下载已有--output-dir。
+CLI仓库保留 `scripts/switch-job.mjs` 源码及隔离测试，但其直连真实浏览器的旧许可已撤销；沟通岗位由用户切换、公开CLI核验，见[岗位切换边界](switch-job.md)。旧临时脚本不再作为正式入口。cut_screenshot、merge-receipts、export-resumes未形成通用验证版本，不附带；下载已有--output-dir。

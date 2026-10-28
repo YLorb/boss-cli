@@ -46,7 +46,7 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 
 2026-10-26 用户确认的[沟通页候选人定位流程](chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期岗位"] --json`，必须已在沟通页。保留当前页面状态、不主动切岗 → 搜索图标 → 输入昵称 → 读取完整匹配项（含隐藏项） → 唯一匹配才点击 → 核验会话姓名、data-id及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令；比较参数不用于选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不重试。此命令不支持 `--check`、不发送，不以人才搜索 `boss search` 代用，现有chat及指定对象发送／附件／探测均接入此搜索，滚动查找已删除；仍只处理起始快照中的对象。`status --json` 的 `chatSearch` 字段只读查看搜索输入及结果。
 
-沟通页岗位切换使用CLI仓库的 `node .\scripts\switch-job.mjs --list` 与 `--job '完整label'`，不是boss子命令。调用前必须读取[脚本规范](switch-job.md)，参数、当前位置、结果核验和失败处理均按该规范执行。
+沟通页岗位由用户切换，再用公开 CLI `status --json` 的 `chatFilterJob` 核验。`scripts/switch-job.mjs` 不是公开 boss 子命令，其直连真实浏览器的旧许可已撤销；不得调用或包装成替代入口。见[岗位切换边界](switch-job.md)。
 
 ```powershell
 boss list --unread --json
