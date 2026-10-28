@@ -7,6 +7,9 @@ scope: "collect-unread"
 
 # 未读简历收集 SOP
 
+在线简历截图成功后，立即按[异步 OCR 规范](resume-ocr.md)由 Agent 后台执行公开 `ocr` 命令；等本人的结果完成后优先读文字评估，保留原图核验。不得以异步为由跳过逐人处理、提前评分或触达。
+
+
 读取[共用规则](common-rules.md)、[账本](ledger-and-recovery.md)。输入目标岗位、JD及评估条件、获准消息、输出目录和本轮范围。禁止把 collect round 当成本 SOP。
 
 1. 确认登录；按[岗位切换边界](switch-job.md)由用户切换后通过公开 CLI 的 status.chatFilterJob 核验目标沟通岗位，不把 collect --job 当成页面切换。启动 collect，等待 started，核对 job 和恢复状态，show 读取账本。

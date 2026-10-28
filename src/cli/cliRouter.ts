@@ -1,4 +1,5 @@
 import { runCheck, runStatus, type CheckCriteria } from '../toolset/check.js';
+import { runResumeOcr } from '../common/resume_ocr.js';
 /**
  * CLI：子命令直接调用 toolset 中的 impl*。
  * 无参数时进入交互模式，逐行解析与 `boss <argv...>` 相同的命令。
@@ -156,6 +157,9 @@ function printHelp(): void {
       进入交互模式；提示符 boss> ，exit / quit 退出；Ctrl+C 正常结束
   boss help
       显示本帮助
+  boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] [--json]
+      向 BOSS_OCR_URL（默认 http://ylorb.top:9002/ocr）上传本地截图并按坐标分栏重排；保留原图
+      截图后由 Agent 后台调用，评估前等待完成并优先读 textPath；失败报错，不重试、不连接浏览器
   boss collect --job <岗位完整名称> [--ledger-dir <目录>]
       一岗一账的常驻会话；stdin 每行一个 JSON 命令，stdout 每行一个 JSON 结果
       op: add / decision / round / recheck / reconcile / show / stop；仅 stop 或 Ctrl+C 正常写回
@@ -450,8 +454,22 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['ocr', 'check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
+  }
+  if (cmd === 'ocr') {
+    const paths: string[] = [];
+    let timeoutMs: number | undefined;
+    for (let i = 0; i < tail.length; i++) {
+      if (tail[i] === '--timeout-ms') {
+        if (timeoutMs !== undefined || !/^\d+$/.test(tail[i+1] ?? '')) die('ocr --timeout-ms 需要唯一整数值');
+        timeoutMs = Number(tail[++i]);
+      } else if (tail[i].startsWith('-')) die('ocr 不支持参数：' + tail[i]);
+      else paths.push(tail[i]);
+    }
+    if (paths.length !== 1) die('用法: boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] [--json]');
+    const result = await runResumeOcr(paths[0], timeoutMs);
+    return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
   }
   if(cmd==='status') {
     if(tail.length) die('status 不接受参数');
@@ -900,7 +918,7 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
-  if (!argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['update', 'version-check', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
+  if (!argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['ocr', 'update', 'version-check', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
     await printPackageUpdateNoticeIfDue();
   }
 

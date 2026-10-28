@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { resumeOcrRequest } from '../common/resume_ocr.js';
 import type { Page } from 'puppeteer-core';
 import {
   ONLINE_RESUME_IFRAME_WAIT_MAX_MS,
@@ -592,8 +593,8 @@ export async function runChatActionOnCurrentConversation(
       if (resumeShotPath === null) {
         throw new Error('未找到在线简历入口，或在线简历弹层未正常出现。');
       }
-      if (options.json) return JSON.stringify({ action: 'resume', name: candidateLabel, path: resumeShotPath, type: 'online-resume-screenshot' });
-      return `在线简历操作成功，截图文件：${resumeShotPath}`;
+      if (options.json) return JSON.stringify({ action: 'resume', name: candidateLabel, path: resumeShotPath, type: 'online-resume-screenshot', ocr: resumeOcrRequest(resumeShotPath) });
+      return `在线简历操作成功，截图文件：${resumeShotPath}\nOCR 待由 Agent 后台执行：ocr ${JSON.stringify(resumeShotPath)} --json`;
     }
     case 'agree-resume':
       return runIncomingResumeCardAction(page, 'agree', options.target, options.json);

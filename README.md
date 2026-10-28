@@ -255,3 +255,7 @@ Cloudflare Workers Builds 配置：
 ## 本地招聘调用说明
 
 当前调用语法、参数、前置条件、返回结果与停止规则见[逐项调用手册](skills/boss-recruitment/references/invocation-guide.md)。岗位名、城市、薪资与会话岗位的区分，以及collect常驻stdin协议均在手册中明确。
+
+### 在线简历文字提取
+
+截图命令保留 PNG，并返回 OCR 调用描述。Agent 后台执行 `node dist/cli/index.js ocr "<PNG绝对路径>" --json`，完成后优先读取 `textPath`，低置信度或排版疑点核对原图。默认 `BOSS_OCR_URL=http://ylorb.top:9002/ocr`；无浏览器操作、无自动重试，滚轮与随机停顿保持原样。支持明确的单栏/双栏，复杂跨栏报错。参见[异步 OCR 使用规范](skills/boss-recruitment/references/resume-ocr.md)。

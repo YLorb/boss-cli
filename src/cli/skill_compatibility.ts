@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 export const COMPATIBILITY = Object.freeze({
   cliVersion: '0.6.9',
-  skillVersion: '1.0.15',
-  compatibilityId: '2026-10-28-search-card-controls-v1',
+  skillVersion: '1.0.16',
+  compatibilityId: '2026-10-29-resume-ocr-v1',
 });
 const installRoot = fileURLToPath(new URL('../../', import.meta.url));
 

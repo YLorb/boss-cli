@@ -68,7 +68,8 @@
     "test:resume-timing": "node --experimental-test-module-mocks --test scripts/test-resume-capture-timing.mjs",
     "test:positions": "node --experimental-test-module-mocks --test scripts/test-positions.mjs",
     "test:switch-job": "node --test scripts/test-switch-job.mjs",
-    "test:search-more-back": "node --experimental-test-module-mocks --test scripts/test-search-more-back.mjs"
+    "test:search-more-back": "node --experimental-test-module-mocks --test scripts/test-search-more-back.mjs",
+    "test:resume-ocr": "node --test scripts/test-resume-ocr.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

@@ -7,6 +7,9 @@ scope: "search"
 
 # 搜索 SOP
 
+在线简历截图成功后，立即按[异步 OCR 规范](resume-ocr.md)由 Agent 后台执行公开 `ocr` 命令；等本人的结果完成后优先读文字评估，保留原图核验。不得以异步为由跳过逐人处理、提前评分或触达。
+
+
 前置读取：[只读check/status规范](check-status.md)、[共用规则](common-rules.md)、[账本与恢复](ledger-and-recovery.md)、[路径核验](paths.md)。真实页面仅使用公开 boss-cli，遵守[工具边界](tool-boundary.md)。以下 `boss` 是简写，执行时在核验后的 cliDir 使用 `node .\dist\cli\index.js`；搜索触达步骤需要包含 `fc55e17` 功能的 CLI；入口元数据中的旧基线不保证这些参数可用，先检查当前安装的 help 与版本来源。
 
 ## 输入与权限

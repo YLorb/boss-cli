@@ -69,7 +69,7 @@ boss preview '唯一候选人姓名' --json
 boss greet '唯一候选人姓名' --job '岗位关键字' --json
 ```
 
-recommend岗位模糊匹配；核对实际完整名称。search关键词最多20字符，不带词只读取当前状态；不支持--job、不设置不限职位、不提供加载更多。preview保存在线简历截图并关闭弹层，会消耗查看次数；不做OCR。姓名歧义先停止。greet支持推荐／深度搜索；包含2026-10-20本地实现的CLI还支持搜索页及其在线简历。搜索页先用 greet "完整显示姓名" --check --json 预检，实际联系去掉 --check，不支持 --job。联系可能消耗次数并发送平台默认问候。contact-confirmed只证明按钮变为“继续沟通”；不代表消息3或账本完成。点击后未确认不得重试。旧安装须先核验help及来源，不因本Skill描述就认定已具备新功能。
+recommend岗位模糊匹配；核对实际完整名称。search关键词最多20字符，不带词只读取当前状态；不支持--job、不设置不限职位、不提供加载更多。preview保存在线简历截图并关闭弹层，会消耗查看次数；返回 OCR 调用描述，由 Agent 后台执行公开 `ocr` 命令并优先读文字，见[OCR规范](resume-ocr.md)。姓名歧义先停止。greet支持推荐／深度搜索；包含2026-10-20本地实现的CLI还支持搜索页及其在线简历。搜索页先用 greet "完整显示姓名" --check --json 预检，实际联系去掉 --check，不支持 --job。联系可能消耗次数并发送平台默认问候。contact-confirmed只证明按钮变为“继续沟通”；不代表消息3或账本完成。点击后未确认不得重试。旧安装须先核验help及来源，不因本Skill描述就认定已具备新功能。
 
 ```powershell
 boss deep-search --core '模型推理优化' --core '源码实现经验' --bonus 'CUDA' --json

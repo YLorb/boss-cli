@@ -97,7 +97,7 @@ boss send --name '张三' --data-id '123-0' --text '已确认正文' --json
 
 | 调用 | 实际动作／前提 |
 | --- | --- |
-| `boss action resume --json` | 当前正确会话的在线简历截图，不做OCR |
+| `boss action resume --json` | 当前正确会话的在线简历截图，返回待执行的 OCR 描述 |
 | `boss action history --json` | 打开并读取沟通记录，不证明所有历史均已加载 |
 | `boss action remark --remark '备注内容' --json` | 修改当前候选人备注 |
 | `boss action agree-resume --json` | 同意当前附件请求；自动化优先使用带联合键的accept-resume |
@@ -220,7 +220,7 @@ stdin不支持send、download、upload、recordProbe。独立下载回执不会�
 | `boss version`／`boss ver`／`boss --version`／`boss -v` | 版本及npm更新检查，可能联网 |
 | `boss update` | 更新全局npm包，不等于更新当前源码／ZIP；不要在业务中自动升级 |
 
-没有通用的搜索清空、批量候选人选择、账本导入下载回执或上传HR系统命令。常规搜索扩池使用下节有上限的 search-more；不支持其他页面加载更多。遇到能力缺口保存现场并报告，不编造选项、不使用跨页往返恢复。失败后仅可按下节显式 back --previous 返回一步，不重新执行失败动作。`_baidu-keys` 是内部凭据入口，不属于本SOP；截图OCR当前关闭。
+没有通用的搜索清空、批量候选人选择、账本导入下载回执或上传HR系统命令。常规搜索扩池使用下节有上限的 search-more；不支持其他页面加载更多。遇到能力缺口保存现场并报告，不编造选项、不使用跨页往返恢复。失败后仅可按下节显式 back --previous 返回一步，不重新执行失败动作。`_baidu-keys` 是内部凭据入口，不属于本SOP；截图后使用独立公开 `ocr` 命令异步提取，见[OCR规范](resume-ocr.md)。
 
 运行记录留在工作目录，包含命令参数、开始／结束时间、退出码、原始JSON、筛选与身份依据。不要随发布包交付真实候选人回执、简历、浏览器资料或密钥。
 
@@ -249,3 +249,7 @@ expect-url 必须是实际前一条历史的完整 URL，包含原有查询参�
 ### 启动前版本门槛
 
 每轮业务开始前执行 `boss version-check --json`，外部 Skill 设置实际绝对路径 `BOSS_SKILL_DIR`。不匹配时业务命令和 collect 阻止启动；必须展示差异并取得用户明确确认后，才在本轮命令携带 `--confirm-version-mismatch <confirmationToken>`。详见[启动与使用](start-and-use.md#启动前配套版本检查)。
+
+## 本地截图 OCR
+
+`boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] [--json]` 无页面前置条件；上传指定图片，保留原图及原始响应，按 `dt_boxes` 重排。成功返回 `status=completed,imagePath,imageSha256,textPath,boxesPath,rawPath,resultPath,layout,lineCount,lowConfidenceIds,needsReview,timing`。具体 Agent 异步调用与停止规则见[OCR规范](resume-ocr.md)。

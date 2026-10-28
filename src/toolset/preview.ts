@@ -2,6 +2,7 @@
  * 在线简历预览：须在「推荐」页、「深度搜索 aiform」页或「常规搜索」页且列表已加载；不自动跳转，否则报错。
  */
 import { openSearchResumeOnly } from './open-search-resume.js';
+import { resumeOcrRequest } from '../common/resume_ocr.js';
 import { readRecommendCandidateId, assertRecommendResumeIdentity } from './recommend_identity.js';
 import { visibleResumeFrame } from './search-greet.js';
 import { join } from 'node:path';
@@ -125,9 +126,9 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const disclaimer =
         '说明：平台对在线简历的每日可查看次数有限，请按需使用、谨慎查看。';
 
-      if (options.json) return JSON.stringify({ name: target, ...(verifiedCandidateId ? {candidateId: verifiedCandidateId, identityVerified:true} : {}), sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot' });
+      if (options.json) return JSON.stringify({ name: target, ...(verifiedCandidateId ? {candidateId: verifiedCandidateId, identityVerified:true} : {}), sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot', ocr: resumeOcrRequest(absPath) });
 
-      return [jobLine, `简历预览截图：${absPath}`, '', disclaimer].join('\n');
+      return [jobLine, `简历预览截图：${absPath}`, `OCR 待由 Agent 后台执行：ocr ${JSON.stringify(absPath)} --json`, '', disclaimer].join('\n');
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);

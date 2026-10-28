@@ -41,8 +41,8 @@ boss jd "模型评估工程师" --json
 | `accept-resume` / `action agree-resume` | `action,kind,which,target,attachmentReceived` | 返回 clicked，且已等到新附件卡片；已处理请求仍报错 |
 | `download-resume` | `name,dataId,geekId,attachmentName,fileName,path,bytes,sha256` | 默认即 JSON；`--json` 同样接受；图片 geekId 为 null |
 | `probe-resume` | `name,dataId,attachment,attachmentName,request,requestEvidence,scope,download` | 默认即 JSON；scope=loaded-messages；未观察到为 NOT_OBSERVED，不代表无附件或未发送；`--download` 才返回下载详情 |
-| `preview` | `name,sourceUrl,job,path,type`，搜索／推荐另含candidateId、identityVerified | type 为 `online-resume-screenshot`，不是原附件或 OCR 结果；open-only仅搜索，见调用手册 |
-| `action resume` | `action,name,path,type` | 同上，为在线简历截图 |
+| `preview` | `name,sourceUrl,job,path,type,ocr`，搜索／推荐另含candidateId、identityVerified | type 为 `online-resume-screenshot`，不是原附件或 OCR 结果；open-only仅搜索，见调用手册 |
+| `action resume` | `action,name,path,type,ocr` | 同上，为在线简历截图 |
 | `greet` | `source,name,message,status,candidates`，推荐页另含 `geekId,job,candidateId,identityVerified`；深度搜索另含 `jobKeyword` | 推荐status为clicked，只确认点击，不代表回复；搜索返回独立联系状态，见调用手册；--check只返回布尔值 |
 | `send` | `text,target,status,requestResume`；求简历时另含 `resumeRequest` | status 为 message-visible，已确认页面出现新增匹配正文；不是已读回执。未指定目标时 target 为 null |
 | `action not-fit` | `action,status` | clicked |
@@ -74,3 +74,7 @@ npm run test:json
 ## version-check
 
 `boss version-check --json` 离线返回 `{compatible, requiresConfirmation, skillDir, actual:{cliVersion,skillVersion,skillCliVersion,compatibilityId}, expected:{cliVersion,skillVersion,compatibilityId}, confirmationToken}`。匹配退出码 0 且令牌为 null；不匹配退出码 2，业务启动被阻止，需用户明确确认后携带当前令牌。读取失败输出标准错误 JSON，退出码 1。外部 Skill 通过 BOSS_SKILL_DIR 指定绝对目录。
+
+### 截图 OCR
+
+截图回执的 `ocr={status:"not-started",command:"ocr",args:[绝对图片路径,"--json"],execution:"agent-background",imagePath}` 是待执行描述，不表示上传已开始。`ocr` 命令完成时返回 `status=completed`、输入 SHA-256、文字/坐标/原始响应/结果路径、layout、lineCount、lowConfidenceIds、needsReview 和 timing；失败为标准 JSON 错误，非零退出码，错误包含原图及诊断结果路径。每次调用独立输出目录，失败或中断不消费半成品。详见[OCR规范](../skills/boss-recruitment/references/resume-ocr.md)。
