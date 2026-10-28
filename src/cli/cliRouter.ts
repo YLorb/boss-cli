@@ -34,6 +34,7 @@ import { isAttachmentCommand, runCommandProcess } from './command_process.js';
 import { runProbeTargetResume } from '../toolset/attachment.js';
 import { runCollectionSession } from '../collection/session.js';
 import { runBack } from '../toolset/back.js';
+import { parseSearchMoreArgs, runSearchMore } from '../toolset/search-more.js';
 import { inspectEmbeddedChat, checkEmbeddedChat, sendEmbeddedChat } from '../toolset/embedded-chat.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
@@ -161,7 +162,7 @@ function printHelp(): void {
       显示当前版本并检查 npm 是否有更新
   boss update
       使用 npm 安装最新版 boss-cli
-  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/deep-search/preview/greet/back）
+  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/search-more/deep-search/preview/greet/back）
       输出各命令的原始字段；JSON 模式 stdout 仅输出结果，诊断日志写 stderr
       失败输出 {ok:false,command,error:{name,message}} 并返回非零退出码
       jd --json 返回 Markdown 正文与缓存路径；download-resume 默认已输出 JSON
@@ -214,11 +215,18 @@ function printHelp(): void {
       抓取指定职位详情并缓存到项目目录同名 .md
   boss back [--if-open]；back --check-in_online_resume 只判断是否打开简历
       关闭在线简历弹层；独立在线简历页仅向已核验的列表历史回退一步。检查开关在列表上不操作。
+  boss back --previous --expect-url <前一条历史的完整BOSS列表URL> [--json]
+      显式返回上一条浏览器历史，仅一步；核对前后历史ID及URL。不刷新、不重新路由、不重跑失败动作。
+      仅支持已知列表、在线简历页及权益页；登录、验证、未知页或简历弹层仍打开时停止。
 
   boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
       进入推荐页并读取推荐列表；岗位名称＋城市作为匹配键，忽略薪资后缀；同岗位不重复选择；--ensure-job 要求该键唯一精确匹配
   boss search [关键词]
       进入「搜索」页并读取当前结果；带关键词时提交一次，等待本次响应成功并核对页面候选人 ID/查询标识；失败不重试
+  boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]
+      仅当前常规搜索页，逐次向下滚动并核验下一页响应；关键词／岗位保持不变，按候选人ID去重，不联系。
+      人数上限包含起始列表、限制返回池；平台单页可能额外加载。每轮响应及核验共用超时，默认10000ms。
+      达上限、成功空响应或成功响应无新增ID即结束；无响应、请求失败或页面变化直接报错，不刷新、不重试。
   boss preview <姓名> [--candidate-id <ID>] [--open-only]
       在线简历预览：须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
       --candidate-id 支持推荐及常规搜索：姓名和 ID 联合唯一核验；无 ID 时重名暂停；深度搜索不支持该参数
@@ -433,7 +441,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'preview', 'recommend', 'greet', 'back'].includes(cmd)) {
+  if (json && !['check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if(cmd==='status') {
@@ -681,6 +689,8 @@ export async function executeCommand(argv: string[]): Promise<string> {
     return implBossSearch({ ...parseDeepSearchArgs(tail), json });
   }
 
+  if (cmd === 'search-more') return runSearchMore(parseSearchMoreArgs(tail), json);
+
   if (cmd === 'search') {
     const { rest, opts, flags } = parseOpts(tail);
     if (flags.size > 0 || Object.keys(opts).length > 0) {
@@ -708,8 +718,15 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'back') {
-    const { rest, opts, flags } = parseOpts(tail, new Set(['check-in_online_resume','if-open']));
-    if (rest.length || Object.keys(opts).length || [...flags].some(f => !['check-in_online_resume','if-open'].includes(f))) die('❌ 用法: back [--if-open | --check-in_online_resume]');
+    const keys = tail.filter(t => t.startsWith('--')).map(t => t.split('=')[0]);
+    if (new Set(keys).size !== keys.length) die('back 参数不能重复');
+    const { rest, opts, flags } = parseOpts(tail, new Set(['check-in_online_resume','if-open','previous']));
+    if (rest.length || Object.keys(opts).some(k => k !== 'expect-url') || [...flags].some(f => !['check-in_online_resume','if-open','previous'].includes(f))) die('用法: back [--if-open | --check-in_online_resume | --previous --expect-url <URL>]');
+    if (flags.has('previous')) {
+      if (flags.size !== 1 || !opts['expect-url']?.trim()) die('--previous 必须配合 --expect-url，不能与其他返回或检查开关混用');
+      return runBack(false, json, opts['expect-url']);
+    }
+    if (Object.keys(opts).length) die('--expect-url 仅用于 back --previous');
     if(flags.has('check-in_online_resume')) {if(flags.has('if-open'))die('检查不能与返回动作混用');return runCheck({state:'online-resume-open'});}
     return runBack(flags.has('if-open'), json);
   }

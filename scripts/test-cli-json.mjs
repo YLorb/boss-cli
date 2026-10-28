@@ -13,7 +13,24 @@ mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries(names
   return JSON.stringify({reader:name,args});
 }])) });
 mock.module('../dist/toolset/back.js', { namedExports: { runBack: async (...args) => { calls.push({name:'runBack',args}); return JSON.stringify({args}); } } });
+mock.module('../dist/toolset/search-more.js', { namedExports: {
+  parseSearchMoreArgs: args => ({parsedArgs:args}),
+  runSearchMore: async (...args) => { calls.push({name:'runSearchMore',args}); return JSON.stringify({args}); },
+}});
 const { executeCommand } = await import('../dist/cli/cliRouter.js');
+
+test('new bounded search and explicit history-back routes forward JSON and reject mixed back flags', async () => {
+  await executeCommand(['search-more','--max-scrolls','2','--max-candidates','40','--json']);
+  assert.deepEqual(calls.at(-1), {name:'runSearchMore',args:[{parsedArgs:['--max-scrolls','2','--max-candidates','40']},true]});
+  const url='https://www.zhipin.com/web/chat/search';
+  await executeCommand(['back','--previous','--expect-url',url,'--json']);
+  assert.deepEqual(calls.at(-1),{name:'runBack',args:[false,true,url]});
+  const before=calls.length;
+  for(const args of [['back','--previous'],['back','--expect-url',url],['back','--previous','--if-open','--expect-url',url],
+    ['back','--previous','--check-in_online_resume','--expect-url',url],['back','--previous=false','--expect-url',url],
+    ['back','--previous','--expect-url',url,'--expect-url',url]]) await assert.rejects(executeCommand(args));
+  assert.equal(calls.length,before);
+});
 
 test('every business command forwards --json to its reader, including aliases and flag placement', async () => {
   const cases = [

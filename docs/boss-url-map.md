@@ -23,6 +23,16 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 约定
 
+### 有上限的扩池与显式历史返回（2026-10-28）
+
+- `boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]`：只在当前 `/web/chat/search` 执行，要求无在线简历弹层、搜索 iframe 已就绪。两个上限必填；每轮响应及页面核验共用超时，默认 10000ms。复用 `withBossSessionPage` 的会话锁和页面守护，不切岗位／关键词，不调用 search 重查。
+- 单一路径滚动搜索 iframe 的 `document.scrollingElement` 到底，监听页面自然发起的下一页 geeks.json 请求；不直接发接口请求、不调用组件加载方法。容器不可滚动或已到底而无法再滚动时明确报错，不改用其他容器。每轮只接受一次、当前关键词＋岗位 ID＋下一页码的成功响应，核对响应 ID/lid 与组件及 DOM；变化、重复请求、接口错误、超时均停止，不返回部分池冒充成功。
+- 返回池按 candidateId 去重并核验同 ID 姓名；人数上限包含起始列表，限制返回的唯一候选人数量，平台单次响应可能加载更多卡片。达到任一上限、成功空响应或成功响应没有新增 ID 后正常结束；没有响应是失败，不推断已到底。JSON 含 keyword、jobId、上限、scrolls、initialCount、addedCount、duplicatesSkipped、stopReason、candidates。跨命令去重仍由运行回执维护；命令不预览、不联系、不发送。
+- `boss back --previous --expect-url <完整URL> [--json]`：显式返回前一条浏览器历史，仅一步。当前页只允许上述四种已知列表、`/web/frame/c-resume/...` 或 `/web/chat/business/mine`；目标须为 HTTPS `www.zhipin.com` 的已知列表完整 URL（含查询参数）。登录、验证、未知页面、无前项、同 URL、目标不符、弹层仍打开均停止。先检查相邻历史及当前 URL，再调用一次 `goBack`，返回后核对历史索引、条目 ID 和完整 URL。
+- 这是失败回执保存后的独立显式动作，不是自动失败回退。任何业务异常都不会自动调用它，不刷新、不 goto／重新设置路由、不重新执行失败命令；返回失败也不再次返回。现有 `back --if-open` 继续处理简历弹层，两种模式互斥。
+- 离线测试：`npm run test:search-more-back`，另运行 CLI JSON、搜索关键词、既有返回及不自动恢复回归。模拟 DOM／网络／历史测试通过不代表当前真实 BOSS 页面结构已验收；不得通过临时脚本补救结构差异。
+
+
 - `collect reconcile` 的完整盘点使用主沟通列表 `.chat-user .user-container > .user-list`，不依赖内嵌聊天的 `.chat-global-list`。读取唯一可见根节点的 `loading$`／`hasMore$`，仅在加载结束、无后续页、`.load-tips` 非加载态可见且滚动到底后完成；已加载组件会话ID必须全部出现在盘点结果中。空态须同时有零数据、无更多页及可见“暂无牛人”。结构缺失、状态异常、漏项或加载超时明确报错，不返回部分列表、不回退旧容器。
 
 - 推荐选岗按“岗位名称＋城市”比较，忽略薪资后缀；如 `recommend '全栈软件开发工程师 _ 深圳' --ensure-job --json`。下拉搜索只输入岗位名称，读取选项后再比较名称和城市；任何模式出现多项匹配均停止。当前岗位键相同不重复点击；`check --page recommend --job`／`recommend --check-job` 使用同一比较口径，返回的岗位标签仍保留页面原文。

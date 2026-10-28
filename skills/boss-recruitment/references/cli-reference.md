@@ -174,3 +174,7 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 - `greet "姓名" --candidate-id "ID" [--check] --json`：同一 ID 贯穿首次联系、预检及选岗/确认。继续沟通仍必须携带成功回执 ID。
 - 无 ID 时维持姓名必须唯一；ID 缺失、姓名不符、重复 ID 或目标不在当前列表直接报错，不回退按姓名匹配，不刷新寻找。
 - 只有获得当前卡片的可靠 ID 后才可处理同名者，仍不唯一则暂停。推荐同样支持姓名＋ID；深度搜索不支持该参数。
+
+## 搜索扩池与显式历史返回（2026-10-28）
+
+公开入口：`search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] --json` 与 `back --previous --expect-url <完整URL> --json`。前者限当前常规搜索页、按 ID 去重且不联系；后者只返回已核验的前一条浏览器历史一步，不刷新或重跑失败动作。完整参数、返回字段、上限与停止条件见[逐项调用手册](invocation-guide.md#12-有上限的搜索扩池与返回上一页)。仅离线测试通过，未做真实页面验收。

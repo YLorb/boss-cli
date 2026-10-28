@@ -7,7 +7,7 @@ import { SEARCH_STATE_SCRIPT, submitSearchQuery, searchMatchesEvidenceScript, ty
 const BOSS_CHAT_SEARCH_URL = 'https://www.zhipin.com/web/chat/search';
 const SEARCH_FRAME_READY_TIMEOUT_MS = 18_000;
 
-type NormalSearchCandidate = {
+export type NormalSearchCandidate = {
   candidateId: string;
   name: string;
   active: string;
@@ -177,7 +177,7 @@ export async function openNormalSearchResumePreview(frame: Frame, target: string
   return opened;
 }
 
-async function readNormalSearchCandidates(frame: Frame): Promise<NormalSearchCandidate[]> {
+export async function readNormalSearchCandidates(frame: Frame): Promise<NormalSearchCandidate[]> {
   return (await frame.evaluate(`(() => {
     const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
     const unique = (items) => Array.from(new Set(items.map(norm).filter(Boolean)));
