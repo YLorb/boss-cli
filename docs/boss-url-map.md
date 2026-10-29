@@ -9,7 +9,7 @@ $env:BOSS_SKILL_DIR = 'C:\Recruitment\workspace\.workbuddy\skills\boss-recruitme
 node .\dist\cli\index.js version-check --json
 ```
 
-CLI 0.6.9 配套 Skill 1.0.16，兼容标识为 `2026-10-29-resume-ocr-v1`。独立版本号按配套关系比较。未设置 BOSS_SKILL_DIR 时明确使用当前 CLI 安装附带的 Skill；加载外部 Skill 的 Agent 必须指定外部实际目录，不能以包内版本替代检查。文件缺失、格式错误直接报错，不搜索其他路径。
+CLI 0.6.10 配套 Skill 1.0.17，兼容标识为 `2026-10-29-resume-ocr-v2`。独立版本号按配套关系比较。未设置 BOSS_SKILL_DIR 时明确使用当前 CLI 安装附带的 Skill；加载外部 Skill 的 Agent 必须指定外部实际目录，不能以包内版本替代检查。文件缺失、格式错误直接报错，不搜索其他路径。
 
 匹配返回 compatible:true，退出码 0；不匹配返回 compatible:false、requiresConfirmation:true、实际与期望版本、路径及 confirmationToken，退出码 2。所有业务命令（含 login、只读 status/check、附件子进程和 collect）在连接浏览器或写账本前阻止启动。help、version、update、version-check 可用于诊断和修复。
 

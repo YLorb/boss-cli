@@ -2,21 +2,23 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.16"
+  version: "1.0.17"
   updated: "2026-10-29"
   language: "zh-CN"
-  cli-version: "0.6.9"
-  cli-compatibility: "2026-10-29-resume-ocr-v1"
-  cli-baseline: "0.6.9-dev-resume-ocr"
+  cli-version: "0.6.10"
+  cli-compatibility: "2026-10-29-resume-ocr-v2"
+  cli-baseline: "v0.6.10"
 ---
 
 # BOSS 招聘流程
 
 这是本机 CLI 的操作规范，不是独立浏览器驱动。执行需要可运行 shell 的 Agent、Node.js、Chrome 和使用者自己的 BOSS 登录态。仅能对话的 GPT 无法直接执行。不要因加载本 Skill 自动开始操作。
 
+每轮开始操作前必须读取本 Skill 的 [AGENTS.md](AGENTS.md)，遵守其中的上下文保留与同一候选人 OCR 汇总评估约束；不假定宿主会自动加载该文件。
+
 ## 启动前版本校验（强制）
 
-每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.9 与 Skill 1.0.16 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
+每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.10 与 Skill 1.0.17 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
 
 ## SOP 执行约束（必读）
 
@@ -70,7 +72,7 @@ metadata:
 
 ## 截图后自动异步提取文字
 
-`preview` / `action resume` 成功返回截图后，Agent 必须按[异步 OCR 规范](references/resume-ocr.md)立即后台调用公开 `ocr` 命令，保留任务句柄，等待完成后优先读取文字评估。原图保留用于低置信度或排版疑点核验；`not-started` 不是完成。失败明确报告，不重试、不换服务、不跳过完整性检查。滚轮及全部随机停顿不变。
+`preview` / `action resume` 成功返回截图后，Agent 必须按[异步 OCR 规范](references/resume-ocr.md)优先识别完整长图，先检查已有任务或成功结果，避免重复 OCR；需要识别时立即后台调用公开 `ocr` 命令并保留任务句柄。同一候选人的全部必需结果成功返回并核验后，统一读取文字评估。原图保留用于低置信度或排版疑点核验；`not-started` 不是完成。失败明确报告，不重试、不换服务、不跳过完整性检查。滚轮及全部随机停顿不变。
 
 ## 所有流程共同遵守
 

@@ -4,9 +4,9 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const COMPATIBILITY = Object.freeze({
-  cliVersion: '0.6.9',
-  skillVersion: '1.0.16',
-  compatibilityId: '2026-10-29-resume-ocr-v1',
+  cliVersion: '0.6.10',
+  skillVersion: '1.0.17',
+  compatibilityId: '2026-10-29-resume-ocr-v2',
 });
 const installRoot = fileURLToPath(new URL('../../', import.meta.url));
 
