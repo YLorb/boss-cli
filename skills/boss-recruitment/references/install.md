@@ -1,7 +1,7 @@
 ---
 title: "下载、安装与版本兼容"
 read_when: "首次部署、换机、升级或命令缺失"
-updated: "2026-10-29"
+updated: "2026-10-30"
 scope: "local-installation"
 ---
 
@@ -13,9 +13,11 @@ scope: "local-installation"
 
 Node.js/npm缺失时，先按[环境配置的授权安装流程](environment.md#nodejsnpm缺失时的授权安装流程)告知用户，取得明确同意后再由Agent从 https://nodejs.org/ 下载并配置。Chrome仅作浏览器推荐，Agent不下载、不安装；缺少兼容浏览器时由用户自行准备。版本要求以交付源码的package.json、构建结果及命令核验为准。
 
-## 当前版本：v0.6.10
+## 当前版本：v0.6.11
 
-CLI 0.6.10 配套 Skill 1.0.17。使用下文的 `v0.6.10` 标签源码，安装依赖并构建；源码归档不包含 dist 或 node_modules。构建后运行 `node .\dist\cli\index.js version-check --json`，确认 `compatible=true`。全局 `boss` 若链接到此源码目录，重新构建后即使用新版本；其他安装须单独核验。
+CLI 0.6.11 配套 Skill 1.0.20，兼容标识为 `2026-10-30-resume-analysis-v1`。本版包含受守卫保护的公开 `switch-job`、截图后按收集／推荐搜索区分退出或停留、下载命令30秒总时限，以及本地文字解析交接脚本。截图滚轮速度与随机停顿不变。
+
+使用下文的 `v0.6.11` 标签源码，安装依赖并构建；源码归档不包含 dist 或 node_modules。构建后运行 `node .\dist\cli\index.js version-check --json`，确认 `compatible=true`。全局 `boss` 若链接到此源码目录，重新构建后即使用新版本；其他安装须单独核验。
 
 完整 Skill 位于源码的 `skills/boss-recruitment/`，包括操作前必读的 `AGENTS.md`。不要沿用旧版独立 Skill。端口配置、各命令参数及前置条件见[逐项调用手册](invocation-guide.md)。下节旧版快照仅供历史复现。
 
@@ -37,21 +39,21 @@ node .\dist\cli\index.js help
 
 ## 路径二：GitHub 标签 ZIP下载（无需Git）
 
-v0.6.10 的下载地址：
+v0.6.11 的下载地址：
 
-[下载CLI源码ZIP：v0.6.10](https://github.com/YLorb/boss-cli/archive/refs/tags/v0.6.10.zip)
+[下载CLI源码ZIP：v0.6.11](https://github.com/YLorb/boss-cli/archive/refs/tags/v0.6.11.zip)
 
 可在浏览器中直接下载，也可使用PowerShell；下面目标目录须尚不存在，避免覆盖现有安装：
 
 ```powershell
 $installRoot = 'C:\Recruitment'
-$archive = Join-Path $installRoot 'boss-cli-v0.6.10.zip'
-$extractDir = Join-Path $installRoot 'boss-cli-v0.6.10'
+$archive = Join-Path $installRoot 'boss-cli-v0.6.11.zip'
+$extractDir = Join-Path $installRoot 'boss-cli-v0.6.11'
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 if ((Test-Path -LiteralPath $archive) -or (Test-Path -LiteralPath $extractDir)) { throw '下载目标已存在，请选择新的目录或核验现有文件' }
-Invoke-WebRequest -Uri 'https://github.com/YLorb/boss-cli/archive/refs/tags/v0.6.10.zip' -OutFile $archive
+Invoke-WebRequest -Uri 'https://github.com/YLorb/boss-cli/archive/refs/tags/v0.6.11.zip' -OutFile $archive
 Expand-Archive -LiteralPath $archive -DestinationPath $extractDir
-Set-Location (Join-Path $extractDir 'boss-cli-0.6.10')
+Set-Location (Join-Path $extractDir 'boss-cli-0.6.11')
 npm.cmd ci
 if ($LASTEXITCODE -ne 0) { throw '依赖安装失败，停止' }
 npm.cmd run build
@@ -68,16 +70,16 @@ GitHub归档格式与固定提交下载依据：[GitHub官方文档](https://doc
 ## Git方式（可选，已有方法保留）
 
 ```powershell
-git clone --branch v0.6.10 https://github.com/YLorb/boss-cli.git
+git clone --branch v0.6.11 https://github.com/YLorb/boss-cli.git
 Set-Location boss-cli
-git checkout v0.6.10
+git checkout v0.6.11
 git rev-parse HEAD
 npm ci
 npm run build
 node .\dist\cli\index.js help
 ```
 
-以上固定到 v0.6.10 标签，Skill 使用该标签内的配套目录。后续升级需由交付者提供新的已验收 ref。原上游为 https://github.com/joohw/boss-cli ，不保证与此分支能力一致；更换来源须重新核验。
+以上固定到 v0.6.11 标签，Skill 使用该标签内的配套目录。后续升级需由交付者提供新的已验收 ref。原上游为 https://github.com/joohw/boss-cli ，不保证与此分支能力一致；更换来源须重新核验。
 
 ## npm 发布版（单独选择，不是失败回退）
 

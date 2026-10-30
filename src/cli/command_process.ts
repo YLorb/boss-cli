@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { attachmentCommandTimeoutMs } from '../common/attachment_timeout.js';
 
 export const ATTACHMENT_TIMEOUT_MS = 15_000;
 
@@ -15,7 +16,7 @@ type WorkerResult = { text?: string; error?: { name: string; message: string } }
 /** Resolve only after close: a reported result alone does not prove the worker exited. */
 export function runCommandProcess(
   argv: string[],
-  timeoutMs = ATTACHMENT_TIMEOUT_MS,
+  timeoutMs = attachmentCommandTimeoutMs(argv),
   worker = new URL('./command_worker.js', import.meta.url),
 ): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -1,6 +1,6 @@
 {
   "name": "@joohw/boss-cli",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "description": "Boss直聘自动化 CLI：批量发消息、自动打招呼、候选人管理、深度搜索。基于 Puppeteer/CDP 驱动本机 Chrome，支持 AI Agent 编排",
   "keywords": [
     "boss",
@@ -65,10 +65,11 @@
     "test:baidu": "node --env-file=.env scripts/test-baidu-ocr.mjs",
     "deploy": "npm --prefix landing run deploy",
     "test:browser-entry": "node --experimental-test-module-mocks --test scripts/test-browser-entry.mjs",
-    "test:resume-timing": "node --experimental-test-module-mocks --test scripts/test-resume-capture-timing.mjs",
+    "test:resume-timing": "node --experimental-test-module-mocks --test scripts/test-resume-capture-timing.mjs scripts/test-resume-chat-close.mjs",
     "test:positions": "node --experimental-test-module-mocks --test scripts/test-positions.mjs",
-    "test:switch-job": "node --test scripts/test-switch-job.mjs",
+    "test:switch-job": "node --experimental-test-module-mocks --test scripts/test-switch-job.mjs scripts/test-switch-job-route.mjs",
     "test:search-more-back": "node --experimental-test-module-mocks --test scripts/test-search-more-back.mjs",
+    "test:resume-analysis": "node --test scripts/test-resume-analysis-session.mjs",
     "test:resume-ocr": "node --test scripts/test-resume-ocr.mjs"
   },
   "dependencies": {

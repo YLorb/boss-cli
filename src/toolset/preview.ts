@@ -117,7 +117,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const fileName = `preview-${safeResumeScreenshotFileBase(target)}-${Date.now()}.png`;
       const absPath = join(RESUME_SCREENSHOTS_DIR, fileName);
 
-      const ok = await captureCResumeIframeToFile(page, absPath);
+      const ok = await captureCResumeIframeToFile(page, absPath, 'keep-open');
       if (!ok) {
         await closeCResumePanel(page);
         throw new Error('在线简历 iframe 截图失败。');
@@ -126,7 +126,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const disclaimer =
         '说明：平台对在线简历的每日可查看次数有限，请按需使用、谨慎查看。';
 
-      if (options.json) return JSON.stringify({ name: target, ...(verifiedCandidateId ? {candidateId: verifiedCandidateId, identityVerified:true} : {}), sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot', ocr: resumeOcrRequest(absPath) });
+      if (options.json) return JSON.stringify({ name: target, ...(verifiedCandidateId ? {candidateId: verifiedCandidateId, identityVerified:true} : {}), sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot', closed: false, next: 'await-agent-result', ocr: resumeOcrRequest(absPath) });
 
       return [jobLine, `简历预览截图：${absPath}`, `OCR 待由 Agent 后台执行：ocr ${JSON.stringify(absPath)} --json`, '', disclaimer].join('\n');
     });

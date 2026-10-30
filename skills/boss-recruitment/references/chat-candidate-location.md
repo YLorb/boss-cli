@@ -33,7 +33,7 @@ scope: "chat-candidate-location"
 
 - 搜索结果的 `match`／`matches` 及 `status.chatSearch.matches`、失败诊断中的匹配项均包含 `name`、`uniqueId`、`label`、`info`、`tag`。`label` 是搜索行 `.content-text` 完整文本；`info` 是组件 `workDesc` 原文（可能为公司、院校等），`tag` 是 `exchangeDesc` 原文（交换信息提示）。缺失为null，空字符串不改写，异常类型直接报错；不从label下划线拆分补值，不把info默认当公司。只读 `status --json` 可读取当前搜索结果，无需再次输入昵称。chat-search及chat --data-id可提供--info，作为返回结果的精确筛选条件；页面仍只输入昵称，不宣称BOSS支持公司关键词查询。--tag不支持。chat --info必须带--data-id，不能与--index/--check混用；其他业务命令不接受--info，先用chat定位成功后按姓名和ID复用当前会话。
 
-- 定位等待默认每阶段20秒；环境变量 `BOSS_CHAT_SEARCH_TIMEOUT_MS` 可设1000–60000整数毫秒（例如30000）。此设置不增加重试次数，亦不覆盖附件命令15秒总时限。错误保留stage和diagnostics：`ChatLocateError` 表示定位尚未核验完成；`ChatStateError` 表示身份曾核验通过，但结束状态复核失败。locationVerified只代表此前核验的历史事实，不能据此宣告当前会话已确认。
+- 定位等待默认每阶段20秒；环境变量 `BOSS_CHAT_SEARCH_TIMEOUT_MS` 可设1000–60000整数毫秒（例如30000）。此设置不增加重试次数，亦不覆盖附件命令总时限（下载30秒、非下载15秒）。错误保留stage和diagnostics：`ChatLocateError` 表示定位尚未核验完成；`ChatStateError` 表示身份曾核验通过，但结束状态复核失败。locationVerified只代表此前核验的历史事实，不能据此宣告当前会话已确认。
 - 失败时的只读诊断包含选择器总数/可见数、选中姓名/ID、详情、筛选和搜索组件状态。先依据诊断定位身份等待条件为何未满足；不因超时自行增加重试、跨页面往返或改用其他选择器。诊断缺失或diagnosticError应明确记录为未取到现场证据。
 - 结果包含searchMatches保留筛选前完整结果，matches为筛选后结果（opened返回match）；info记录本次条件。已完成且零匹配时，chat-search返回 `status=not-found, clicked=false, matches=[]`；reason=search-empty表示查询零结果，reason=info-no-match表示已有结果但已知info未匹配。chat及业务定位入口抛出CandidateNotFound并停止，不继续读消息或发送。仍在等待、查询未确认、搜索框消失时保持TimeoutError／阶段诊断，不当作无人匹配。不能点击首项、改词、刷新或滚动回退。
 - 本流程用于明确指定对象的已有会话定位。使用昵称搜索替代滚动查找，不主动改变岗位筛选；未读收集仍固定本轮起始快照，只搜索其中的对象，不将全岗位匹配结果变成新增处理范围。已知ID及岗位须按原对象核验，不使用变化后的旧序号。

@@ -7,12 +7,12 @@ scope: "collect-unread"
 
 # 未读简历收集 SOP
 
-在线简历截图成功后，立即按[异步 OCR 规范](resume-ocr.md)由 Agent 后台执行公开 `ocr` 命令；等本人的结果完成后优先读文字评估，保留原图核验。不得以异步为由跳过逐人处理、提前评分或触达。
+在线简历截图成功后，立即按[异步 OCR 规范](resume-ocr.md)由 Agent 后台执行公开 `ocr` 命令；等本人的结果完成后优先读文字评估，保留原图核验。不得以异步为由跳过逐人处理、提前评分或触达。 截图到底后不向上恢复；收集截图后通过左侧随机安全空白点击退出，等待本人的 OCR 和 Agent 结果，再决定下一步。
 
 
 读取[共用规则](common-rules.md)、[账本](ledger-and-recovery.md)。输入目标岗位、JD及评估条件、获准消息、输出目录和本轮范围。禁止把 collect round 当成本 SOP。
 
-1. 确认登录；按[岗位切换边界](switch-job.md)由用户切换后通过公开 CLI 的 status.chatFilterJob 核验目标沟通岗位，不把 collect --job 当成页面切换。启动 collect，等待 started，核对 job 和恢复状态，show 读取账本。
+1. 确认登录；按[岗位切换边界](switch-job.md)通过公开 `switch-job --list` 获取完整文案，再用 `switch-job --job` 选岗及 status.chatFilterJob 核验，不把 collect --job 当成页面切换。启动 collect，等待 started，核对 job 和恢复状态，show 读取账本。
 2. **本轮只获取一次起始未读快照**：`node .\dist\cli\index.js list --unread --json`，核对岗位，保存姓名、data-id及顺序。本轮不反复刷新列表，新到未读留下一轮。
 3. 仅按起始快照中的姓名、data-id及目标岗位定位下一人。依照用户确认的新[定位流程](chat-candidate-location.md)，`chat "完整昵称" --data-id "快照ID"` 直接按昵称搜索，不主动切换或恢复岗位，唯一匹配才打开，再核验原对象ID及岗位；搜索范围不构成新增候选人授权。此前已取得并与该对象关联的info，可通过chat的--info传入原文，按完整姓名和info精确筛选；不重新取未读、不猜填、不因无匹配移除条件。筛选后仍重名时暂停等待用户手动确认或进一步指令，不按ID挑选、不滚动查找、不处理下一人。`chat --index` 仅从调用时列表取得身份再搜索，不能直接套用保存的旧序号；搜索后BOSS可能重置岗位及未读视图，后续使用原快照联合键，不刷新未读或重新取序号。无法维持快照边界时停止并报告。
 4. 进入后核对实际 data-id、姓名、目标岗位。打开使未读消失不影响继续处理已核对的当前人。依照获准范围读取摘要／在线简历及评估；新对象 add 到当前账本，保存结论；FAIL 从正式账本移除但本轮保留原因，不点页面“不合适”。
@@ -37,6 +37,6 @@ node .\dist\cli\index.js download-resume '候选人姓名' --data-id '实际ID' 
 node .\dist\cli\index.js download-resume '候选人姓名' --data-id '实际ID' --output-dir 'C:\Recruitment\runtime\resumes' --json
 ```
 
-当前限制：严格固定起始未读集合的完整 CLI 调度尚未实现；不能把以上 SOP 宣称为一条命令即可完成。probe-resume 的指定对象定位已采用相同昵称搜索，但不提供未读边界保证，正常循环仍按本SOP逐人执行。附件命令15秒超时后先确认子进程退出，记录 RECHECK；不重试该人，不继续其消息或上传。重名暂停不是附件失败，不写RECHECK；普通错误停止本轮。
+当前限制：严格固定起始未读集合的完整 CLI 调度尚未实现；不能把以上 SOP 宣称为一条命令即可完成。probe-resume 的指定对象定位已采用相同昵称搜索，但不提供未读边界保证，正常循环仍按本SOP逐人执行。附件命令达到总时限（下载30秒、非下载15秒）后先确认子进程退出，记录 RECHECK；不重试该人，不继续其消息或上传。重名暂停不是附件失败，不写RECHECK；普通错误停止本轮。
 
 收件状态遵循 [check/status规范](check-status.md#收件字段不可混用)：probe-resume.request 是我方求简历话术证据，不是对方待同意请求，禁止用它决定是否跳过同意。

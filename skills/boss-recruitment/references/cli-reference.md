@@ -46,7 +46,7 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 
 2026-10-26 用户确认的[沟通页候选人定位流程](chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期岗位"] --json`，必须已在沟通页。保留当前页面状态、不主动切岗 → 搜索图标 → 输入昵称 → 读取完整匹配项（含隐藏项） → 唯一匹配才点击 → 核验会话姓名、data-id及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令；比较参数不用于选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不重试。此命令不支持 `--check`、不发送，不以人才搜索 `boss search` 代用，现有chat及指定对象发送／附件／探测均接入此搜索，滚动查找已删除；仍只处理起始快照中的对象。`status --json` 的 `chatSearch` 字段只读查看搜索输入及结果。
 
-沟通页岗位由用户切换，再用公开 CLI `status --json` 的 `chatFilterJob` 核验。`scripts/switch-job.mjs` 不是公开 boss 子命令，其直连真实浏览器的旧许可已撤销；不得调用或包装成替代入口。见[岗位切换边界](switch-job.md)。
+沟通页通过公开 `switch-job --list` 获取选项，再用 `switch-job --job "完整文案"` 选岗，使用 `status --json` 的 `chatFilterJob` 核验。`scripts/switch-job.mjs` 不是公开 boss 子命令，其直连真实浏览器的旧许可已撤销；不得调用或包装成替代入口。见[岗位切换边界](switch-job.md)。
 
 ```powershell
 boss list --unread --json
@@ -69,7 +69,7 @@ boss preview '唯一候选人姓名' --json
 boss greet '唯一候选人姓名' --job '岗位关键字' --json
 ```
 
-recommend岗位模糊匹配；核对实际完整名称。search关键词最多20字符，不带词只读取当前状态；不支持--job、不设置不限职位、不提供加载更多。preview保存在线简历截图并关闭弹层，会消耗查看次数；返回 OCR 调用描述，由 Agent 后台执行公开 `ocr` 命令并优先读文字，见[OCR规范](resume-ocr.md)。姓名歧义先停止。greet支持推荐／深度搜索；包含2026-10-20本地实现的CLI还支持搜索页及其在线简历。搜索页先用 greet "完整显示姓名" --check --json 预检，实际联系去掉 --check，不支持 --job。联系可能消耗次数并发送平台默认问候。contact-confirmed只证明按钮变为“继续沟通”；不代表消息3或账本完成。点击后未确认不得重试。旧安装须先核验help及来源，不因本Skill描述就认定已具备新功能。
+recommend岗位模糊匹配；核对实际完整名称。search关键词最多20字符，不带词只读取当前状态；不支持--job、不设置不限职位、不提供加载更多。preview保存在线简历截图并保持弹层打开，等Agent结果后再决定沟通或退出，会消耗查看次数；返回 OCR 调用描述，由 Agent 后台执行公开 `ocr` 命令并优先读文字，见[OCR规范](resume-ocr.md)。姓名歧义先停止。greet支持推荐／深度搜索；包含2026-10-20本地实现的CLI还支持搜索页及其在线简历。搜索页先用 greet "完整显示姓名" --check --json 预检，实际联系去掉 --check，不支持 --job。联系可能消耗次数并发送平台默认问候。contact-confirmed只证明按钮变为“继续沟通”；不代表消息3或账本完成。点击后未确认不得重试。旧安装须先核验help及来源，不因本Skill描述就认定已具备新功能。
 
 ```powershell
 boss deep-search --core '模型推理优化' --core '源码实现经验' --bonus 'CUDA' --json
@@ -116,7 +116,7 @@ boss download-resume '张三' --data-id '123-0' --check --output-dir 'C:\Recruit
 boss download-resume '张三' --data-id '123-0' --output-dir 'C:\Recruitment\runtime\resumes' --json
 ```
 
-probe-resume核对指定会话附件与默认求简历话术；--download才下载，不接受--check。accept-resume只在出现待同意卡片时操作并等待附件，不发文字。download-resume下载已收到的原附件，返回path、bytes、sha256等。三者整命令15秒预算；超时终止子进程不撤销已发送给浏览器的动作。
+probe-resume核对指定会话附件与默认求简历话术；--download才下载，不接受--check。accept-resume只在出现待同意卡片时操作并等待附件，不发文字。download-resume下载已收到的原附件，返回path、bytes、sha256等。download-resume及probe-resume --download整命令30秒预算（含定位、预览、下载和核验），其他附件命令15秒；超时终止子进程不撤销已发送给浏览器的动作。
 
 ## 岗位与 JD
 

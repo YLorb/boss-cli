@@ -1,5 +1,6 @@
 import { runCheck, runStatus, type CheckCriteria } from '../toolset/check.js';
 import { runResumeOcr } from '../common/resume_ocr.js';
+import { parseSwitchJobArgs, runSwitchJob } from '../toolset/switch-job.js';
 /**
  * CLI：子命令直接调用 toolset 中的 impl*。
  * 无参数时进入交互模式，逐行解析与 `boss <argv...>` 相同的命令。
@@ -157,6 +158,10 @@ function printHelp(): void {
       进入交互模式；提示符 boss> ，exit / quit 退出；Ctrl+C 正常结束
   boss help
       显示本帮助
+  boss switch-job --list [--json]
+  boss switch-job --job <实时完整岗位文案> [--timeout-ms <1-60000>] [--json]
+      须已在沟通页；复用会话锁和页面守卫。--list 展开读取并收起菜单，非只读；--job 精确唯一选岗
+      相同岗位不点击；草稿、遮挡、重名、禁用或切换未确认即停止，不导航、不发消息
   boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] [--json]
       向 BOSS_OCR_URL（默认 http://ylorb.top:9002/ocr）上传本地截图并按坐标分栏重排；保留原图
       截图后由 Agent 后台调用，评估前等待完成并优先读 textPath；失败报错，不重试、不连接浏览器
@@ -210,7 +215,7 @@ function printHelp(): void {
       在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
   boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]
       复用或昵称定位指定会话后检查附件、已发送求简历消息，不主动切岗；--download 同时下载已收到附件
-      probe-resume / accept-resume / download-resume 整条命令限时 15 秒，超时终止子进程并返回错误
+      download-resume 和 probe-resume --download 总时限 30 秒（含定位、预览、下载和核验），其他附件命令 15 秒；超时终止子进程并返回错误
   boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]
       下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
       --check：只读比较当前身份及附件状态，返回 true/false，不定位、不接收或下载
@@ -241,7 +246,7 @@ function printHelp(): void {
       人数上限包含起始列表、限制返回池；平台单页可能额外加载。每轮响应及核验共用超时，默认10000ms。
       达上限、成功空响应或成功响应无新增ID即结束；无响应、请求失败或页面变化直接报错，不刷新、不重试。
   boss preview <姓名> [--candidate-id <ID>] [--open-only]
-      在线简历预览：须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
+      在线简历预览：截图到底后保持打开，等 Agent 结果再决定沟通或退出；须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
       --candidate-id 支持推荐及常规搜索：姓名和 ID 联合唯一核验；无 ID 时重名暂停；深度搜索不支持该参数
       --open-only 仅搜索页：打开并核验候选人 ID，保持展开，不截图、不沟通；已打开同一人时复用
       注意：平台对在线简历每日可查看次数有限，请按需使用、谨慎查看
@@ -454,7 +459,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['ocr', 'check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['switch-job', 'ocr', 'check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -485,6 +490,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     return runCheck(criteria);
   }
   configureHeadlessForCommand(cmd);
+  if (cmd === 'switch-job') return runSwitchJob(parseSwitchJobArgs(tail), json);
 
   if (cmd === '--check-login') {
     if (tail.length) die('❌ 用法: boss --check-login [--json]');

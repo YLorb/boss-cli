@@ -2,6 +2,7 @@ import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 import { sleepRandom } from '../browser/timing.js';
 import { captureResumeByWheel } from './resume_scroll_capture.js';
 import { traceResumeCapture } from './resume_capture_trace.js';
+import { closeChatResumeByBlankClick } from './resume_chat_close.js';
 
 /** 在线简历 iframe：`src` 常为相对路径 `/web/frame/c-resume/...`，故用子串匹配 */
 export const C_RESUME_IFRAME_SELECTOR =
@@ -155,27 +156,31 @@ export async function waitForVisibleCResumeIframeReady(
 }
 
 /**
- * 保持视口尺寸，通过简历区域内滚轮逐屏截图、校验并拼接，然后关闭弹层。
+ * 保持视口尺寸，滚动到底逐屏截图；调用方显式指定截图后的停留/退出策略。
  */
 export async function captureCResumeIframeToFile(
   page: Page,
   absPath: string,
+  afterCapture: 'keep-open' | 'close-chat-blank',
 ): Promise<boolean> {
+  if (!['keep-open', 'close-chat-blank'].includes(afterCapture)) throw new Error('必须指定截图后的页面处理方式');
   if (!(await waitForVisibleCResumeIframeReady(page, 2_000))) throw new Error('在线简历未就绪');
   const iframe = await findVisibleCResumeIframeHandle(page);
   if (!iframe) throw new Error('未找到可见在线简历 iframe');
   try { await captureResumeByWheel(page, iframe, absPath); }
   finally { await iframe.dispose(); }
+  if (afterCapture === 'keep-open') return true;
   const started = performance.now();
   traceResumeCapture('close-wait-start', C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS);
   await sleepRandom(C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS.min, C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS.max);
   traceResumeCapture('close-wait-end', { elapsedMs: Math.round(performance.now() - started) });
   traceResumeCapture('close-start');
-  await closeCResumePanel(page);
+  try { await closeChatResumeByBlankClick(page); }
+  catch (error) { throw new Error(`简历截图已保存：${absPath}；退出失败：${error instanceof Error ? error.message : String(error)}`); }
   const remaining = await findVisibleCResumeIframeHandle(page);
   if (remaining) {
     await remaining.dispose();
-    throw new Error('简历截图已保存，但关闭后在线简历弹层仍可见');
+    throw new Error(`简历截图已保存：${absPath}，但关闭后在线简历弹层仍可见`);
   }
   traceResumeCapture('close-end', { visiblePanel: false });
   return true;

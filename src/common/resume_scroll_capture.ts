@@ -202,7 +202,6 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
     }
     return metrics;
   };
-  let original: Metrics | undefined;
   let initialBox: { x: number; y: number; width: number; height: number } | undefined;
   const stable = async (): Promise<Metrics> => {
     let previous = await read(), unchanged = 0;
@@ -269,7 +268,7 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
     traceResumeCapture('reading-wait-end', { elapsedMs: Math.round(performance.now() - started) });
     // Do not classify an opening/loading overlay as a capture obstruction before
     // the promised initial reading pause. Persistent obstructions still fail.
-    original = await stable();
+    await stable();
     let m = await moveTo(0);
     const bodyClip = await geometry(m);
     const frameBox = await iframe.boundingBox();
@@ -316,14 +315,10 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
     const body = PNG.sync.read(stitchResumeTiles(tiles, m.width, m.height, m.total, scale));
     result = composeResumeFrame(shell, body, insetX, insetY, tiles[0].image.height);
   } catch (error) { failure = error; }
-  try {
-    if (original) await moveTo(original.top);
-  } catch (error) {
-    failure = failure ? new AggregateError([failure, error], `简历截图失败：${String(failure)}；滚动位置恢复失败：${String(error)}`) : error;
-  } finally { await rootHandle.dispose(); await rootFrame.evaluate(`delete globalThis[${key}]`); }
+  finally { await rootHandle.dispose(); await rootFrame.evaluate(`delete globalThis[${key}]`); }
   if (failure) throw failure;
   if (!result) throw new Error('简历截图没有生成有效拼接结果');
-  // Restore before writing: failures must not leave a purportedly complete result.
+  // Keep the final scroll position. Only a complete, verified image is written.
   await writeFile(path, result, { flag: 'wx' });
-  traceResumeCapture('file-written', { bytes: result.length, restoredTop: original?.top });
+  traceResumeCapture('file-written', { bytes: result.length, scrollPosition: 'bottom' });
 }

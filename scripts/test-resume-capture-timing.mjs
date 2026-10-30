@@ -37,7 +37,7 @@ test('reading and segment delays include their specified endpoints', () => {
   assert.equal(resumeScrollIntervalMs(() => 1 - Number.EPSILON), 3000);
 });
 
-for (const pageName of ['recommend', 'search']) test(`${pageName} capture pauses between wheel segments, retains pulse pacing, restores scroll and writes a complete image`, async t => {
+for (const pageName of ['recommend', 'search']) test(`${pageName} capture pauses between wheel segments, retains pulse pacing, stays at bottom and writes a complete image`, async t => {
   const dir = await mkdtemp(path.join(tmpdir(), 'boss-capture-timing-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   // Run the actual capture loop with virtual waits and a deterministic scroll surface.
@@ -73,7 +73,7 @@ for (const pageName of ['recommend', 'search']) test(`${pageName} capture pauses
     evaluate: async () => ({ width: 100, height: 100, x: 0, y: 0, pixelRatio: 1, scale: 1 }),
     mouse: {
       move: async () => { events.push({ kind: 'segment', now }); },
-      wheel: async ({ deltaY }) => { events.push({ kind: 'pulse', now }); top = Math.max(0, Math.min(200, top + deltaY)); },
+      wheel: async ({ deltaY }) => { events.push({ kind: 'pulse', now, deltaY }); top = Math.max(0, Math.min(200, top + deltaY)); },
     },
     screenshot: async options => {
       assert.equal(options.clip, undefined);
@@ -90,13 +90,14 @@ for (const pageName of ['recommend', 'search']) test(`${pageName} capture pauses
   assert.equal(warnings.length, 1, 'same obstruction is reported once per capture');
   assert.match(warnings[0], /在线简历.*继续截图.*element=DIV.status/);
   assert.ok(warnings[0].includes('page=/web/chat/' + pageName));
-  assert.ok(Math.abs(top) <= 0.5, 'original position restored within capture tolerance');
+  assert.ok(Math.abs(top - 200) <= 0.5, 'capture remains at bottom');
+  assert.ok(events.filter(e=>e.kind==='pulse').every(e=>e.deltaY>=0), 'no upward wheel after capture');
   assert.equal(PNG.sync.read(await readFile(file)).height, 300);
   const firstPulse = events.findIndex(event => event.kind === 'pulse');
   assert.ok(events.slice(0, firstPulse).some(event => event.kind === 'wait' && event.ms === 2000));
   const segments = events.filter(event => event.kind === 'segment');
   const intervals = events.filter(event => event.kind === 'wait' && event.ms === 500);
-  assert.ok(segments.length >= 4, 'exercise multiple capture and restore segments');
+  assert.ok(segments.length >= 4, 'exercise multiple downward capture segments');
   assert.equal(intervals.length, segments.length - 1);
   for (let i = 1; i < events.length; i++) {
     if (events[i].kind === 'segment' && events.slice(0, i).some(event => event.kind === 'segment')) {
@@ -114,33 +115,29 @@ mock.module('../dist/browser/timing.js', { namedExports: {
 mock.module('../dist/common/resume_scroll_capture.js', { namedExports: {
   captureResumeByWheel: async () => { closingEvents.push(['capture']); if (captureError) throw captureError; },
 } });
+let closed = false, keepOpen = false;
+mock.module('../dist/common/resume_chat_close.js', { namedExports: {
+  closeChatResumeByBlankClick: async () => {closingEvents.push(['blank-close']);if(!keepOpen)closed=true;},
+} });
 const { captureCResumeIframeToFile } = await import('../dist/common/c_resume_capture.js');
 
-test('successful capture waits 1000–5050ms before closing; failed capture never closes as success', async () => {
-  const iframe = { boundingBox: async () => ({ width: 100, height: 100 }), contentFrame: async () => null,
-    dispose: async () => {} };
-  let closed = false, keepOpen = false;
-  const frame = {
-    $: async () => iframe,
-    evaluate: async script => {
-      if (script.includes('function hasCResumeIframe')) {
-        closingEvents.push(['close']);
-        if (keepOpen) return false;
-        const result = !closed; closed = true; return result;
-      }
-      return !closed;
-    },
-  };
+test('explicit capture disposition: preview stays open; collection closes only after successful image; failures retain screenshot context', async () => {
+  const iframe = { boundingBox: async () => ({ width: 100, height: 100 }), contentFrame: async () => null, dispose: async () => {} };
+  const frame = { $: async () => iframe, evaluate: async () => !closed };
   const page = { frames: () => [frame] };
-  closingEvents.length = 0;
-  await captureCResumeIframeToFile(page, 'unused');
-  assert.deepEqual(closingEvents.slice(0, 3), [['capture'], ['wait', 1000, 5050], ['close']]);
-  captureError = new Error('overlap mismatch');
-  closed = false;
-  closingEvents.length = 0;
-  await assert.rejects(captureCResumeIframeToFile(page, 'unused'), /overlap mismatch/);
-  assert.deepEqual(closingEvents, [['capture']]);
-  captureError = undefined;
-  keepOpen = true;
-  await assert.rejects(captureCResumeIframeToFile(page, 'unused'), /关闭后在线简历弹层仍可见/);
+  closingEvents.length=0;
+  await captureCResumeIframeToFile(page,'unused','keep-open');
+  assert.deepEqual(closingEvents,[['capture']]);assert.equal(closed,false);
+  closingEvents.length=0;
+  await captureCResumeIframeToFile(page,'unused','close-chat-blank');
+  assert.deepEqual(closingEvents,[['capture'],['wait',1000,5050],['blank-close']]);
+  captureError=new Error('overlap mismatch');closed=false;closingEvents.length=0;
+  for(const mode of ['keep-open','close-chat-blank']) {
+    closingEvents.length=0;
+    await assert.rejects(captureCResumeIframeToFile(page,'unused',mode),/overlap mismatch/);
+    assert.deepEqual(closingEvents,[['capture']]);assert.equal(closed,false);
+  }
+  captureError=undefined;keepOpen=true;closingEvents.length=0;
+  await assert.rejects(captureCResumeIframeToFile(page,'unused','close-chat-blank'),/关闭后在线简历弹层仍可见/);
+  assert.equal(closingEvents.filter(e=>e[0]==='blank-close').length,1);
 });

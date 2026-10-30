@@ -9,7 +9,7 @@ $env:BOSS_SKILL_DIR = 'C:\Recruitment\workspace\.workbuddy\skills\boss-recruitme
 node .\dist\cli\index.js version-check --json
 ```
 
-CLI 0.6.10 配套 Skill 1.0.17，兼容标识为 `2026-10-29-resume-ocr-v2`。独立版本号按配套关系比较。未设置 BOSS_SKILL_DIR 时明确使用当前 CLI 安装附带的 Skill；加载外部 Skill 的 Agent 必须指定外部实际目录，不能以包内版本替代检查。文件缺失、格式错误直接报错，不搜索其他路径。
+CLI 0.6.11 配套 Skill 1.0.20，兼容标识为 `2026-10-30-resume-analysis-v1`。独立版本号按配套关系比较。未设置 BOSS_SKILL_DIR 时明确使用当前 CLI 安装附带的 Skill；加载外部 Skill 的 Agent 必须指定外部实际目录，不能以包内版本替代检查。文件缺失、格式错误直接报错，不搜索其他路径。
 
 匹配返回 compatible:true，退出码 0；不匹配返回 compatible:false、requiresConfirmation:true、实际与期望版本、路径及 confirmationToken，退出码 2。所有业务命令（含 login、只读 status/check、附件子进程和 collect）在连接浏览器或写账本前阻止启动。help、version、update、version-check 可用于诊断和修复。
 
@@ -39,6 +39,8 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 约定
 
+沟通选岗菜单展开时标签会替换为搜索输入框；`switch-job` 读取唯一 active 选项确认原岗位，以 `ui-dropmenu-visible` 判断开关。列举结束在侧栏右侧、候选列表左侧的空白边距内随机取一个点，留12个 CSS 像素内边距；命中背景与布局核验后通过浏览器鼠标点击一次，再核验菜单关闭、URL/岗位/当前会话未变。使用实时视口 CSS 坐标，区域不足或被遮挡直接停止，不重选点、不使用失焦兜底。2026-10-29 真实列举与关闭验收成功，命令耗时859ms，后续 status 验证岗位为“全部职位”、会话为空；实际岗位切换尚未验收。
+
 ### 有上限的扩池与显式历史返回（2026-10-28）
 
 - `boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]`：只在当前 `/web/chat/search` 执行，要求无在线简历弹层、搜索 iframe 已就绪。两个上限必填；每轮响应及页面核验共用超时，默认 10000ms。复用 `withBossSessionPage` 的会话锁和页面守护，不切岗位／关键词，不调用 search 重查。
@@ -60,7 +62,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - 昵称搜索匹配项统一输出 `name`、`uniqueId`、`label`、`info`、`tag`：`info` 直接取组件 `workDesc`（可为公司或院校描述），`tag` 直接取 `exchangeDesc`（交换信息提示），保留原字符串，缺失为null、空字符串仍为空字符串、非字符串时报错。不拆分label推测字段。覆盖chat-search的match/matches、status.chatSearch.matches及失败diagnostics.search[].matches；status无需重搜即可读取当前结果。chat-search及chat --data-id支持可选 --info：仅使用此前已获取并与目标关联的原文，在昵称查询返回后按完整姓名和info精确筛选，不向页面输入公司关键词。筛选后唯一且ID相符才点击；同名同info或群聊歧义仍暂停；零匹配停止，不退回仅姓名。tag仅输出，不支持--tag。当前会话身份一致仍直接复用，不因info再次搜索。
 
 
-- 2026-10-27 诊断：昵称搜索每次等待默认20000ms，可用环境变量 `BOSS_CHAT_SEARCH_TIMEOUT_MS` 设置1000–60000的整数毫秒（例如30000），不是整条命令总时限，不改变附件命令独立的15秒总时限。`ChatLocateError` 表示尚未完成候选人定位核验；`ChatStateError` 表示候选人身份曾核验成功，但定位结束时的页面或身份复核失败。chat/chat-search/send的JSON错误保留 `error.details`：stage、timeoutMs、clickState、locationVerified、verifiedConversation及diagnostics。locationVerified只代表此前身份核验的历史事实，不保证错误发生后的当前身份，也不表示业务动作成功。附件子进程保留错误名称及含诊断的message，受总时限约束可能先退出。
+- 2026-10-27 诊断：昵称搜索每次等待默认20000ms，可用环境变量 `BOSS_CHAT_SEARCH_TIMEOUT_MS` 设置1000–60000的整数毫秒（例如30000），不是整条命令总时限，不改变附件命令独立的总时限（下载30秒、非下载15秒）。`ChatLocateError` 表示尚未完成候选人定位核验；`ChatStateError` 表示候选人身份曾核验成功，但定位结束时的页面或身份复核失败。chat/chat-search/send的JSON错误保留 `error.details`：stage、timeoutMs、clickState、locationVerified、verifiedConversation及diagnostics。locationVerified只代表此前身份核验的历史事实，不保证错误发生后的当前身份，也不表示业务动作成功。附件子进程保留错误名称及含诊断的message，受总时限约束可能先退出。
 - 失败诊断仅执行一次只读DOM快照，记录关键选择器total/visible数量、当前选中行姓名/ID、详情姓名/岗位、职位标签、搜索输入及组件匹配、主页面路径和视口；不读取聊天正文、不包含URL查询参数。诊断读取失败单独标注diagnosticError，保留原异常，不重试业务。重名规则及身份比较条件未因诊断而放宽；尚不将“10秒超时”解释为根因，不采用跨页面往返恢复或按同公司自动合并会话。
 
 - 2026-10-27：`chat --data-id` 及指定对象的send/accept-resume/download-resume/probe-resume共用入口先只读核验当前会话：选中行唯一、姓名、data-id及详情姓名均须匹配。匹配则直接使用当前会话，不打开搜索、不切换职位；不匹配才直接进入昵称搜索，不主动切换或恢复岗位。现有附件预览清理仍保留，清理后及业务操作前再次核验身份。读取异常、清理失败或后续身份变化直接报错，不catch后转去搜索、不重试。搜索出现重名仍保持现场暂停。只有姓名的chat和显式chat-search不采用此复用判断。
@@ -75,13 +77,13 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 - 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--info "已知原文"] [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。不操作岗位下拉，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，比较参数不用于自动选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
 
-- 沟通岗位切换由用户在 `/web/chat/index` 手动完成，Agent 通过公开 CLI `status --json` 的 `chatFilterJob` 核验；当前没有 `boss switch-job` 子命令。`scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，禁止作为替代入口。完整边界见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
+- 沟通页新增 `boss switch-job --list [--json]` 和 `boss switch-job --job "实时完整文案" [--timeout-ms 1..60000] [--json]`。须已在 `/web/chat/index`，两者复用会话锁和页面守卫；--list 展开读取并收起菜单，非只读；--job 精确唯一匹配，相同岗位不点击。草稿、遮挡、禁用、重名及超时直接停止。回执核对标签及菜单关闭，再由 `status --json` 核验 chatFilterJob；不导航、不切分类、不联系，不宣称候选列表已加载完成。`scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，禁止作为替代入口。完整边界见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
 
 - 正常招聘SOP只从指定岗位未读列表逐人处理，评估一人后完成其发送/收件或等待，再处理下一人；本轮附件收集完成后统一上传。对账、复查、仅收集须人工明确指定。当前 `collect round` 遍历全账本、`chat --data-id` 通过昵称搜索已指定对象、`--check` 未命中只返回false，不能保证严格未读边界；不得将这些技术能力作为正常SOP扩大范围的授权。
 
 - `boss --check-login [--json]` 通过已配置的本机 CDP 端口，只读检查首个 `www.zhipin.com` 页面；不启动浏览器、不导航、不安装页面守卫。登录入口返回 false；可见工作台菜单或账号入口返回 true；验证页或缺乏证据报无法判断错误。连接失败、没有 BOSS 标签页、页面失效直接报错，不能解释为未登录。此命令检查页面信号，不验证服务端会话有效期。
 
-- `boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]` 使用 `/web/chat/index`：进入「沟通—全部」，定位后先读附件再读己方已发送的默认求简历话术。未观察到不等于无附件或未发送；`--download` 才下载。与 `accept-resume`、`download-resume` 一样，CLI 整条命令限时 15 秒，确认子进程退出后报错。
+- `boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]` 使用 `/web/chat/index`：进入「沟通—全部」，定位后先读附件再读己方已发送的默认求简历话术。未观察到不等于无附件或未发送；`--download` 才下载。`download-resume` 与 `probe-resume --download` 整条命令限时30秒（含定位、预览、下载和核验）；非下载 probe-resume 与 accept-resume 仍为15秒，确认子进程退出后报错。
 - `boss collect --job <岗位完整名称> [--ledger-dir <目录>]` 为候选人处理流程的第一个常驻步骤：等待 started、核对岗位与 recoveryRequired、读取 show 后才处理候选人；有恢复要求时等待人工 reconcile 完成。启动 collect 本身不导航页面。round 处理普通记录；人工 recheck 复查 RECHECK；人工 reconcile 遍历「沟通—全部」，按岗位全量逐项对账；stop 写回。见 [岗位账本](collection-ledger.md)。
 - 候选人姓名、序号和联合键定位统一使用昵称搜索；原列表扫描、向下／向上滚动及目标居中点击代码已删除，不存在滚动回退。重名时即使有会话ID也通过CandidateSelectionRequired暂停，等待用户确认；指定对象的发送／收件／下载／探测不会继续。全量对账的列表盘点属于独立功能，仍需用户明确要求，不参与候选人定位或充当回退。
 - DOM 信息读取本身不刷新页面、不点击或导航；滚轮可能触发 BOSS 的虚拟列表更新或加载更多，点击候选人会更新详情。完整 `list`/定位命令包含页面和分类筛选准备，不能把整条命令称为纯读取。已经在沟通页时 URL 检查不导航；公共层不再把非工作台页面自动导航到沟通首页，风险页只记录错误上下文、不自动返回；执行上下文销毁直接报错，不重跑业务回调。
@@ -101,17 +103,17 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - `positions` 以实际职位行确定所在 frame，不把主页面统计文字视为列表已就绪；16 秒内未识别职位行、或已识别行缺少标题/状态/三项统计时明确报出 URL 和解析上下文，不过滤后返回 `jobs=[]`，不将缺失统计补零。真实页面结构变更必须依据当前 DOM 证据修复，不能猜测选择器。离线回归：`npm run test:positions`。
 - 侧栏导航使用实际调用的字符串脚本：点击菜单后必须等待 pathname 等于目标路径，不能只返回函数对象就视为导航完成。
 - `boss action resume` 与 `boss preview` 返回原截图路径及 `ocr` 调用描述（`status=not-started`）；Agent 随即后台调用 `boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] --json`，完成后优先读取重排文字。该命令不要求 BOSS 当前页面、不连接浏览器；上传至显式 `BOSS_OCR_URL`（默认 `http://ylorb.top:9002/ocr`）。单栏/双栏坐标重排、文件与失败契约见[OCR规范](../skills/boss-recruitment/references/resume-ocr.md)。原图保留，滚轮和随机停顿不变，`--open-only` 不触发 OCR。
-- 在线简历截图保持当前视口尺寸，打开后随机等待 2000–10000ms，再通过简历区域内的滚轮逐屏截取并拼接；每段滚动采用随机加减速，保留约 35% 重叠，以实际滚动位置裁剪重复部分并检查重叠像素。确认顶部、稳定底部后恢复原滚动位置，再写入 PNG。支持 iframe 内部滚动和完整高度 iframe 的外层容器滚动；按实际布局唯一识别滚动容器。重叠校验使用区域平均像素差，兼容非整数显示缩放的抗锯齿差异。推荐、常规搜索、深度搜索的 `preview` 与沟通页 `action resume` 共用此实现。截图不再使用 `BOSS_RESUME_SCREENSHOT_VIEWPORT_HEIGHT`，不主动刷新页面。随机滚动不构成平台风控安全保证。
+- 在线简历截图保持当前视口尺寸，打开后随机等待 2000–10000ms，再通过简历区域内的滚轮逐屏截取并拼接；每段滚动采用随机加减速，保留约 35% 重叠，以实际滚动位置裁剪重复部分并检查重叠像素。确认顶部、稳定底部后直接拼接并写入 PNG，不再向上恢复；失败也不自动恢复滚动。支持 iframe 内部滚动和完整高度 iframe 的外层容器滚动；按实际布局唯一识别滚动容器。重叠校验使用区域平均像素差，兼容非整数显示缩放的抗锯齿差异。推荐、常规搜索、深度搜索的 `preview` 与沟通页 `action resume` 共用此实现。截图不再使用 `BOSS_RESUME_SCREENSHOT_VIEWPORT_HEIGHT`，不主动刷新页面。随机滚动不构成平台风控安全保证。
 - 完整性检查失败直接报错，不保存为完整简历、不改用拉高视口截图。多个滚动容器、横向溢出、区域超出视口、内容高度变化、滚轮无响应或重叠校验失败均停止。固定/吸顶遮挡在推荐页及常规搜索页按下述规则提示，其他页面仍停止。最多 100 屏、8000 万累计截图像素；动态加载或特殊布局需要先解决原因。本地已验证合成图像与模拟滚动流程，测试脚本不随本次正式代码交付。
 - 首次固定/吸顶遮挡检测在打开后的 2000–10000ms 阅读等待结束后执行，避免尚未经过初始等待就将加载层判为截图失败；等待后持续遮挡在推荐页及常规搜索页输出提示，其他页面直接报错；不隐藏元素、不重复尝试。2026-10-22 修正时序，后续两份完整截图实测成功；未重开此前失败的候选人，不声明已确认该遮挡元素的具体用途。
-- 相邻完整滚动段之间随机等待 500～3000ms（含顶部定位和原位置恢复），与每个滚轮脉冲的 16～32ms 间隔分开；首次滚动前仍随机等待 2000～10000ms。成功完成截图、恢复位置并写入文件后，随机等待 1000～5050ms 再关闭简历；截图失败直接报错，不走成功关闭流程。离线回归：`npm run test:resume-timing`。
+- 相邻完整滚动段之间随机等待 500～3000ms（含截图开始前的顶部定位），与每个滚轮脉冲的 16～32ms 间隔分开；首次滚动前仍随机等待 2000～10000ms。成功截图写入后：沟通页 action resume 随机等待 1000～5050ms，再单次点击左侧随机安全空白退出；推荐／搜索／深度搜索 preview 保持简历打开在底部。两者均等Agent结果再决定下一步；截图失败不自动关闭。离线回归：`npm run test:resume-timing`。
 - `BOSS_CLI_TRACE=true/1` 时，简历截图在 stderr 输出 `[boss-cli][resume]` JSON事件：阅读/分段等待、滚动起止、分屏、实际DPR/重叠校验、写入和关闭顺序；不改变业务 stdout。拼接使用实际devicePixelRatio，不能从取整后的PNG宽度反推缩放；确认底部后按实际末屏像素范围输出。关闭后仍可见在线简历时直接报错。2026-10-14补测已验证完整截图及成功后的3562ms延迟关闭；`jd` 详情读取仍因编辑页结构变化失败。具体边界见 [实测记录](live-validation-2026-10-14.md)。
-- 实际浏览器验收覆盖内外滚动容器、150% 像素缩放、首轮阅读等待、滚动恢复和无重载检查。拼接保证范围为当前展开内容；页面自身折叠的“查看全部”等内容不因滚动而自动展开。
+- 历史浏览器验收覆盖内外滚动容器、150% 像素缩放、首轮阅读等待及当时的滚动恢复和无重载检查；2026-10-29 改为不恢复滚动、按入口决定退出，目前只完成离线验证。拼接保证范围为当前展开内容；页面自身折叠的“查看全部”等内容不因滚动而自动展开。
 - `data-id` 是 Boss 页面会话行标识；联合键使用候选人显示名称和 `data-id`，两者不一致时停止操作。附件预览地址出现的 `geekId` 单独返回，但尚不作为定位主键。
 
 ## 推荐页状态保持与返回（2026-10-15）
 
-- 2026-10-26：按用户确认，在线简历截图时仅主页面为 `https://www.zhipin.com/web/chat/recommend` 或 `https://www.zhipin.com/web/chat/search`（允许末尾斜杠和查询参数）将固定/吸顶元素检测降为提示；stderr 保留主页面路径、元素、定位方式及矩形，同一提示每次截图只输出一次，不污染 JSON stdout。此规则针对检测类别，不声称已识别具体状态栏；不隐藏或删除元素，截图仍包含可见内容。其他页面仍因同类遮挡报错。滚动到底、重叠一致性、尺寸/高度、像素预算和恢复位置等校验保持不变；提示本身不证明正文无遮挡。离线回归：`node --experimental-test-module-mocks --test scripts/test-resume-obstruction.mjs scripts/test-resume-capture-timing.mjs`。
+- 2026-10-26：按用户确认，在线简历截图时仅主页面为 `https://www.zhipin.com/web/chat/recommend` 或 `https://www.zhipin.com/web/chat/search`（允许末尾斜杠和查询参数）将固定/吸顶元素检测降为提示；stderr 保留主页面路径、元素、定位方式及矩形，同一提示每次截图只输出一次，不污染 JSON stdout。此规则针对检测类别，不声称已识别具体状态栏；不隐藏或删除元素，截图仍包含可见内容。其他页面仍因同类遮挡报错。滚动到底、重叠一致性、尺寸/高度、像素预算等校验保持不变（后续2026-10-29已取消位置恢复）；提示本身不证明正文无遮挡。离线回归：`node --experimental-test-module-mocks --test scripts/test-resume-obstruction.mjs scripts/test-resume-capture-timing.mjs`。
 
 - 2026-10-26：`selectRecommendJob()` 内部默认比较当前岗位，所有调用均生效，包括普通recommend及greet --job，不依赖--ensure-job。完整岗位名忽略空白和大小写后相同，直接返回，不打开下拉、不搜索、不点击；简称搜索后匹配到当前岗位时，仅收起下拉并核验关闭，不点击岗位项。匹配到不同岗位时才选择一次；比较或关闭失败直接报错，不重试。
 
@@ -119,7 +121,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - `boss back --if-open [--json]`（交互别名 `/back`）：当前已知列表上存在在线简历弹层时关闭并核验；列表无弹层时返回 `action=noop`，不执行历史回退。独立 `/web/frame/c-resume/...` 页面仅在前一条历史属于同域的推荐、搜索、深度搜索或沟通列表时回退一步，并核验最终 URL。无历史、未知历史目标、未知当前页面或关闭失败直接报错，不以历史回退兜底。无检查开关且未打开简历时报错。
 - 公共层不自动调用 back。出现异常后先检查当前状态，再显式执行返回命令；不得盲目重试刚才的选岗、预览或发送动作。
 - `greet` 不再临时拉高视口或恢复视口尺寸；读取当前已挂载卡片，找不到目标直接报错。已可见页面不再重复 bringToFront。
-- 简历截图采用当前可见视口截图，`fullPage=false`、`captureBeyondViewport=false`，不传浏览器 clip；按实际 DPR 在本地裁剪所需区域、拼接，裁剪边界或视口变化直接报错。外层滚动时复用首屏，避免重复截图。保留原有阅读等待、分段等待、完整性校验及关闭等待。此改动减少浏览器裁剪渲染干扰，不宣称未经现场验证的闪烁已完全消失。
+- 简历截图采用当前可见视口截图，`fullPage=false`、`captureBeyondViewport=false`，不传浏览器 clip；按实际 DPR 在本地裁剪所需区域、拼接，裁剪边界或视口变化直接报错。外层滚动时复用首屏，避免重复截图。保留原有阅读等待、分段等待和完整性校验；关闭等待仅用于收集截图。此改动减少浏览器裁剪渲染干扰，不宣称未经现场验证的闪烁已完全消失。
 - 离线回归：`node --experimental-test-module-mocks --test scripts/test-recommend-navigation.mjs scripts/test-session-no-recovery.mjs`，以及 `npm run test:json`、`npm run test:resume-timing`。
 
 ## 搜索页立即沟通（2026-10-20，本地实现）

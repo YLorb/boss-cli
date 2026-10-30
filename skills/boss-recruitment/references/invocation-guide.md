@@ -49,7 +49,7 @@ check 可组合 `--page`、`--overlay`、`--state`、`--name`、`--data-id`、`-
 
 ## 3. 选择沟通岗位和获取起始列表
 
-沟通岗位由用户手动切换，Agent 通过公开 CLI `status --json` 的 `chatFilterJob` 核验。当前没有 `boss switch-job` 子命令；独立 `scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，不运行或包装该脚本。岗位不符或无法核实时停止依赖步骤，详见[岗位切换边界](switch-job.md)。
+沟通岗位通过公开 `boss switch-job --list --json` 读取选项（会展开菜单），再用 `boss switch-job --job "完整文案" --json` 精确选择。两者使用会话锁和页面守卫，之后用 `status --json` 核验；独立 `scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，不运行或包装该脚本。岗位不符或无法核实时停止依赖步骤，详见[岗位切换边界](switch-job.md)。
 
 | 调用 | 行为 | 结果 |
 | --- | --- | --- |
@@ -81,7 +81,7 @@ check 可组合 `--page`、`--overlay`、`--state`、`--name`、`--data-id`、`-
 - `not-found`：本次查询明确完成且零匹配，clicked=false。普通chat及发送／附件共用定位会抛CandidateNotFound，不继续后续动作。
 - 超时：查询或身份未确认，保存stage、clickState、diagnostics；不当作零结果，不自动重试。
 
-`BOSS_CHAT_SEARCH_TIMEOUT_MS` 为每阶段1000–60000毫秒，默认20000；不改变附件命令15秒总预算。`--keep-current-job` 临时选项已移除。不支持CLI通配符配置；用户的 `王洪*` 由Agent解释为前缀查询并报告完整姓名。唯一结果与查询关键词不完全一致时精确定位会停止，应读取status报告匹配，不绕过精确核验或重名暂停。
+`BOSS_CHAT_SEARCH_TIMEOUT_MS` 为每阶段1000–60000毫秒，默认20000；不改变附件命令总预算（下载30秒、非下载15秒）。`--keep-current-job` 临时选项已移除。不支持CLI通配符配置；用户的 `王洪*` 由Agent解释为前缀查询并报告完整姓名。唯一结果与查询关键词不完全一致时精确定位会停止，应读取status报告匹配，不绕过精确核验或重名暂停。
 
 ## 5. 发送与当前会话动作
 
@@ -118,7 +118,7 @@ action没有通用--check；执行前用身份check/status。失败直接停止�
 | `boss probe-resume '张三' --data-id '123-0' --json` | 定位／复用后探测已加载附件及己方求附件话术，不自动同意，不下载 |
 | `boss probe-resume '张三' --data-id '123-0' --download --output-dir 'C:\Recruitment\resumes' --json` | 探测并下载已收到附件；只有--download时可传output-dir |
 
-probe-resume不支持--check。request=SENT指我方求简历话术，不代表对方待同意请求；NOT_OBSERVED不能推断历史没发过。三类附件命令总时限15秒，超时须等子进程退出、保存证据并标待复核，不能假定动作未发生。外部下载不会自动回写collect，不用再次下载冒充账本合并。
+probe-resume不支持--check。request=SENT指我方求简历话术，不代表对方待同意请求；NOT_OBSERVED不能推断历史没发过。下载命令（download-resume、probe-resume --download）总时限30秒，其他附件命令15秒，超时须等子进程退出、保存证据并标待复核，不能假定动作未发生。外部下载不会自动回写collect，不用再次下载冒充账本合并。
 
 ## 7. 推荐、人才搜索、深度搜索
 
@@ -143,7 +143,7 @@ preview/greet须已在对应推荐、常规搜索或深度搜索页，不负责�
 
 | 调用 | 方法与结果 |
 | --- | --- |
-| `boss preview '唯一显示姓名' --json` | 推荐／深度搜索按唯一姓名；成功截图后关闭简历，消耗查看次数 |
+| `boss preview '唯一显示姓名' --json` | 推荐／深度搜索按唯一姓名；成功截图后停在底部并保持打开，等待Agent结果；消耗查看次数 |
 | `boss preview '显示姓名' --candidate-id '当前卡片ID' --json` | 常规搜索／推荐按姓名＋ID唯一定位，核验卡片及简历ID后截图；深度搜索不支持ID |
 | `boss preview '显示姓名' --candidate-id '卡片ID' --open-only --json` | 仅常规搜索，打开／复用并核验，保持展开，不截图、不联系 |
 | `boss back --check-in_online_resume --json` | 只读判断简历是否打开 |

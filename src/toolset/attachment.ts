@@ -1,4 +1,5 @@
 import { runCheck } from './check.js';
+import { DOWNLOAD_TIMEOUT_MS } from '../common/attachment_timeout.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readdir, stat } from 'node:fs/promises';
@@ -31,7 +32,7 @@ async function latestAttachmentCard(page: Page): Promise<string> {
   return name;
 }
 
-async function waitForCompletedDownload(dir: string, timeoutMs = 120_000): Promise<string> {
+async function waitForCompletedDownload(dir: string, timeoutMs = DOWNLOAD_TIMEOUT_MS): Promise<string> {
   const deadline = Date.now() + timeoutMs;
   let stable = 0;
   let previous = '';

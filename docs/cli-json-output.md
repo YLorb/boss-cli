@@ -78,3 +78,9 @@ npm run test:json
 ### 截图 OCR
 
 截图回执的 `ocr={status:"not-started",command:"ocr",args:[绝对图片路径,"--json"],execution:"agent-background",imagePath}` 是待执行描述，不表示上传已开始。`ocr` 命令完成时返回 `status=completed`、输入 SHA-256、文字/坐标/原始响应/结果路径、layout、lineCount、lowConfidenceIds、needsReview 和 timing；失败为标准 JSON 错误，非零退出码，错误包含原图及诊断结果路径。每次调用独立输出目录，失败或中断不消费半成品。详见[OCR规范](../skills/boss-recruitment/references/resume-ocr.md)。
+
+### 沟通选岗
+
+`switch-job --list --json` 返回 ok/changed=false/before/options/url/closeClick/note，options 含 label/unavailable；closeClick 含视口 CSS 坐标 x/y、随机范围 rect 和点击前选中会话 ID 数组 selected。会展开菜单并单次点击已核验的左侧随机空白点收起，非只读。`switch-job --job "完整文案" --json` 返回 ok/changed/before/job/url。失败遵循标准 JSON 错误，非零退出码，不自动重试。两者复用会话锁及守卫，不发送消息。
+
+截图成功回执增加 `closed` 与 `next="await-agent-result"`：沟通收集 `action resume` 仅在左侧空白点击退出并核验后返回 closed=true；推荐／搜索的 preview 返回 closed=false，保持底部等待 Agent 决策。截图失败不退出；截图已保存但退出失败时错误保留截图路径。

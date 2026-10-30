@@ -10,6 +10,28 @@ import { Ledger } from '../dist/collection/ledger.js';
 import { CollectionRunner } from '../dist/collection/runner.js';
 import { runCommandProcess, AttachmentTimeoutError } from '../dist/cli/command_process.js';
 
+test('download commands receive a 30s worker budget; non-download attachment commands retain 15s', async t => {
+  const dir=await directory(t);
+  const worker=path.join(dir,'budget-worker.mjs');
+  await writeFile(worker,"process.send({text:'done'},()=>process.disconnect());");
+  const originalTimeout=globalThis.setTimeout;
+  const budgets=[];
+  t.mock.method(globalThis,'setTimeout',(callback,ms,...args)=>{
+    budgets.push(ms);return originalTimeout(callback,ms,...args);
+  });
+  for(const [args,budget] of [
+    [['download-resume','张三'],30000],
+    [['probe-resume','张三','--download'],30000],
+    [['probe-resume','张三'],15000],
+    [['accept-resume','张三'],15000],
+    [['probe-resume','--','--download'],15000],
+  ]) {
+    budgets.length=0;
+    assert.equal(await runCommandProcess(args,undefined,pathToFileURL(worker)),'done');
+    assert.deepEqual(budgets,[budget]);
+  }
+});
+
 async function directory(t) {
   const dir = await mkdtemp(path.join(tmpdir(), 'boss-collection-test-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
