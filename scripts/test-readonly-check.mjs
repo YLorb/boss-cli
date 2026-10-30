@@ -1,11 +1,11 @@
 import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
-let snapshot,url='https://www.zhipin.com/web/chat/index',reads=0,disconnects=0,fail=false,pagesCount=1,frameUrl='https://www.zhipin.com/web/frame/search';
-const page={url:()=>url,evaluate:async()=>{reads++;if(fail)throw new Error('detached');return structuredClone(snapshot);},frames:()=>[{url:()=>frameUrl,evaluate:async()=>structuredClone(snapshot)}]};
+let frameSnapshot,snapshot,url='https://www.zhipin.com/web/chat/index',reads=0,disconnects=0,fail=false,pagesCount=1,frameUrl='https://www.zhipin.com/web/frame/search';
+const page={url:()=>url,evaluate:async()=>{reads++;if(fail)throw new Error('detached');return structuredClone(snapshot);},frames:()=>[{url:()=>frameUrl,evaluate:async()=>structuredClone(frameSnapshot??snapshot)}]};
 mock.module('puppeteer-core',{defaultExport:{connect:async()=>({pages:async()=>Array(pagesCount).fill(page),disconnect:async()=>{disconnects++;}})}});
 const {runCheck,runStatus,matchesStatus}=await import('../dist/toolset/check.js');
 const {executeCommand}=await import('../dist/cli/cliRouter.js');
-function reset(){url='https://www.zhipin.com/web/chat/index';fail=false;pagesCount=1;snapshot={resume:false,resumeId:'',resumeInfoId:'',embedded:false,embeddedIdentity:null,conversation:{name:'测试',detailName:'测试',dataId:'id1'},editable:true,draft:'',messages:[],cards:[],searchJob:'岗位',chatJob:'岗位',keyword:'Agent',contactText:'',contactUsable:false,selectedJob:null,resumeReceived:true,resumeRequest:true};}
+function reset(){frameSnapshot=undefined;url='https://www.zhipin.com/web/chat/index';fail=false;pagesCount=1;snapshot={resume:false,resumeId:'',resumeInfoId:'',embedded:false,embeddedIdentity:null,conversation:{name:'测试',detailName:'测试',dataId:'id1'},editable:true,draft:'',messages:[],cards:[],searchJob:'岗位',chatJob:'岗位',keyword:'Agent',contactText:'',contactUsable:false,selectedJob:null,resumeReceived:true,resumeRequest:true};}
 test('page/state checks return booleans and never use navigation or business APIs',async()=>{
  reset();assert.equal(await runCheck({page:'chat'}),'true');assert.equal(await runCheck({page:'search'}),'false');
  for(const cmd of [
@@ -39,6 +39,17 @@ test('status returns info; errors remain errors, never false; disconnects on fai
 });
 test('pure comparison uses supplied expectations, never assumes a match',()=>{
  reset();const s={...snapshot,pageType:'chat',overlayType:null};assert.equal(matchesStatus(s,{page:'chat',job:'other'}),false);assert.equal(matchesStatus(s,{overlay:'online-resume'}),false);assert.equal(matchesStatus(s,{state:'resume-received',name:'other',dataId:'id1'}),false);
+});
+
+test('recommend status and checks use the nested resume identity and reject outer panels',async()=>{
+ reset();url='https://www.zhipin.com/web/chat/recommend';frameUrl='https://www.zhipin.com/web/frame/recommend/';
+ frameSnapshot={...snapshot,resume:true,resumeId:'candidate',resumeInfoId:'candidate',recommendJob:'岗位',recommendCards:[{name:'测试',candidateId:'candidate',componentId:'candidate',componentName:'测试'}]};
+ const result=JSON.parse(await runStatus());
+ assert.equal(result.overlayType,'online-resume');assert.equal(result.resumeId,'candidate');assert.equal(result.recommendResume.resumeInfoId,'candidate');
+ assert.equal(await runCheck({overlay:'online-resume',name:'测试',candidateId:'candidate'}),'true');
+ frameSnapshot.resumeInfoId='other';assert.equal(await runCheck({name:'测试',candidateId:'candidate'}),'false');
+ snapshot.resume=true;await assert.rejects(runStatus(),/主页面出现非预期简历面板/);
+ reset();frameUrl='https://www.zhipin.com/web/frame/search';
 });
 
 test('status matches search and recommend iframe paths with or without a trailing slash',async()=>{

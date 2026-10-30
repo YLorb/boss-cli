@@ -48,7 +48,9 @@
     "docs/boss-url-map.md",
     "docs/cli-json-output.md",
     "docs/collection-ledger.md",
-    "docs/workbuddy-recruitment-runbook.md"
+    "docs/workbuddy-recruitment-runbook.md",
+    "docs/workbuddy-auto-resume-guide.md",
+    "docs/workbuddy-auto-resume-prompt.txt"
   ],
   "scripts": {
     "build": "tsc",

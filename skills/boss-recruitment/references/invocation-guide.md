@@ -6,6 +6,10 @@ scope: "public-cli-invocations"
 
 # 逐项调用手册
 
+## 搜索侧栏只读检查
+
+`boss search-sidebar [--json]` 仅在当前常规搜索页执行，接入会话锁和页面守护，只连接已有唯一 BOSS 标签页。返回 `keyword`、`job`、`sidebar.text`、`elements`，读取“搜索畅聊卡”和“我的订阅”侧栏；不启动浏览器、不刷新、导航、滚动、点击或应用订阅。不接受其他参数。元素的 cursor、role、href 等只表示交互线索，不证明点击后的行为。标题、独立侧栏或搜索 frame 无法唯一定位则停止并报告，不改用其他入口。侧栏保存的条件不等于当前生效条件。
+
 这是当前包的实际调用方式，配合对应 SOP 使用。命令可用不等于获得发送、联系、下载或改账授权。示例的姓名、ID、岗位、目录必须替换为已核验的值；不要整段执行包含真实动作的示例。
 
 ## 1. 固定执行目录和参数
@@ -252,4 +256,7 @@ expect-url 必须是实际前一条历史的完整 URL，包含原有查询参�
 
 ## 本地截图 OCR
 
-`boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] [--json]` 无页面前置条件；上传指定图片，保留原图及原始响应，按 `dt_boxes` 重排。成功返回 `status=completed,imagePath,imageSha256,textPath,boxesPath,rawPath,resultPath,layout,lineCount,lowConfidenceIds,needsReview,timing`。具体 Agent 异步调用与停止规则见[OCR规范](resume-ocr.md)。
+`boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]` 无页面前置条件；上传指定图片，保留原图及原始响应，按 `dt_boxes` 重排。成功返回 `status=completed,imagePath,imageSha256,textPath,boxesPath,rawPath,resultPath,layout,lineCount,lowConfidenceIds,needsReview,timing`。具体 Agent 异步调用与停止规则见[OCR规范](resume-ocr.md)。
+# 搜索预览的显式单次恢复（2026-10-29）
+
+用户明确授权时可用 `preview <姓名> --candidate-id <ID> --reopen-on-frame-error --json`（可与 `--open-only` 同用）。仅搜索页、仅目标Frame打开失败：核验原URL、固定搜索参数（保留城市等全部筛选，仅排除page）、岗位标签及同人双ID；允许列表动态追加/重排、分页和后台列表加载，目标姓名＋ID唯一核验不变，点击唯一可用关闭按钮一次，确认弹层消失，再核验条件并重开一次。身份歧义、条件变化、关闭失败、第二次失败及截图失败不恢复。无浏览器历史回退、刷新、改筛选或沟通。未带开关保持失败即停止；此为用户明确授权的有限恢复例外。成功查看仍须按原SOP核验、OCR与计数。

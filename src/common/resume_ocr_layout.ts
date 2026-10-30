@@ -3,6 +3,38 @@ export type OcrBox = {
   left: number; right: number; top: number; bottom: number;
 };
 
+export type OcrLayout = 'auto' | 'boss-online-resume';
+
+/** Explicit online-resume contract: vertical rows, with dates/tags on the same row. */
+export function orderOnlineResumeBoxes(boxes: OcrBox[]) {
+  if (!boxes.length) throw new Error('无法排列空 OCR 结果');
+  const rows: { anchor: OcrBox; boxes: OcrBox[] }[] = [];
+  const center = (b: OcrBox) => (b.top + b.bottom) / 2;
+  for (const box of [...boxes].sort((a,b) => center(a)-center(b) || a.left-b.left)) {
+    const matches = rows.filter(row => Math.abs(center(row.anchor)-center(box)) <=
+      Math.min(row.anchor.bottom-row.anchor.top,box.bottom-box.top)*0.5);
+    if (matches.length > 1) throw new Error(`在线简历行归属不明确：id=${box.id}`);
+    if (matches.length === 1) matches[0].boxes.push(box);
+    else rows.push({anchor:box,boxes:[box]});
+  }
+  for (const row of rows) {
+    row.boxes.sort((a,b) => a.left-b.left);
+    for (let i=1;i<row.boxes.length;i++) {
+      const a=row.boxes[i-1],b=row.boxes[i];
+      // OCR box edges may overlap while both endpoints still give the same order.
+      // Containment/equal endpoints cannot establish that order; never discard a box.
+      if (a.left===b.left || a.right>=b.right)
+        throw new Error(`在线简历同行文字框顺序不明确（包含或重合）：ids=${a.id},${b.id}`);
+    }
+  }
+  const ordered=rows.flatMap((row,i)=>row.boxes.map(b=>({...b,region:'body',row:i})));
+  if (ordered.length!==boxes.length || new Set(ordered.map(b=>b.id)).size!==boxes.length)
+    throw new Error('OCR 重排丢失或重复文字框');
+  return {layout:'boss-online-resume' as const,boxes:ordered,
+    text:rows.map(row=>row.boxes.map(b=>b.text).join(' ')).join('\n')+'\n',
+    lowConfidenceIds:ordered.filter(b=>b.score<0.9).map(b=>b.id)};
+}
+
 /** Validate the RapidOCR wire contract before assigning reading order. */
 export function parseOcrBoxes(raw: unknown, width: number, height: number): OcrBox[] {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('OCR 响应必须为文字框对象');

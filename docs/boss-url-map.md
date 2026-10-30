@@ -1,5 +1,15 @@
 # Boss URL 与功能对照
 
+2026-10-29：搜索/推荐简历定位只查询已核验宿主的唯一可见 `.resume-middle-wrap` 与其中唯一 `c-resume` iframe，通过 `contentFrame()` 获取目标，不遍历无关 Frame；搜索宿主为主文档，推荐宿主为推荐 Frame。后续仍验证 Canvas 就绪、父子关系及双 ID。
+
+用户明确授权的恢复入口：`preview <姓名> --candidate-id <ID> --reopen-on-frame-error [--open-only] --json`，仅常规搜索页。该显式开关仅在目标 Frame 定位/Canvas 加载失败时允许关闭同人预览层并重开一次，处于原会话锁/页面守护内；关闭前验证唯一面板、双 ID、唯一可见且未遮挡的关闭按钮，前后比较 URL、主页面导航事件、固定搜索参数（含城市、关键词、岗位，排除分页page）及岗位标签；允许候选列表动态追加/重排及分页、后台列表加载，目标候选人仍须通过原有姓名＋ID与简历双ID核验。任何身份/条件变化、关闭失败、第二次打开失败或截图失败均停止；不浏览器历史回退、不刷新、不修改筛选、不重试沟通。默认不带开关仍无恢复。成功回执附 recovery，stderr记录恢复阶段，错误包含stage及candidateId。此开关是用户明确要求的有限恢复例外，不扩大其他命令的权限。
+
+在线简历 OCR 固定使用 `ocr <PNG绝对路径> --layout boss-online-resume --json`，按纵向行排序，同行从左到右；保留全部文字框、坐标及置信度，同一行文字框包含、重合导致顺序歧义时直接报错，不按左右栏猜读序。preview/action 的 OCR 回执参数包含该选项。其他图片保留显式 `--layout auto`（默认）的原有单双栏识别；两种模式不会失败后切换。
+
+推荐页 `status --json` 的 `recommendResume` 返回推荐 iframe 内的简历面板状态、两处候选人 ID 和 framePath，用于区分主页面与推荐 iframe 的简历归属；只读，不点击或重新打开简历。
+
+2026-10-29 修复：推荐简历属于 `/web/frame/recommend/`，`preview` 在该 frame 中核验 `.resume-simple-box` 的 `dataSource.encryptGeekId` 与 `personInfo.encryptGeekId`，并验证 c-resume iframe 的父 frame。搜索页仍使用主页面的 `geekInfo/resumeInfo`，不互相兜底。推荐 `status/check` 的简历状态和身份来自推荐 frame；诊断 `resumeComponents`/`recommendResume.components` 仅列出组件结构、属性键及 ID，不输出简历正文。
+
 ## 启动前配套版本检查
 
 每轮先设置实际加载的 Skill 路径，再运行离线检查（不连接浏览器、不写账本）：
@@ -38,6 +48,13 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 | `/web/chat/job/list` | 职位管理列表 | `boss positions`、`boss jd <name>` | 可通过侧栏进入职位管理页后读取。 |
 
 ## 约定
+
+### 搜索侧栏只读入口（2026-10-29）
+
+- `boss search-sidebar [--json]`：仅当前 `/web/chat/search`，复用会话锁和页面守护，只连接已有唯一 BOSS 标签页，不启动浏览器、不导航、刷新、滚动或点击。
+- 唯一匹配 `/web/frame/search`，以唯一可见“我的订阅”标题向上限定同时包含“搜索畅聊卡”的独立侧栏；范围含候选人卡片、标题或 frame 不唯一、侧栏过大均报错，不换定位路径。
+- 返回当前 `keyword`、`job`、`sidebar.text` 和侧栏 `elements`（标签、类名、文字、role、href、cursor、disabled），用于读取订阅条件及观察交互线索。`cursor=pointer` 等仅是线索，不保证可以成功点击。无订阅应用或选择功能，不将历史订阅条件当作当前搜索条件。
+- 错误停止，不重试、不回退。该入口经过守护，原 `status` / `check` 的独立只读语义保持不变。
 
 沟通选岗菜单展开时标签会替换为搜索输入框；`switch-job` 读取唯一 active 选项确认原岗位，以 `ui-dropmenu-visible` 判断开关。列举结束在侧栏右侧、候选列表左侧的空白边距内随机取一个点，留12个 CSS 像素内边距；命中背景与布局核验后通过浏览器鼠标点击一次，再核验菜单关闭、URL/岗位/当前会话未变。使用实时视口 CSS 坐标，区域不足或被遮挡直接停止，不重选点、不使用失焦兜底。2026-10-29 真实列举与关闭验收成功，命令耗时859ms，后续 status 验证岗位为“全部职位”、会话为空；实际岗位切换尚未验收。
 
@@ -102,7 +119,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - `positions` 读取当前分页，不自动遍历所有页。2026-10-14 验证的职位页是 `/web/frame/job_v2/list` iframe：行 `.job-item-container`、标题 `.job-title .job-name`、标签 `.job-title .job-labels`、状态 `.job-status-wrapper .status-box`，信息标签和三项统计仍由各行读取。DOM 未暴露 data-id 时 id 保持空字符串，不伪造。共享 JD 编辑入口为对应行 `.operation-container .operate-btn` 中文字严格等于“编辑”的唯一按钮。
 - `positions` 以实际职位行确定所在 frame，不把主页面统计文字视为列表已就绪；16 秒内未识别职位行、或已识别行缺少标题/状态/三项统计时明确报出 URL 和解析上下文，不过滤后返回 `jobs=[]`，不将缺失统计补零。真实页面结构变更必须依据当前 DOM 证据修复，不能猜测选择器。离线回归：`npm run test:positions`。
 - 侧栏导航使用实际调用的字符串脚本：点击菜单后必须等待 pathname 等于目标路径，不能只返回函数对象就视为导航完成。
-- `boss action resume` 与 `boss preview` 返回原截图路径及 `ocr` 调用描述（`status=not-started`）；Agent 随即后台调用 `boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] --json`，完成后优先读取重排文字。该命令不要求 BOSS 当前页面、不连接浏览器；上传至显式 `BOSS_OCR_URL`（默认 `http://ylorb.top:9002/ocr`）。单栏/双栏坐标重排、文件与失败契约见[OCR规范](../skills/boss-recruitment/references/resume-ocr.md)。原图保留，滚轮和随机停顿不变，`--open-only` 不触发 OCR。
+- `boss action resume` 与 `boss preview` 返回原截图路径及 `ocr` 调用描述（`status=not-started`）；Agent 随即后台调用 `boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] --json`，完成后优先读取重排文字。该命令不要求 BOSS 当前页面、不连接浏览器；上传至显式 `BOSS_OCR_URL`（默认 `http://ylorb.top:9002/ocr`）。单栏/双栏坐标重排、文件与失败契约见[OCR规范](../skills/boss-recruitment/references/resume-ocr.md)。OCR上传前同时按3 MiB和1984像素高度上限一次确定分段（高度含256像素相邻重叠）；全部预检通过才按序请求，坐标还原后去重排序，超限或失败不追加切片、不重试。原图保留，滚轮和随机停顿不变，`--open-only` 不触发 OCR。
 - 在线简历截图保持当前视口尺寸，打开后随机等待 2000–10000ms，再通过简历区域内的滚轮逐屏截取并拼接；每段滚动采用随机加减速，保留约 35% 重叠，以实际滚动位置裁剪重复部分并检查重叠像素。确认顶部、稳定底部后直接拼接并写入 PNG，不再向上恢复；失败也不自动恢复滚动。支持 iframe 内部滚动和完整高度 iframe 的外层容器滚动；按实际布局唯一识别滚动容器。重叠校验使用区域平均像素差，兼容非整数显示缩放的抗锯齿差异。推荐、常规搜索、深度搜索的 `preview` 与沟通页 `action resume` 共用此实现。截图不再使用 `BOSS_RESUME_SCREENSHOT_VIEWPORT_HEIGHT`，不主动刷新页面。随机滚动不构成平台风控安全保证。
 - 完整性检查失败直接报错，不保存为完整简历、不改用拉高视口截图。多个滚动容器、横向溢出、区域超出视口、内容高度变化、滚轮无响应或重叠校验失败均停止。固定/吸顶遮挡在推荐页及常规搜索页按下述规则提示，其他页面仍停止。最多 100 屏、8000 万累计截图像素；动态加载或特殊布局需要先解决原因。本地已验证合成图像与模拟滚动流程，测试脚本不随本次正式代码交付。
 - 首次固定/吸顶遮挡检测在打开后的 2000–10000ms 阅读等待结束后执行，避免尚未经过初始等待就将加载层判为截图失败；等待后持续遮挡在推荐页及常规搜索页输出提示，其他页面直接报错；不隐藏元素、不重复尝试。2026-10-22 修正时序，后续两份完整截图实测成功；未重开此前失败的候选人，不声明已确认该遮挡元素的具体用途。

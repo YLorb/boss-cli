@@ -28,8 +28,18 @@ test('recommendation canonical roots, exact name/ID, component identity and opti
   assert.equal(matchesStatus({...s,resume:true,resumeId:'a',resumeInfoId:'a',contactText:'打招呼',contactUsable:true},{name:'陈成',candidateId:'a',state:'contact-ready'}),false);
   s.cards.push({...s.cards[0]});assert.equal(matchesStatus(s,{name:'陈成',candidateId:'a',state:'contact-ready'}),false);
   await page.setContent('<div class="resume-middle-wrap"><iframe src="https://www.zhipin.com/web/frame/c-resume/test"></iframe><div class="resume-right-side"><div class="resume-simple-box"></div></div></div>');
-  await page.evaluate(`document.querySelector('.resume-simple-box').__vue__={$props:{geekInfo:{encryptGeekId:'a'},resumeInfo:{encryptGeekId:'a'}}}`);
+  await page.evaluate(`document.querySelector('.resume-simple-box').__vue__={$props:{dataSource:{encryptGeekId:'a'},personInfo:{encryptGeekId:'a'}}}`);
   await assertRecommendResumeIdentity(page,'a');await assert.rejects(assertRecommendResumeIdentity(page,'b'),/ID核验失败/);
-  await page.evaluate(`document.querySelector('.resume-simple-box').__vue__.$props.resumeInfo.encryptGeekId='other'`);await assert.rejects(assertRecommendResumeIdentity(page,'a'),/ID核验失败/);
+  await page.evaluate(`document.querySelector('.resume-simple-box').__vue__.$props.personInfo.encryptGeekId='other'`);await assert.rejects(assertRecommendResumeIdentity(page,'a'),/ID核验失败/);
+  // Recommendation resumes live inside the list frame, not the outer chat page.
+  await page.setContent('<iframe id="recommend" srcdoc="<div></div>"></iframe>');
+  const host=await page.$('#recommend');const recommendation=await host.contentFrame();await host.dispose();
+  await recommendation.evaluate(`document.body.innerHTML='<div class="resume-middle-wrap"><iframe src="https://www.zhipin.com/web/frame/c-resume/test"></iframe><div class="resume-right-side"><div class="resume-simple-box"></div></div></div>';document.querySelector('.resume-simple-box').__vue__={$props:{dataSource:{encryptGeekId:'a'},personInfo:{encryptGeekId:'a'}}}`);
+  await assert.rejects(assertRecommendResumeIdentity(page,'a'),/可见简历面板不唯一：0/);
+  await assertRecommendResumeIdentity(recommendation,'a');
+  await recommendation.evaluate(`document.querySelector('.resume-simple-box').__vue__.$props.personInfo.encryptGeekId='b'`);
+  await assert.rejects(assertRecommendResumeIdentity(recommendation,'a'),/ID核验失败/);
+  await recommendation.evaluate(`document.querySelector('.resume-simple-box').__vue__={$props:{geekInfo:{encryptGeekId:'a'},resumeInfo:{encryptGeekId:'a'}}}`);
+  await assert.rejects(assertRecommendResumeIdentity(recommendation,'a'),/ID核验失败/);
  }finally{await browser.close()}
 });

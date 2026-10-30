@@ -8,6 +8,8 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 
 # 命令参考
 
+`boss search-sidebar [--json]`：在会话锁和页面守护下只读当前搜索页右侧“搜索畅聊卡／我的订阅”文字及元素描述，不点击、不应用条件、不刷新或导航。详见[逐项调用手册](invocation-guide.md#搜索侧栏只读检查)。
+
 逐项可执行语法、每个调用的前置条件／结果／副作用、岗位值区别及collect stdin协议，统一见[逐项调用手册](invocation-guide.md)。本文保留按功能的补充说明。
 
 使用前遵守[工具使用边界](tool-boundary.md)。缺失能力不授权 Agent 直接连接 CDP、使用其他浏览器工具、导入内部模块或临时编写页面脚本。

@@ -4,6 +4,8 @@ import type { Page } from 'puppeteer-core';
 import { CHAT_SEARCH_MATCH_SCRIPT } from './chat_search_match.js';
 import { RECOMMEND_CARD_IDENTITY_SCRIPT } from './recommend_identity.js';
 import { recommendJobKey } from './recommend_job.js';
+import { installBossPageGuards } from '../common/boss_page_guards.js';
+import { withBossSessionLock } from '../common/boss_session_lock.js';
 
 export type CheckCriteria = { page?: string; overlay?: string; state?: string; name?: string; dataId?: string; candidateId?: string; job?: string; keyword?: string; text?: string; embedded?: boolean };
 export const PAGE_TYPES = ['chat','search','recommend','deep-search','online-resume','positions','login','other'];
@@ -17,6 +19,7 @@ export const STATUS_SCRIPT = `(() => {
  const panel=one('.resume-middle-wrap');
  const box=panel&&one('.resume-right-side .resume-simple-box',panel);
  const props=box?.__vue__?.$props;
+ const recommendContext=location.pathname.replace(/\\/+$/,'')==='/web/frame/recommend';
  const chat=one('.chat-global-conversation');
  const card=chat&&one('.bosschat-chat-global-card',chat);
  const c=card?.__vue__?.$props?.conversation;
@@ -44,7 +47,8 @@ export const STATUS_SCRIPT = `(() => {
  const recommendCards=[...document.querySelectorAll('.candidate-card-wrap')].map(e=>{const identity=${RECOMMEND_CARD_IDENTITY_SCRIPT}(e);const b=e.querySelector('.button-chat-wrap .btn.btn-greet');return {...identity,contactText:norm(b?.textContent),contactUsable:usable(b)&&visible(b)};});
  return {
   chatSearch,recommendCards,chatFilterJob:norm(document.querySelector('.chat-top-job .ui-dropmenu-label')?.textContent),
-  resume:!!panel,resumeId:props?.geekInfo?.encryptGeekId||'',resumeInfoId:props?.resumeInfo?.encryptGeekId||'',
+  resume:!!panel,resumeId:(recommendContext?props?.dataSource:props?.geekInfo)?.encryptGeekId||'',resumeInfoId:(recommendContext?props?.personInfo:props?.resumeInfo)?.encryptGeekId||'',
+  resumeComponents:panel?[panel,...panel.querySelectorAll('*')].filter(e=>e.__vue__).slice(0,30).map(e=>({tag:e.tagName,className:e.className,propKeys:Object.keys(e.__vue__.$props||{}),dataKeys:Object.keys(e.__vue__.$data||{}),ids:Object.fromEntries(Object.entries(e.__vue__.$props||{}).filter(([k,v])=>/id/i.test(k)&&typeof v==='string')),objects:Object.fromEntries(Object.entries(e.__vue__.$props||{}).filter(([k,v])=>v&&typeof v==='object'&&!Array.isArray(v)).map(([k,v])=>[k,{keys:Object.keys(v),encryptGeekId:v.encryptGeekId}]))})):[],
   embedded:!!chat,embeddedIdentity:c?{name:c.name,candidateId:c.encryptUid,job:c.toPosition,conversationId:c.uniqueId,editorId:host?.$props?.uniqueId,friendId:c.friendId,rootFriendId:chat.__vue__?.$props?.friendId}:null,
   conversation:selected?{name:norm(selected.querySelector('.geek-name')?.textContent),dataId:selected.getAttribute('data-id')||'',detailName:detail}:null,
   editable:!!input&&(input.isContentEditable||input.tagName==='TEXTAREA')&&usable(input),draft:editorText,
@@ -67,7 +71,11 @@ export async function readStatus(page: Page): Promise<any> {
   if(frames.length!==1)throw new Error(`${pageType==='recommend'?'推荐':'搜索'} frame 缺失或不唯一，无法读取状态；main=${u.origin+u.pathname}；frames=${JSON.stringify(page.frames().map(f=>{const url=new URL(f.url()||'about:blank');return url.origin+url.pathname;}))}`);
   const search:any=await frames[0]!.evaluate(STATUS_SCRIPT);
   if(pageType==='search'){info.keyword=search.keyword;info.searchJob=search.searchJob;info.recommendJob='';info.cards=search.cards;}
-  else {info.keyword=null;info.searchJob='';info.recommendJob=search.recommendJob;info.cards=search.recommendCards;}
+  else {info.keyword=null;info.searchJob='';info.recommendJob=search.recommendJob;info.cards=search.recommendCards;
+   info.recommendResume={framePath:new URL(frames[0]!.url()).pathname,resume:search.resume,resumeId:search.resumeId,resumeInfoId:search.resumeInfoId,components:search.resumeComponents};
+   if(info.resume)throw new Error('推荐页主页面出现非预期简历面板，停止读取');
+   for(const key of ['resume','resumeId','resumeInfoId','contactText','contactUsable','contactGeometry'])info[key]=search[key];
+  }
  }
  delete info.recommendCards;
  return {url,pageType,overlayType:info.resume?'online-resume':null,...info};
@@ -133,3 +141,12 @@ async function withReadOnlyPage<T>(fn:(page:Page)=>Promise<T>):Promise<T>{
 }
 export async function runCheck(criteria:CheckCriteria):Promise<string>{validateCriteria(criteria);return withReadOnlyPage(async page=>JSON.stringify(matchesStatus(await readStatus(page),criteria)));}
 export async function runStatus():Promise<string>{return withReadOnlyPage(async page=>JSON.stringify(await readStatus(page)));}
+
+/** Existing browser only; callers must validate the page before installing guards. */
+export async function withGuardedReadOnlyPage<T>(validate:(page:Page)=>void, read:(page:Page)=>Promise<T>):Promise<T>{
+ return withBossSessionLock(()=>withReadOnlyPage(async page=>{
+  validate(page);
+  await installBossPageGuards(page);
+  return read(page);
+ }));
+}

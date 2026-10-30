@@ -116,7 +116,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
       }
 
       const frame = await assertRecommendPageReady(page, '打招呼');
-      if(await visibleResumeFrame(page))throw new Error('推荐打招呼须先返回列表，停止；不点击被简历覆盖的卡片');
+      if(await visibleResumeFrame(page,frame))throw new Error('推荐打招呼须先返回列表，停止；不点击被简历覆盖的卡片');
       const candidateId=await readRecommendCandidateId(frame,t,options.candidateId);
       const selectedJob = await selectRecommendJob(frame, kw);
       await readRecommendCandidateId(frame,t,candidateId);

@@ -156,6 +156,7 @@ export async function implRecommend(jobKeyword?: string, json = false, checkJob 
 export async function implPreview(opts: {
   candidateTarget: string;
   openOnly?: boolean;
+  reopenOnFrameError?: boolean;
   candidateId?: string;
   json?: boolean;
 }): Promise<string> {

@@ -126,18 +126,51 @@ test('explicit capture disposition: preview stays open; collection closes only a
   const frame = { $: async () => iframe, evaluate: async () => !closed };
   const page = { frames: () => [frame] };
   closingEvents.length=0;
-  await captureCResumeIframeToFile(page,'unused','keep-open');
+  await captureCResumeIframeToFile(page,'unused',{afterCapture:'keep-open'});
   assert.deepEqual(closingEvents,[['capture']]);assert.equal(closed,false);
   closingEvents.length=0;
-  await captureCResumeIframeToFile(page,'unused','close-chat-blank');
+  await captureCResumeIframeToFile(page,'unused',{afterCapture:'close-chat-blank'});
   assert.deepEqual(closingEvents,[['capture'],['wait',1000,5050],['blank-close']]);
   captureError=new Error('overlap mismatch');closed=false;closingEvents.length=0;
   for(const mode of ['keep-open','close-chat-blank']) {
     closingEvents.length=0;
-    await assert.rejects(captureCResumeIframeToFile(page,'unused',mode),/overlap mismatch/);
+    await assert.rejects(captureCResumeIframeToFile(page,'unused',{afterCapture:mode}),/overlap mismatch/);
     assert.deepEqual(closingEvents,[['capture']]);assert.equal(closed,false);
   }
   captureError=undefined;keepOpen=true;closingEvents.length=0;
-  await assert.rejects(captureCResumeIframeToFile(page,'unused','close-chat-blank'),/关闭后在线简历弹层仍可见/);
+  await assert.rejects(captureCResumeIframeToFile(page,'unused',{afterCapture:'close-chat-blank'}),/关闭后在线简历弹层仍可见/);
   assert.equal(closingEvents.filter(e=>e[0]==='blank-close').length,1);
+});
+
+test('verified host and capture disposition work together without scanning unrelated frames', async () => {
+  closed = false; keepOpen = false; captureError = undefined; closingEvents.length = 0;
+  let hostLookups = 0;
+  const iframe = {
+    boundingBox: async () => ({ width: 100, height: 100 }),
+    contentFrame: async () => ({ evaluate: async () => true }),
+    dispose: async () => {},
+  };
+  const host = { evaluateHandle: async () => {
+    hostLookups++;
+    return { asElement: () => closed ? null : iframe, dispose: async () => {} };
+  } };
+  const page = { frames: () => { throw new Error('unrelated frame scan forbidden'); } };
+  await captureCResumeIframeToFile(page, 'unused', { host, afterCapture: 'keep-open' });
+  assert.equal(hostLookups, 2);
+  assert.deepEqual(closingEvents, [['capture']]);
+  assert.equal(closed, false);
+  closingEvents.length = 0;
+  await captureCResumeIframeToFile(page, 'unused', { host, afterCapture: 'close-chat-blank' });
+  assert.equal(hostLookups, 5, 'readiness, capture and post-close check use the host');
+  assert.deepEqual(closingEvents, [['capture'], ['wait', 1000, 5050], ['blank-close']]);
+  assert.equal(closed, true);
+
+  closed = false; captureError = new Error('target capture failed'); closingEvents.length = 0;
+  await assert.rejects(captureCResumeIframeToFile(page, 'unused', { host, afterCapture: 'close-chat-blank' }), /target capture failed/);
+  assert.deepEqual(closingEvents, [['capture']]);
+  assert.equal(closed, false, 'failed capture must not trigger closing');
+  captureError = undefined;
+  const beforeInvalidPolicy = hostLookups;
+  await assert.rejects(captureCResumeIframeToFile(page, 'unused', { host, afterCapture: 'unknown' }), /必须指定截图后的页面处理方式/);
+  assert.equal(hostLookups, beforeInvalidPolicy, 'invalid policy fails before page access');
 });

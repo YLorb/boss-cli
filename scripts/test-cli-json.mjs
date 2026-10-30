@@ -6,6 +6,7 @@ import path from 'node:path';
 import { splitJsonFlag } from '../dist/cli/output.js';
 
 const calls = [];
+mock.module('../dist/toolset/search-sidebar.js',{namedExports:{runSearchSidebar:async()=>{calls.push({name:'runSearchSidebar',args:[]});return JSON.stringify({readOnly:true,guarded:true});}}});
 mock.module('../dist/toolset/contact-notice.js',{namedExports:{dismissContactNotice:async(...args)=>{calls.push({name:'dismissContactNotice',args});return JSON.stringify({status:'contact-notice-dismissed'});}}});
 mock.module('../dist/toolset/check.js',{namedExports:{runCheck:async (...args)=>{calls.push({name:'runCheck',args});return 'true';},runStatus:async()=>'{"pageType":"chat"}'}});
 const names = ['implChatAction','implChatSearch','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
@@ -19,6 +20,14 @@ mock.module('../dist/toolset/search-more.js', { namedExports: {
   runSearchMore: async (...args) => { calls.push({name:'runSearchMore',args}); return JSON.stringify({args}); },
 }});
 const { executeCommand } = await import('../dist/cli/cliRouter.js');
+
+test('search sidebar exposes only a read and rejects action parameters',async()=>{
+  assert.equal(JSON.parse(await executeCommand(['search-sidebar','--json'])).readOnly,true);
+  assert.deepEqual(calls.at(-1),{name:'runSearchSidebar',args:[]});
+  const before=calls.length;
+  for(const args of [['search-sidebar','--click'],['search-sidebar','1'],['search-sidebar','--job','岗位']])await assert.rejects(executeCommand(args));
+  assert.equal(calls.length,before);
+});
 
 test('contact notice route requires explicit identity and forwards only its scoped target',async()=>{
   const target={name:'测试',candidateId:'candidate-1',job:'测试岗位'};
@@ -112,6 +121,10 @@ test('greet check forwards a boolean without consuming the candidate name', asyn
 });
 
 test('preview open-only forwards its flag and preserves the name', async () => {
+  await executeCommand(['preview','n**','--candidate-id','id','--reopen-on-frame-error','--json']);
+  assert.deepEqual(calls.at(-1).args,[{candidateTarget:'n**',candidateId:'id',reopenOnFrameError:true,json:true}]);
+  await assert.rejects(executeCommand(['preview','n**','--reopen-on-frame-error']),/candidate-id/);
+  await assert.rejects(executeCommand(['preview','n**','--candidate-id','id','--reopen-on-frame-error=true']),/布尔开关/);
   await executeCommand(['preview','--open-only','n**','--json']);
   assert.deepEqual(calls.at(-1),{name:'implPreview',args:[{candidateTarget:'n**',json:true,openOnly:true}]});
   await assert.rejects(executeCommand(['preview','n**','--open-only=true']),/布尔开关/);

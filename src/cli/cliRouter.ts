@@ -1,4 +1,5 @@
 import { runCheck, runStatus, type CheckCriteria } from '../toolset/check.js';
+import { runSearchSidebar } from '../toolset/search-sidebar.js';
 import { runResumeOcr } from '../common/resume_ocr.js';
 import { parseSwitchJobArgs, runSwitchJob } from '../toolset/switch-job.js';
 /**
@@ -162,7 +163,7 @@ function printHelp(): void {
   boss switch-job --job <实时完整岗位文案> [--timeout-ms <1-60000>] [--json]
       须已在沟通页；复用会话锁和页面守卫。--list 展开读取并收起菜单，非只读；--job 精确唯一选岗
       相同岗位不点击；草稿、遮挡、重名、禁用或切换未确认即停止，不导航、不发消息
-  boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] [--json]
+  boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]
       向 BOSS_OCR_URL（默认 http://ylorb.top:9002/ocr）上传本地截图并按坐标分栏重排；保留原图
       截图后由 Agent 后台调用，评估前等待完成并优先读 textPath；失败报错，不重试、不连接浏览器
   boss collect --job <岗位完整名称> [--ledger-dir <目录>]
@@ -187,6 +188,8 @@ function printHelp(): void {
   boss check --page <chat|search|recommend|deep-search|online-resume|positions|login|other> [--state <状态>] [--name <姓名>] [--data-id <ID>] [--candidate-id <ID>] [--job <完整岗位>] [--text <正文>]
   boss status [--json]
       check 和业务 --check 严格只读，输出 true/false；status 输出当前页面信息。读取失败报错。
+  boss search-sidebar [--json]
+      在会话锁及页面守护下只读当前搜索侧栏文字和元素描述；不点击订阅、不导航或刷新。
   boss list [--unread] [--chatting] [--json]
       --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
   boss chat --inspect-embedded
@@ -245,8 +248,9 @@ function printHelp(): void {
       仅当前常规搜索页，逐次向下滚动并核验下一页响应；关键词／岗位保持不变，按候选人ID去重，不联系。
       人数上限包含起始列表、限制返回池；平台单页可能额外加载。每轮响应及核验共用超时，默认10000ms。
       达上限、成功空响应或成功响应无新增ID即结束；无响应、请求失败或页面变化直接报错，不刷新、不重试。
-  boss preview <姓名> [--candidate-id <ID>] [--open-only]
-      在线简历预览：截图到底后保持打开，等 Agent 结果再决定沟通或退出；须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
+  boss preview <姓名> [--candidate-id <ID>] [--open-only] [--reopen-on-frame-error]
+    --reopen-on-frame-error：仅搜索页+candidate-id；Frame打开失败时校验条件并关闭同人预览、重开一次
+      在线简历预览：截图到底后保持打开，等待 Agent 结果再决定沟通或退出；须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
       --candidate-id 支持推荐及常规搜索：姓名和 ID 联合唯一核验；无 ID 时重名暂停；深度搜索不支持该参数
       --open-only 仅搜索页：打开并核验候选人 ID，保持展开，不截图、不沟通；已打开同一人时复用
       注意：平台对在线简历每日可查看次数有限，请按需使用、谨慎查看
@@ -459,26 +463,34 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['switch-job', 'ocr', 'check', 'status', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['switch-job', 'ocr', 'check', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
     const paths: string[] = [];
     let timeoutMs: number | undefined;
+    let layout: 'auto' | 'boss-online-resume' | undefined;
     for (let i = 0; i < tail.length; i++) {
       if (tail[i] === '--timeout-ms') {
         if (timeoutMs !== undefined || !/^\d+$/.test(tail[i+1] ?? '')) die('ocr --timeout-ms 需要唯一整数值');
         timeoutMs = Number(tail[++i]);
+      } else if (tail[i] === '--layout') {
+        if (layout !== undefined || !['auto','boss-online-resume'].includes(tail[i+1])) die('ocr --layout 需要唯一的 auto 或 boss-online-resume');
+        layout=tail[++i] as 'auto' | 'boss-online-resume';
       } else if (tail[i].startsWith('-')) die('ocr 不支持参数：' + tail[i]);
       else paths.push(tail[i]);
     }
-    if (paths.length !== 1) die('用法: boss ocr <PNG绝对路径> [--timeout-ms <1000-120000>] [--json]');
-    const result = await runResumeOcr(paths[0], timeoutMs);
+    if (paths.length !== 1) die('用法: boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]');
+    const result = await runResumeOcr(paths[0], timeoutMs, layout);
     return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
   }
   if(cmd==='status') {
     if(tail.length) die('status 不接受参数');
     return runStatus();
+  }
+  if(cmd==='search-sidebar') {
+    if(tail.length) die('search-sidebar 不接受参数');
+    return runSearchSidebar();
   }
   if(cmd==='check') {
     const {rest,opts,flags}=parseOpts(tail,new Set(['embedded']));
@@ -742,8 +754,8 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'preview') {
-    const { rest, opts, flags } = parseOpts(tail, new Set(['open-only']));
-    if ([...flags].some(flag => flag !== 'open-only')) {
+    const { rest, opts, flags } = parseOpts(tail, new Set(['open-only','reopen-on-frame-error']));
+    if ([...flags].some(flag => !['open-only','reopen-on-frame-error'].includes(flag))) {
       die('❌ preview 不支持该 flag');
     }
     const unsupportedOpts = Object.keys(opts).filter(k => k !== 'candidate-id');
@@ -755,7 +767,8 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!candidateTarget) {
       die('❌ 用法: preview <姓名>');
     }
-    return implPreview({ candidateTarget, json, ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}) });
+    if(flags.has('reopen-on-frame-error')&&!opts['candidate-id']?.trim())die('--reopen-on-frame-error 要求 --candidate-id');
+    return implPreview({ candidateTarget, json, ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) });
   }
 
   if (cmd === 'back') {

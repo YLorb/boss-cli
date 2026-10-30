@@ -28,7 +28,7 @@ export async function readRecommendCandidateId(frame: Frame, name: string, candi
  return await frame.evaluate(`(() => { const target=${recommendTargetScript(name,candidateId)};return target.identity.candidateId; })()`) as string;
 }
 
-export const RESUME_IDENTITY_SCRIPT = `(() => {
+function resumeIdentityScript(cardProp: string, detailProp: string): string { return `(() => {
  const visible=e=>e.getClientRects().length>0&&getComputedStyle(e).display!=='none'&&getComputedStyle(e).visibility!=='hidden';
  const panels=[...document.querySelectorAll('.resume-middle-wrap')].filter(visible);
  if(panels.length!==1)throw Error('可见简历面板不唯一：'+panels.length);
@@ -37,11 +37,14 @@ export const RESUME_IDENTITY_SCRIPT = `(() => {
  const frames=[...panels[0].querySelectorAll('iframe[src*="c-resume"]')].filter(visible);
  if(frames.length!==1)throw Error('简历面板与iframe关联不唯一');
  const props=boxes[0].__vue__?.$props;
- return {geekId:props?.geekInfo?.encryptGeekId||'',resumeId:props?.resumeInfo?.encryptGeekId||''};
-})()`;
+ return {geekId:props?.[${JSON.stringify(cardProp)}]?.encryptGeekId||'',resumeId:props?.[${JSON.stringify(detailProp)}]?.encryptGeekId||''};
+})()`; }
 
-export async function assertRecommendResumeIdentity(page: Page, candidateId: string): Promise<void> {
- const actual=await page.evaluate(RESUME_IDENTITY_SCRIPT) as {geekId:string;resumeId:string};
+export const RESUME_IDENTITY_SCRIPT = resumeIdentityScript('geekInfo','resumeInfo');
+export const RECOMMEND_RESUME_IDENTITY_SCRIPT = resumeIdentityScript('dataSource','personInfo');
+
+export async function assertRecommendResumeIdentity(frame: Frame | Page, candidateId: string): Promise<void> {
+ const actual=await frame.evaluate(RECOMMEND_RESUME_IDENTITY_SCRIPT) as {geekId:string;resumeId:string};
  if(!candidateId||actual.geekId!==candidateId||actual.resumeId!==candidateId)
   throw Error(`推荐简历ID核验失败：expected=${candidateId}；actual=${JSON.stringify(actual)}`);
 }

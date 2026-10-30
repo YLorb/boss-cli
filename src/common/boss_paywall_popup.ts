@@ -1,4 +1,4 @@
-import type { Page } from 'puppeteer-core';
+import type { Frame, Page } from 'puppeteer-core';
 import { GREET_PAYWALL_WAIT_MAX_MS, ONLINE_RESUME_IFRAME_WAIT_MAX_MS } from '../browser/human_delay.js';
 import { sleepRandom } from '../browser/timing.js';
 import { frameHasVisibleCResumeIframe } from './c_resume_capture.js';
@@ -37,6 +37,7 @@ const HAS_PAYWALL_SCRIPT = `(() => {
 export async function waitForCResumeIframeOrPaywall(
   page: Page,
   timeoutMs: number = ONLINE_RESUME_IFRAME_WAIT_MAX_MS,
+  host?: Frame,
 ): Promise<'iframe' | 'paywall' | 'neither'> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -45,7 +46,7 @@ export async function waitForCResumeIframeOrPaywall(
       return 'paywall';
     }
 
-    const frames = page.frames();
+    const frames = host ? [host] : page.frames();
     for (const frame of frames) {
       if (await frameHasVisibleCResumeIframe(frame)) {
         return 'iframe';

@@ -2,6 +2,7 @@
  * 在线简历预览：须在「推荐」页、「深度搜索 aiform」页或「常规搜索」页且列表已加载；不自动跳转，否则报错。
  */
 import { openSearchResumeOnly } from './open-search-resume.js';
+import type { Frame } from 'puppeteer-core';
 import { resumeOcrRequest } from '../common/resume_ocr.js';
 import { readRecommendCandidateId, assertRecommendResumeIdentity } from './recommend_identity.js';
 import { visibleResumeFrame } from './search-greet.js';
@@ -43,9 +44,11 @@ export type PreviewOptions = {
   candidateTarget: string;
   candidateId?: string;
   openOnly?: boolean;
+  reopenOnFrameError?: boolean;
 };
 
 export async function runPreview(options: PreviewOptions): Promise<string> {
+  let stage='precheck';
   const target = options.candidateTarget.trim();
   if (!target) {
     throw new Error('请提供候选人姓名。');
@@ -53,11 +56,15 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
   try {
     return await withBossSessionPage(async (page) => {
       const url = page.url();
+      if(options.reopenOnFrameError && (!isBossChatSearchUrl(url)||!options.candidateId))throw Error('--reopen-on-frame-error 仅支持常规搜索并要求 --candidate-id');
       if (options.candidateId && !isBossChatSearchUrl(url) && !isBossChatRecommendUrl(url)) throw new Error('--candidate-id 仅支持常规搜索页或推荐页');
       let verifiedCandidateId: string | undefined;
+      let resumeHost: Frame | undefined;
+      let recovery: unknown;
       if (options.openOnly) {
+        stage='open-frame';
         if (!isBossChatSearchUrl(url)) throw new Error('preview --open-only 当前仅支持常规搜索页');
-        const result = await openSearchResumeOnly(page, target, options.candidateId);
+        const result = await openSearchResumeOnly(page, target, options.candidateId, options.reopenOnFrameError);
         return options.json ? JSON.stringify(result) : `在线简历已打开并核对：${target}；保持展开，未截图、未沟通`;
       }
       let jobLine: string;
@@ -72,11 +79,14 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         opened = await openDeepSearchResumePreview(page, target);
       } else if (isBossChatRecommendUrl(url)) {
         const frame = await assertRecommendPageReadyForPreview(page);
+        resumeHost=frame;
         job = options.json ? await readCurrentRecommendJobLabel(frame) : '';
         jobLine = '当前岗位：当前推荐列表';
         verifiedCandidateId = await readRecommendCandidateId(frame,target,options.candidateId);
-        if(await visibleResumeFrame(page)) {
-          await assertRecommendResumeIdentity(page,verifiedCandidateId);
+        const resume = await visibleResumeFrame(page,frame);
+        if(resume) {
+          if(resume.parentFrame()!==frame) throw new Error('推荐简历 iframe 不属于当前推荐页，停止预览');
+          await assertRecommendResumeIdentity(frame,verifiedCandidateId);
           opened = true;
         } else opened = await openRecommendResumePreview(frame,target,verifiedCandidateId);
       } else if (isBossChatSearchUrl(url)) {
@@ -84,7 +94,10 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         const label = await readNormalSearchSelectedJobLabel(frame);
         job = label;
         jobLine = `当前岗位：${label}`;
-        const result = await openSearchResumeOnly(page, target, options.candidateId);
+        stage='open-frame';
+        const result = await openSearchResumeOnly(page, target, options.candidateId, options.reopenOnFrameError);
+        resumeHost=page.mainFrame();
+        if('recovery' in result)recovery=result.recovery;
         verifiedCandidateId = result.candidateId;
         opened = true;
       } else {
@@ -95,7 +108,8 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         throw new Error('未在列表中找到该候选人，或点击未能打开简历预览。');
       }
 
-      const outcome = await waitForCResumeIframeOrPaywall(page, ONLINE_RESUME_IFRAME_WAIT_MAX_MS);
+      stage='ready-check';
+      const outcome = await waitForCResumeIframeOrPaywall(page, ONLINE_RESUME_IFRAME_WAIT_MAX_MS,resumeHost);
       if (outcome !== 'iframe') {
         const paywall = await describeBossPaywallPopupIfPresent(page);
         await closeBossPaywallPopupIfPresent(page);
@@ -104,20 +118,23 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         }
         throw new Error('点击后未出现在线简历 iframe（c-resume）。');
       }
-      const ready = await waitForVisibleCResumeIframeReady(page);
+      const ready = await waitForVisibleCResumeIframeReady(page,6000,resumeHost);
       if (!ready) {
         throw new Error('在线简历 iframe 已出现，但内容未在预期时间内渲染完成。');
       }
       if(isBossChatRecommendUrl(url)) {
         const frame=await assertRecommendPageReadyForPreview(page);
         await readRecommendCandidateId(frame,target,verifiedCandidateId);
-        await assertRecommendResumeIdentity(page,verifiedCandidateId!);
+        const resume=await visibleResumeFrame(page,frame);
+        if(!resume||resume.parentFrame()!==frame) throw new Error('推荐简历 iframe 不属于当前推荐页，停止预览');
+        await assertRecommendResumeIdentity(frame,verifiedCandidateId!);
       }
       ensureAppDataLayout();
       const fileName = `preview-${safeResumeScreenshotFileBase(target)}-${Date.now()}.png`;
       const absPath = join(RESUME_SCREENSHOTS_DIR, fileName);
 
-      const ok = await captureCResumeIframeToFile(page, absPath, 'keep-open');
+      stage='capture-keep-open';
+      const ok = await captureCResumeIframeToFile(page, absPath, {host:resumeHost,afterCapture:'keep-open'});
       if (!ok) {
         await closeCResumePanel(page);
         throw new Error('在线简历 iframe 截图失败。');
@@ -126,12 +143,12 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
       const disclaimer =
         '说明：平台对在线简历的每日可查看次数有限，请按需使用、谨慎查看。';
 
-      if (options.json) return JSON.stringify({ name: target, ...(verifiedCandidateId ? {candidateId: verifiedCandidateId, identityVerified:true} : {}), sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot', closed: false, next: 'await-agent-result', ocr: resumeOcrRequest(absPath) });
+      if (options.json) return JSON.stringify({ name: target, ...(verifiedCandidateId ? {candidateId: verifiedCandidateId, identityVerified:true} : {}), ...(recovery?{recovery}:{}), sourceUrl: url, job, path: absPath, type: 'online-resume-screenshot', closed:false, next:'await-agent-result', ocr: resumeOcrRequest(absPath) });
 
-      return [jobLine, `简历预览截图：${absPath}`, `OCR 待由 Agent 后台执行：ocr ${JSON.stringify(absPath)} --json`, '', disclaimer].join('\n');
+      return [jobLine, `简历预览截图：${absPath}`, `OCR 待由 Agent 后台执行：ocr ${JSON.stringify(absPath)} --layout boss-online-resume --json`, '', disclaimer].join('\n');
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    throw new Error(`简历预览失败：${message}`);
+    throw new Error(`简历预览失败：stage=${stage}；candidateId=${options.candidateId||'未提供'}；${message}`,{cause:e});
   }
 }

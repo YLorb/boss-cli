@@ -1,5 +1,6 @@
 import type { Frame, Page } from 'puppeteer-core';
 import { describeBossPaywallPopupIfPresent } from '../common/boss_paywall_popup.js';
+import { directResumeFrame } from '../common/resume_frame_locator.js';
 import { C_RESUME_IFRAME_SELECTOR } from '../common/c_resume_capture.js';
 
 /** Selectors and component identity fields verified read-only on the live search page (2026-10-20). */
@@ -79,22 +80,8 @@ async function assertAncestorFramesExposed(frame: Frame, point: { x: number; y: 
   }
 }
 
-export async function visibleResumeFrame(page: Page): Promise<Frame | null> {
-  const found: Frame[] = [];
-  for (const parent of page.frames()) {
-    for (const handle of await parent.$$(C_RESUME_IFRAME_SELECTOR)) {
-      try {
-        if (!(await handle.isVisible())) continue;
-        const box = await handle.boundingBox();
-        if (!box || box.width < 8 || box.height < 8) continue;
-        const frame = await handle.contentFrame();
-        if (!frame) throw new Error('在线简历 iframe 尚未就绪，停止沟通');
-        found.push(frame);
-      } finally { await handle.dispose(); }
-    }
-  }
-  if (found.length > 1) throw new Error('多个在线简历同时可见，无法确定沟通目标');
-  return found[0] ?? null;
+export async function visibleResumeFrame(page: Page, host: Frame = page.mainFrame()): Promise<Frame | null> {
+  return directResumeFrame(host);
 }
 
 /** Read the same identity used by the rendered search card. No component methods are called. */

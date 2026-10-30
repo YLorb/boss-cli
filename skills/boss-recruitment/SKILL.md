@@ -58,7 +58,7 @@ metadata:
 | 逐项核对公开调用、参数、结果及副作用 | [逐项调用手册](references/invocation-guide.md)，所有入口及collect stdin协议 |
 | 确定命令参数、示例、页面要求 | [命令与 URL 对照](references/cli-reference.md)；只读所需命令小节 |
 | 未读简历收集 | [收集 SOP](references/collect-sop.md) |
-| 沟通页读取／切换岗位 | [岗位切换边界](references/switch-job.md)，用户切换、CLI 核验 |
+| 沟通页读取／切换岗位 | [岗位切换边界](references/switch-job.md)，公开 switch-job 与状态核验 |
 | 沟通页按昵称定位已有候选人、重名暂停 | [沟通页候选人定位](references/chat-candidate-location.md)；`chat-search` 直接搜索且不主动切岗，重名等待用户确认 |
 | 推荐寻访 | [推荐 SOP](references/recommend-sop.md) |
 | 常规搜索、联系选岗、内嵌聊天实战测试 | [搜索 SOP](references/search-sop.md)，含岗位分支、消息核验与失败记账 |

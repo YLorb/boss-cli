@@ -4,24 +4,42 @@ import { waitForCResumeIframeOrPaywall, describeBossPaywallPopupIfPresent } from
 import { assertNormalSearchPageReadyForPreview, openNormalSearchResumePreview } from './normal-search.js';
 import { visibleResumeFrame, readSearchCandidateId } from './search-greet.js';
 import { RESUME_IDENTITY_SCRIPT } from './recommend_identity.js';
+import { ResumeFrameOpenError } from '../common/resume_frame_locator.js';
+import { withSearchResumeRecovery } from './search-resume-recovery.js';
 
-export async function openSearchResumeOnly(page: Page, target: string, expectedCandidateId?: string) {
+export async function openSearchResumeOnly(page: Page, target: string, expectedCandidateId?: string, reopenOnFrameError=false) {
+  if(!reopenOnFrameError)return openSearchResumeAttempt(page,target,expectedCandidateId);
+  if(!expectedCandidateId)throw Error('简历重开要求明确candidate-id');
+  const search=await assertNormalSearchPageReadyForPreview(page);
+  await readSearchCandidateId(search,target,expectedCandidateId);
+  const outcome=await withSearchResumeRecovery(page,search,expectedCandidateId,()=>openSearchResumeAttempt(page,target,expectedCandidateId));
+  return {...outcome.result,recovery:outcome.recovery};
+}
+
+async function openSearchResumeAttempt(page: Page, target: string, expectedCandidateId?: string) {
   const search = await assertNormalSearchPageReadyForPreview(page);
   const candidateId = await readSearchCandidateId(search, target, expectedCandidateId);
   let resume = await visibleResumeFrame(page);
   const reused = !!resume;
   if (!resume) {
     if (!(await openNormalSearchResumePreview(search, target, candidateId))) throw new Error(`未能打开目标在线简历：${target}`);
-    if (await waitForCResumeIframeOrPaywall(page, ONLINE_RESUME_IFRAME_WAIT_MAX_MS) !== 'iframe') {
-      throw new Error(await describeBossPaywallPopupIfPresent(page) || '未出现在线简历；停止，不关闭页面或重试');
+    if (await waitForCResumeIframeOrPaywall(page, ONLINE_RESUME_IFRAME_WAIT_MAX_MS, page.mainFrame()) !== 'iframe') {
+      const paywall=await describeBossPaywallPopupIfPresent(page);
+      if(paywall)throw new Error(paywall);
+      throw new ResumeFrameOpenError('未出现目标在线简历iframe');
     }
     resume = await visibleResumeFrame(page);
-    if (!resume) throw new Error('在线简历 iframe 不可见');
+    if (!resume) throw new ResumeFrameOpenError('目标在线简历iframe不可见');
   }
-  await resume.waitForFunction(`(() => {
+  try {await resume.waitForFunction(`(() => {
     const canvas=document.querySelector('canvas#resume');
     return canvas && canvas.width>0 && canvas.height>0 && document.readyState==='complete';
-  })()`, {timeout:15_000,polling:200});
+  })()`, {timeout:15_000,polling:200});}
+  catch(error){
+    if(error instanceof Error&&(error.name==='TimeoutError'||/detached Frame|frame got detached/i.test(error.message)))
+      throw new ResumeFrameOpenError(`目标Frame加载失败：${error.message}`,{cause:error});
+    throw error;
+  }
   if (resume.parentFrame() !== page.mainFrame()) throw new Error('搜索简历 iframe 不属于主页面，停止预览');
   const identity = await page.evaluate(RESUME_IDENTITY_SCRIPT) as {geekId: string; resumeId: string};
   if (identity.geekId !== candidateId || identity.resumeId !== candidateId)
