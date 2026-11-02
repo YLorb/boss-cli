@@ -47,9 +47,8 @@ export async function searchChatCandidate(page: Page, options: ChatSearchOptions
   if (!name || (options.dataId !== undefined && !options.dataId.trim()) || (options.job !== undefined && !options.job.trim()) || (options.info !== undefined && !options.info.trim())) throw Error('候选人昵称及提供的比较标准不能为空');
   if (!isBossChatIndexUrl(page.url())) throw Error(`chat-search 必须已在沟通页 /web/chat/index；当前=${page.url()}`);
   const context: Omit<ChatSearchFailureDetails, 'diagnostics'> = { stage: 'open-search', timeoutMs: timeout, name, expectedDataId: options.dataId, expectedInfo: options.info, clickState: 'not-attempted', locationVerified: false };
-  // Only an explicitly supplied, previously observed info enables narrowing.
-  // The same predicate is used again immediately before clicking.
-  const matchingScript = options.info === undefined ? 's.matches' : `s.matches.filter(x => x.name === ${JSON.stringify(name)} && x.info === ${JSON.stringify(options.info)})`;
+  const infoCondition = options.info === undefined ? '' : ` && x.info === ${JSON.stringify(options.info)}`;
+  const matchingScript = `s.matches.filter(x => x.name === ${JSON.stringify(name)}${infoCondition})`;
   try {
     context.stage = 'open-search';
     await page.evaluate(`(() => {
@@ -82,12 +81,16 @@ export async function searchChatCandidate(page: Page, options: ChatSearchOptions
         return s.keyword === ${JSON.stringify(name)} && s.content === ${JSON.stringify(name)} && s.count === s.matches.length &&
           ((s.ready && (s.count > 0 || s.groups > 0)) || (s.emptyCompleted && s.count === 0 && s.groups === 0));
       })()`, { timeout });
-    const state = await page.evaluate(resultsScript) as SearchState;
+    const { state, matches } = await page.evaluate(`(() => {
+      const s = ${resultsScript};
+      return { state: s, matches: ${matchingScript} };
+    })()`) as { state: SearchState; matches: Match[] };
     if (state.keyword !== name || state.content !== name || state.count !== state.matches.length) throw Error('搜索结果与当前查询不一致');
-    const matches = options.info === undefined ? state.matches : state.matches.filter(x => x.name === name && x.info === options.info);
     const evidence = { info: options.info, searchMatches: state.matches };
     if (matches.length === 0 && state.groups === 0) {
-      return { status: 'not-found' as const, clicked: false as const, name, matches: [], groupCount: 0, ...evidence, reason: state.matches.length ? 'info-no-match' : 'search-empty' };
+      let reason = 'search-empty';
+      if (state.matches.length) reason = state.matches.some(x => x.name === name) ? 'info-no-match' : 'name-no-match';
+      return { status: 'not-found' as const, clicked: false as const, name, matches: [], groupCount: 0, ...evidence, reason };
     }
     if (matches.length !== 1 || state.groups > 0) {
       return { status: 'needs-confirmation' as const, clicked: false, name, matches, groupCount: state.groups, ...evidence, reason: '重名或多个可能匹配项，等待用户手动确认或进一步指令' };

@@ -51,12 +51,27 @@ test('isolated search: unique result, hidden duplicates, drafts, missing result 
           for(const [i,m] of matches.entries()) {
             const li=document.createElement('li');li.innerHTML='<span class="content-text"></span>';li.querySelector('span').textContent=m.name+'_公司'+i;
             if(i>0 && ${hideAdditional})li.style.display='none';
-            li.onclick=()=>{window.clicks++;window.clickedIndex=i;document.querySelector('.geek-item')?.remove();const row=document.createElement('div');row.className='geek-item selected';row.setAttribute('data-id',${JSON.stringify(actualId)});row.innerHTML='<span class="geek-name">黄子佳</span>';document.body.append(row);document.querySelector('.name-box').textContent='黄子佳';root.hidden=true;};ul.append(li);
+            li.onclick=()=>{window.clicks++;window.clickedIndex=i;document.querySelector('.geek-item')?.remove();const row=document.createElement('div');row.className='geek-item selected';row.setAttribute('data-id',${JSON.stringify(actualId)});row.innerHTML='<span class="geek-name"></span>';row.firstChild.textContent=m.name;document.body.append(row);document.querySelector('.name-box').textContent=m.name;root.hidden=true;};ul.append(li);
           }
         },20);};
       })()`);
     }
     const unique=[{name:'黄子佳',uniqueId:'123-0'}];
+    const exact = {name:'吴丽', uniqueId:'123-0'};
+    const similar = {name:'吴晓丽', uniqueId:'456-0'};
+    for (const rows of [[exact, similar], [similar, exact]]) {
+      await setup(rows, {hideAdditional:false});
+      const opened = await searchChatCandidate(page, {name:'吴丽'}, 700);
+      assert.equal(opened.status, 'opened');
+      assert.equal(opened.dataId, exact.uniqueId);
+      assert.equal(opened.searchMatches.length, 2);
+      assert.deepEqual(await page.evaluate('[window.clicks,window.clickedIndex]'), [1,rows.indexOf(exact)]);
+    }
+    await setup([similar]);
+    const partialOnly = await searchChatCandidate(page, {name:'吴丽'}, 700);
+    assert.equal(partialOnly.status, 'not-found');
+    assert.equal(partialOnly.reason, 'name-no-match');
+    assert.equal(await page.evaluate('window.clicks'), 0);
     await setup(unique);
     const result=await searchChatCandidate(page,{name:'黄子佳',job:'目标岗位',dataId:'123-0'},700);
     assert.equal(result.status,'opened');assert.equal(result.dataId,'123-0');
