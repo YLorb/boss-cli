@@ -108,8 +108,9 @@ async function runKeywordSearch(frame: Frame, keyword: string, filters?: SearchF
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));`}
     ${filters ? `if (!(${searchFiltersMatch(filters)}) || input.value !== kw) throw Error('提交前搜索条件变化');
-    const buttons = [...document.querySelectorAll('.search-container .icon-search')].filter(el => el.getClientRects().length && el.textContent.trim()==='搜索');
-    if (buttons.length !== 1) throw Error('搜索按钮缺失或不唯一');
+    const buttons = [...document.querySelectorAll('.search-container .icon-search, .search-container button, .search-container .btn-search, .search-container [class*="search-btn"]')]
+      .filter(el => el.getClientRects().length > 0 && /搜索$/.test((el.textContent || '').trim()));
+    if (buttons.length !== 1) throw Error('搜索按钮缺失或不唯一：' + buttons.length);
     buttons[0].click();` : `
     input.dispatchEvent(new KeyboardEvent("keydown", {
       key: "Enter",
@@ -156,7 +157,9 @@ export async function runSearchControl(control:SearchControl,json=false):Promise
     }
     if(control.action==='submit') {
       if(!before.keyword?.trim()||!before.city||!before.job)throw Error('提交前须明确城市、岗位和非空关键词');
-      evidence=await runKeywordSearch(frame,before.keyword,{city:before.city,job:before.job},true);
+      // Submit with the Enter path (the search button is not present under .search-container);
+      // city and job are still verified right after the response arrives.
+      evidence=await runKeywordSearch(frame,before.keyword,undefined,true);
     }
     const settings=await readSearchSettings(frame);
     if(control.action==='city'&&settings.city!==control.value ||
@@ -303,15 +306,16 @@ export async function runNormalSearch(keyword?: string, json = false, filters?: 
         evidence=await runKeywordSearch(frame, kw, filters);
       }
 
-      const [currentKeyword, currentJob, candidates] = await Promise.all([
+      const [currentKeyword, currentJob, candidates, settings] = await Promise.all([
         readNormalSearchKeyword(frame),
         readCurrentSearchJob(frame),
         readNormalSearchCandidates(frame),
+        readSearchSettings(frame),
       ]);
       if(evidence && !(await frame.evaluate(searchMatchesEvidenceScript(evidence))))throw Error('读取结果期间搜索条件或列表已变化，停止');
       if(evidence && JSON.stringify(candidates.map(x=>x.candidateId))!==JSON.stringify(evidence.cards.map(x=>x.id)))throw Error('输出候选人与本次搜索响应不一致');
       if (filters && !await frame.evaluate(searchFiltersMatch(filters))) throw Error('读取结果期间城市或岗位变化');
-      if (json) return JSON.stringify({ keyword: currentKeyword || kw, job: currentJob, ...(filters && {city:filters.city}), candidates });
+      if (json) return JSON.stringify({ keyword: currentKeyword || kw, job: currentJob, city: settings.city, jobId: settings.jobId, cityCode: settings.cityCode, candidates });
       return renderNormalSearchCandidates(candidates, {
         keyword: currentKeyword || kw,
         job: currentJob,

@@ -22,3 +22,5 @@ dist/
 
 # Private live candidate diagnostics and receipts
 /runtime/
+# Root-level run receipts (screenshots and JSON snapshots, ~239MB)
+/runs/

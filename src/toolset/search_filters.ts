@@ -7,11 +7,14 @@ const cityLabel = "document.querySelector('.city-wrap .city-label')?.textContent
 const jobLabel = "document.querySelector('.search-current-job')?.textContent.trim()";
 const cityOptions = '.city-wrap .city-box.searching .search-result-item';
 const jobOptions = '.search-job-list-C li[ka="search_select_job"]';
+const cityInput = '.city-wrap .search-city-kw input';
+// Tolerate whitespace and the optional 市 suffix; a stricter predicate silently matches nothing and times out.
+const norm = "(x => (x || '').replace(/\\s+/g,'').replace(/市$/,''))";
 
-// Execute the same exact-text predicate immediately before the one permitted option click.
+// Execute the same normalized-text predicate immediately before the one permitted option click.
 async function pickOption(frame: Frame, selector: string, label: string, job: boolean) {
   const matches = `[...document.querySelectorAll(${JSON.stringify(selector)})].filter(${visible})
-    .filter(el => (${job ? "el.querySelector('.job-name') || el" : "el"}).textContent.trim() === ${JSON.stringify(label)})`;
+    .filter(el => { const n = ${norm}; return n((${job ? "el.querySelector('.job-name') || el" : "el"}).textContent) === n(${JSON.stringify(label)}); })`;
   await frame.waitForFunction(`${matches}.length > 0`, {timeout:8000});
   await frame.evaluate(`(() => {
     const matches = ${matches};
@@ -22,29 +25,57 @@ async function pickOption(frame: Frame, selector: string, label: string, job: bo
   })()`);
 }
 
-export async function selectCity(frame: Frame, city: string) {
-  if (await frame.evaluate(cityLabel) !== city) {
-    await frame.evaluate(`(() => {
-      const inputs = [...document.querySelectorAll('.city-wrap .search-city-kw input')].filter(${visible});
-      if (inputs.length !== 1) throw Error('城市搜索输入框缺失或不唯一');
-      const input = inputs[0];
-      input.focus();
-      input.value = ${JSON.stringify(city)};
-      input.dispatchEvent(new Event('input',{bubbles:true}));
-    })()`);
-    await pickOption(frame,cityOptions,city,false);
+async function firstVisible(frame: Frame, selector: string) {
+  for (const h of await frame.$$(selector)) {
+    if (await h.evaluate((el: Element) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')) return h;
   }
+  return null;
+}
+
+// Typing alone only fills the box and never produces a selectable result: the box must be opened and typed
+// into with real key events, otherwise the option list never renders and the wait times out.
+async function fillCityInput(frame: Frame, city: string) {
+  let input = await firstVisible(frame, cityInput);
+  if (!input) {
+    const opener = await firstVisible(frame, '.city-wrap .city-label') || await firstVisible(frame, '.city-wrap');
+    if (!opener) throw Error('城市筛选入口缺失');
+    await opener.click();
+    await new Promise(r => setTimeout(r, 400));
+    input = await firstVisible(frame, cityInput);
+    if (!input) throw Error('城市搜索输入框缺失');
+  }
+  await input.click();
+  await input.evaluate((el: Element) => {
+    const i = el as HTMLInputElement;
+    i.value = '';
+    i.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await frame.page().keyboard.type(city, {delay:60});
+}
+
+export async function selectCity(frame: Frame, city: string) {
+  const n = (x?: string) => (x || '').replace(/\s+/g, '').replace(/市$/, '');
+  // The visible city label no longer exists in the current layout; the bound params are authoritative.
+  const current = await frame.evaluate(`(() => {
+    const s = ${SEARCH_STATE_SCRIPT};
+    return {name:s.params.cityName || '', label:${cityLabel} || ''};
+  })()`) as {name: string; label: string};
+  if (n(current.name) === n(city) || n(current.label) === n(city)) return;
+  await fillCityInput(frame, city);
+  await pickOption(frame, cityOptions, city, false);
   await frame.waitForFunction(`(() => {
     const s = ${SEARCH_STATE_SCRIPT};
-    return ${cityLabel} === ${JSON.stringify(city)} && s.params.cityName === ${JSON.stringify(city)} && !s.loading;
+    const n = ${norm};
+    return n(s.params.cityName) === n(${JSON.stringify(city)}) && !s.loading;
   })()`,{timeout:8000});
 }
 
 export function searchFiltersMatch(filters: SearchFilters): string {
   return `(() => {
     const s = ${SEARCH_STATE_SCRIPT};
-    return ${filters.city === undefined ? 'true' : `${cityLabel} === ${JSON.stringify(filters.city)} && s.params.cityName === ${JSON.stringify(filters.city)}`} &&
-      ${jobLabel} === ${JSON.stringify(filters.job)} && ${filters.job === '不限职位' ? '!s.params.jobId' : '!!s.params.jobId'};
+    const n = ${norm};
+    return ${filters.city === undefined ? 'true' : `n(s.params.cityName) === n(${JSON.stringify(filters.city)})`} &&
+      n(${jobLabel}) === n(${JSON.stringify(filters.job)}) && ${filters.job === '不限职位' ? '!s.params.jobId' : '!!s.params.jobId'};
   })()`;
 }
 
@@ -68,6 +99,6 @@ export async function selectSearchFilters(frame: Frame, filters: SearchFilters) 
 export async function readSearchSettings(frame: Frame) {
   return frame.evaluate(`(() => {
     const s = ${SEARCH_STATE_SCRIPT};
-    return {city:${cityLabel}, job:${jobLabel}, keyword:s.keyword, jobId:s.params.jobId, cityCode:s.params.city};
+    return {city:s.params.cityName || '', job:${jobLabel}, keyword:s.keyword, jobId:s.params.jobId, cityCode:s.params.city};
   })()`) as Promise<{city:string;job:string;keyword:string;jobId:string;cityCode:string|number}>;
 }
