@@ -9,6 +9,8 @@
 
 本机 WorkBuddy 招聘流程交接：[执行手册与逐步命令](docs/workbuddy-recruitment-runbook.md)。
 
+首次使用 WorkBuddy：[简明使用指南](docs/workbuddy-quick-start.md)，含风控提示、环境配置、三类 SOP、可复制提示词及已知问题。
+
 **boss-cli**（`@joohw/boss-cli`）是开源的 **Boss直聘自动化命令行工具**。基于 Puppeteer / CDP 协议驱动本机 Chrome，无需 Selenium，把 Boss直聘 B 端的核心 HR 操作搬进终端：**候选人列表**、**批量发消息**、**自动打招呼**、**在线简历预览**、**深度搜索**、**职位管理**。
 
 适合 HR 日常提效，也适合 Claude / GPT / Gemini 等 **AI Agent** 通过子进程调用，搭建全自动化招聘流水线。

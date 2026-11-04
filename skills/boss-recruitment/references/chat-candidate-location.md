@@ -1,7 +1,7 @@
 ---
 title: "沟通页候选人定位"
 read_when: "在沟通页按候选人昵称定位已有会话"
-updated: "2026-10-27"
+updated: "2026-11-02"
 scope: "chat-candidate-location"
 ---
 
@@ -13,9 +13,11 @@ scope: "chat-candidate-location"
 
 定位默认不操作岗位筛选：直接搜索，以候选人姓名和会话ID核验成功。BOSS搜索后自行重置筛选属于页面行为，不是定位失败；不主动切全部职位，也不恢复岗位。临时--keep-current-job选项已移除。
 
-公开命令：`node .\dist\cli\index.js chat-search "完整昵称" --json`。可加 `--data-id "预期会话ID"`、`--job "预期完整岗位"` 作定位后的比较标准；这些参数不能用于自动挑选重名。可提供 `--info "已知原文"`，在昵称查询返回后按完整姓名和info原文精确筛选（含空格）；只能使用此前已取得且已关联到该对象的info，不猜填、不从label拆解。命令不支持 `--check`，不会发送消息。已有搜索输入或结果时直接报错，请用户先清空，不覆盖、不复用旧搜索。
+公开命令为 `node .\dist\cli\index.js chat-search "完整昵称" --json`。可加 `--data-id "预期会话ID"`、`--job "预期完整岗位"` 核验身份。重名时先保存返回的匹配项，并核对与目标关联的会话 ID 或 info 原文。缺少两者时保留现场，等待用户提供。
 
-`chat "完整昵称" --data-id "ID"` 和指定候选人的 send／probe-resume／accept-resume／download-resume 先核验当前选中会话唯一、姓名、会话ID和详情姓名全部一致；匹配则直接使用当前会话，不再搜索或切换职位。不匹配才进入下述搜索流程。读取异常直接报错，不解释为不匹配；现有附件预览清理后再次核验，身份变化或清理失败均停止，不转入搜索。
+取得目标会话 ID 或 info 后，先执行 `chat-search --clear --expect-keyword "刚才搜索的完整昵称" --json`。它只在沟通页核验旧搜索词并点击一次搜索框 ×。收到 `status=cleared` 后，单独执行 `chat-search "完整昵称" --info "已知原文" --json`，也可只用 `--data-id`。两项同时给出时取交集。保留 info 的空格，只用原字段，不能从 label 推断。姓名和 info 完全相符且唯一时才打开；零条、仍有多条或出现群聊歧义均停止。清空失败保存回执并停止。
+
+`chat "完整昵称" --data-id "ID"` 和指定候选人的 send／probe-resume／accept-resume／download-resume 先核验当前选中会话唯一、姓名、会话ID和详情姓名全部一致；匹配且未传 info 时直接使用当前会话，不再搜索或切换职位。不匹配才进入下述搜索流程。读取异常直接报错，不解释为不匹配；现有附件预览清理后再次核验，身份变化或清理失败均停止，不转入搜索。
 
 只有姓名的 `chat "完整昵称"`、显式 `chat-search` 及 `chat --index N` 仍执行搜索流程，原姓名与联合键滚动查找代码已删除。姓名始终精确匹配，`--strict` 保留兼容；序号入口仅从当前列表读取姓名、ID和岗位，再搜索核验，不滚动点击原行。
 
@@ -31,15 +33,15 @@ scope: "chat-candidate-location"
 
 ## 停止与能力边界
 
-- 搜索结果的 `match`／`matches` 及 `status.chatSearch.matches`、失败诊断中的匹配项均包含 `name`、`uniqueId`、`label`、`info`、`tag`。`label` 是搜索行 `.content-text` 完整文本；`info` 是组件 `workDesc` 原文（可能为公司、院校等），`tag` 是 `exchangeDesc` 原文（交换信息提示）。缺失为null，空字符串不改写，异常类型直接报错；不从label下划线拆分补值，不把info默认当公司。只读 `status --json` 可读取当前搜索结果，无需再次输入昵称。chat-search及chat --data-id可提供--info，作为返回结果的精确筛选条件；页面仍只输入昵称，不宣称BOSS支持公司关键词查询。--tag不支持。chat --info必须带--data-id，不能与--index/--check混用；其他业务命令不接受--info，先用chat定位成功后按姓名和ID复用当前会话。
+- 搜索结果的 `match`／`matches` 及 `status.chatSearch.matches`、失败诊断中的匹配项均包含 `name`、`uniqueId`、`label`、`info`、`tag`。`label` 是搜索行 `.content-text` 完整文本；`info` 是组件 `workDesc` 原文（可能为公司、院校等），`tag` 是 `exchangeDesc` 原文（交换信息提示）。缺失为null，空字符串不改写，异常类型直接报错；不从label下划线拆分补值，不把info默认当公司。只读 `status --json` 可读取当前搜索结果，无需再次输入昵称。chat-search及chat --data-id可提供--info，作为返回结果的精确筛选条件；页面仍只输入昵称，不宣称BOSS支持公司关键词查询。--tag不支持。chat --info 可单独使用，不能与--index/--check混用；其他业务命令不接受--info，先用chat定位成功后按姓名和ID复用当前会话。
 
 - 定位等待默认每阶段20秒；环境变量 `BOSS_CHAT_SEARCH_TIMEOUT_MS` 可设1000–60000整数毫秒（例如30000）。此设置不增加重试次数，亦不覆盖附件命令总时限（下载30秒、非下载15秒）。错误保留stage和diagnostics：`ChatLocateError` 表示定位尚未核验完成；`ChatStateError` 表示身份曾核验通过，但结束状态复核失败。locationVerified只代表此前核验的历史事实，不能据此宣告当前会话已确认。
 - 失败时的只读诊断包含选择器总数/可见数、选中姓名/ID、详情、筛选和搜索组件状态。先依据诊断定位身份等待条件为何未满足；不因超时自行增加重试、跨页面往返或改用其他选择器。诊断缺失或diagnosticError应明确记录为未取到现场证据。
-- `searchMatches` 保留平台返回的全部人选，`matches` 为筛选后的结果（opened 返回 match）。已完成且零匹配时，chat-search 返回 `status=not-found, clicked=false, matches=[]`。reason 为 `search-empty` 表示结果为空，`name-no-match` 表示有结果但无全名匹配，`info-no-match` 表示全名相符但 info 不符。chat 及业务定位入口抛出 CandidateNotFound 并停止。查询未确认或搜索框消失时保留超时和阶段诊断。
+- `searchMatches` 保留平台返回的全部人选，`matches` 为筛选后的结果（opened 返回 match）。已完成且零匹配时，chat-search 返回 `status=not-found, clicked=false, matches=[]`。reason 为 `search-empty` 表示结果为空，`name-no-match` 表示有结果但无全名匹配，`data-id-no-match` 表示全名匹配但 ID 不符，`info-no-match` 表示已知 info 不符。chat 及业务定位入口抛出 CandidateNotFound 并停止。查询未确认或搜索框消失时保留超时和阶段诊断。
 - 本流程用于明确指定对象的已有会话定位。使用昵称搜索替代滚动查找，不主动改变岗位筛选；未读收集仍固定本轮起始快照，只搜索其中的对象，不将全岗位匹配结果变成新增处理范围。已知ID及岗位须按原对象核验，不使用变化后的旧序号。
 - `chat-search` 及现有会话定位入口共用搜索实现；`boss search` 会进入人才搜索页，不能代用。定位必须已在沟通页，不隐式导航；`status --json` 的 `chatSearch` 字段提供只读输入及完整结果快照。错误直接暴露，不自动清空、补点或滚动回退。只读 `--check` 保持原语义，不搜索或定位。
 - 返回 `status=needs-confirmation`、`clicked=false` 及完整联系人匹配项（包括“查看更多”下隐藏项）表示暂停；同时存在群聊结果也暂停。不得将暂停当作已定位。唯一联系人精确匹配后点击一次，核验选中会话 data-id 与搜索结果 uniqueId、姓名及实际岗位，再次核验身份后才返回 `status=opened`。
-- 对于chat及后续业务定位，重名通过 `CandidateSelectionRequired` 错误中止（消息保留完整匹配信息），不执行发送、同意、下载或读取候选人摘要；collect当前轮次立即停止，不继续下一人，不把暂停写成附件失败或RECHECK。等待用户手动选择或进一步指令，不自动用已有ID绕过暂停，也不自动恢复。已知info筛选无匹配时，不移除条件重搜；同名同info的两个ID仍暂停。用户确认后的动作仍须核验真实会话身份。
+- 对于chat及后续业务定位，重名通过 `CandidateSelectionRequired` 错误中止（消息保留完整匹配信息），不执行发送、同意、下载或读取候选人摘要；collect当前轮次立即停止，不继续下一人，不把暂停写成附件失败或RECHECK。等待用户手动选择或进一步指令，有可靠 ID 或 info 时可显式重新定位。已知info筛选无匹配时，不移除条件重搜；仅传 info 时，同名同 info 仍暂停。用户确认后的动作仍须核验真实会话身份。
 - 已完成隔离浏览器测试：唯一匹配、隐藏重名暂停、群聊歧义、已有输入拒绝覆盖、无结果、错误页面及会话ID／岗位不符停止。真实演示已验证唯一结果的手动路径；真实重名场景尚未验收。
 - 2026-10-26 真实CLI验证：用户关闭旧搜索后指定改搜“刘海罗”，`chat-search "刘海罗" --json` 返回 `status=opened`、`clicked=true`；唯一结果“刘海罗_北京丰升科技有限公司”，搜索uniqueId与会话data-id均为 `692932186-0`，实际岗位“全栈软件开发工程师”。未发送消息，浏览器保持打开。此前黄子佳搜索暴露的就绪标记为数字1问题已修正并通过此完整路径验证。
 - 接入原有定位入口后，`chat "刘海罗" --data-id "692932186-0" --json` 已真实验证成功，实际会话ID及岗位一致，返回原chat摘要／消息结构。38项相关隔离回归通过，包括各定位入口重名暂停、发送／附件中止、collect暂停不改账本及check/status只读；此次未真实发送、收件或下载。

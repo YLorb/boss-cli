@@ -1,5 +1,5 @@
 import { runCheck } from './check.js';
-import { searchChatCandidate, type ChatSearchOptions } from './chat_search.js';
+import { clearChatSearch, searchChatCandidate, type ChatSearchOptions } from './chat_search.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
 /** 业务实现聚合出口：impl* 供 CLI 与其它模块调用 */
 import { runLogin } from './login.js';
@@ -20,6 +20,10 @@ import { runRecommendGreet } from './greet.js';
 import { readSelectedConversation, assertSelectedConversation, openConversationByTarget, type ConversationTarget } from './target_chat.js';
 import { runAcceptTargetResume, runDownloadTargetResume } from './attachment.js';
 export type { ChatPageAction };
+export async function implClearChatSearch(keyword: string, json = false): Promise<string> {
+  const result = await withBossSessionPage(page => clearChatSearch(page, keyword));
+  return json ? JSON.stringify(result) : `已清空沟通搜索：${keyword}`;
+}
 export async function implChatSearch(options: ChatSearchOptions, json = false): Promise<string> {
   const result = await withBossSessionPage(page => searchChatCandidate(page, options));
   return json ? JSON.stringify(result) : result.status === 'needs-confirmation'
@@ -46,9 +50,10 @@ export async function implOpenChat(
   exact: boolean,
   json = false,
   check = false,
+  info?: string,
 ): Promise<string> {
   if (check) return runCheck({page:'chat',state:'conversation',name:candidateName,embedded:false});
-  return withBossSessionPage(async (page) => runOpenCandidateChat(page, candidateName, exact, json));
+  return withBossSessionPage(async (page) => runOpenCandidateChat(page, candidateName, exact, json, info));
 }
 
 export async function implOpenTargetChat(target: ConversationTarget, json = false): Promise<string> {

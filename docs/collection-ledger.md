@@ -14,7 +14,7 @@
 
 1. 首先启动 `boss collect --job "岗位完整名称"`，保持该常驻进程及其 stdin 打开；后续轮次复用同一会话。
 2. 等待 `ok:true,event:started`，核对返回的 job、file 和 recoveryRequired。启动失败立即停止流程，不能继续处理候选人。
-3. recoveryRequired 为 true 时，暂停普通处理，等待人工显式发出 `{"op":"reconcile"}`。全量逐项对账成功、`show` 返回 recoveryRequired=false 后才能继续；不得自动触发对账或绕过恢复状态。
+3. recoveryRequired 为 true 时，暂停普通处理，等待人工显式发出 `{"op":"reconcile","recoveryAuthorized":true}`。全量逐项对账成功、`show` 返回 recoveryRequired=false 后才能继续；不得自动触发对账或绕过恢复状态。
 4. 在该会话发送 `{"op":"show"}` 读取已有账本，再读取 BOSS 未读列表，核对岗位并将新候选人 add 到同一会话。已有决策和进度继续复用，RECHECK 仍只由人工 recheck 指令触发。
 5. 正常模式按未读逐人执行筛选决策和后续动作，不调用全账本round。特殊模式在人工明确范围内使用round或原子命令；每条完成后再执行下一条。停止时向同一会话发送 `{"op":"stop"}`，收到 `ok:true,event:stopped` 后才确认账本已写回。
 
@@ -44,7 +44,7 @@ stdin 每行接收一个 JSON 对象，stdout 每行返回一个 JSON 结果。�
 
 默认目录 `~/.boss-cli/ledgers`，可用 `--ledger-dir` 指定。每个岗位完整名称对应一个 SHA-256 文件名，header 保存岗位名。同一岗位只能有一个存活会话。job 必须与沟通职位的完整名称一致，不支持区分名称完全相同的不同职位 ID。
 
-stop 到达后不再接受新任务，取消尚未开始的排队任务，等当前候选人命令退出后原子写回，不继续下一人。不要一次输入所有命令和 stop，否则排队任务会被取消。Ctrl+C / SIGTERM 也视为停止指令；直接关闭 stdin、杀进程或崩溃保留旧快照和 reading，内存改动可能丢失。
+stop 到达后不再接受新任务，取消尚未开始的排队任务，等当前候选人命令退出后原子写回，不继续下一人。不要一次输入所有命令和 stop，否则排队任务会被取消。Ctrl+C / SIGTERM 也视为停止指令；直接关闭 stdin 或进程中断保留逐人已提交结果，在途附件操作留为该人的 RECHECK。
 
 写回使用同目录临时文件、文件同步和原子 rename。失败直接报错，保留原文件及临时文件。
 
@@ -66,7 +66,7 @@ stop 到达后不再接受新任务，取消尚未开始的排队任务，等当
 ```
 
 - status：PENDING、WAITING_ATTACHMENT、DOWNLOADED、RECHECK。
-- decision：PENDING、PASS；提交 FAIL 后立即从内存删除，stop 后 JSON 中也删除。
+- decision：PENDING、PASS；提交 FAIL 后立即从正式账本原子删除。
 - attachment.probe：最近成功探测的附件、请求消息证据和下载详情；lastError 保存失败上下文。超时保留已有证据和决策，只更新状态、错误与修改时间。
 
 ## 超时和人工复查
@@ -80,7 +80,7 @@ boss probe-resume "测试候选人" --data-id "123-0" --download --json
 
 probe-resume、accept-resume、download-resume 使用独立子进程，整条命令限时 15 秒，覆盖连接、定位、检查、可选下载和退出清理。超时杀死执行进程，确认 close 后返回 AttachmentTimeoutError。已经发到 Chrome 的动作不会撤销，浏览器已经开始的下载也可能继续。
 
-普通 round 跳过 RECHECK，不在同轮重试；只有此前筛选 PASS 的候选人才在普通轮次下载。人工发出 `{"op":"recheck"}` 才逐人复查，每次指令每人一次，与未读列表无关。流程为「沟通—全部 → 姓名和 data-id 定位 → 检查附件 → 检查已发送请求」。复查只读取证据，不下载、筛选或发送，后续显式 round 根据已有决策继续。
+普通 round 跳过 RECHECK，不在同轮重试；只有此前筛选 PASS 的候选人才在普通轮次下载。人工发出 `{"op":"recheck","recoveryAuthorized":true}` 才逐人复查，每次指令每人一次，与未读列表无关。流程为「沟通—全部 → 姓名和 data-id 定位 → 检查附件 → 检查已发送请求」。复查只读取证据，不下载、筛选或发送，后续显式 round 根据已有决策继续。
 
 探测仅证明已加载消息中的事实：attachment=RECEIVED 表示看到附件，request=SENT 表示看到己方完整话术“你好，方便发一份你的简历过来吗？”或历史版本“方便发一份你的简历过来吗？”。未看到时返回 NOT_OBSERVED，不能解释成无附件或未发送；自定义话术和未加载历史需人工核对，不能据此自动补发。已确认的发送证据和下载进度不因本次未观察到而清空。
 
@@ -88,11 +88,11 @@ probe-resume、accept-resume、download-resume 使用独立子进程，整条命
 
 ## 故障恢复
 
-激活前先将磁盘 header 写成 reading:true，内存候选人记录忽略该字段。启动发现残留标记，进入恢复状态，禁止普通 round、recheck、add 和 PASS 决策。
+新会话以岗位锁互斥，每笔候选人变更在成功回执之前保存。旧版 reading:true 或未完成的 reconciliationRequired:true 要求全量恢复，普通 round、recheck、add 和 decision 暂停。仅有个人 RECHECK 时保留其他人的进度。没有明确恢复授权时只提示“有信息需要恢复。”
 
-人工发出 `{"op":"reconcile"}` 后，从顶部遍历「沟通—全部」主列表 `.chat-user .user-container > .user-list`。只有组件 `loading$=0`、`hasMore$=false`、`.load-tips` 非加载态可见且滚动到底，才可结束；同时检查组件中已加载的会话ID均已读取，折叠或虚拟化漏项不能当成完整结果。零结果须有无更多数据与可见“暂无牛人”的共同证据。容器/标志/加载状态缺失、加载超过20秒、未回到顶部或超过扫描上限均报错，不回退旧容器、不返回部分列表。按完整岗位名补回上次只存在内存中的候选人，与原账本合并，再逐项检查附件、请求消息；原账本记录不会因列表缺失而直接删除。
+人工发出 `{"op":"reconcile","recoveryAuthorized":true}` 后，从顶部遍历「沟通—全部」主列表 `.chat-user .user-container > .user-list`。只有组件 `loading$=0`、`hasMore$=false`、`.load-tips` 非加载态可见且滚动到底，才可结束；同时检查组件中已加载的会话ID均已读取，折叠或虚拟化漏项不能当成完整结果。零结果须有无更多数据与可见“暂无牛人”的共同证据。容器/标志/加载状态缺失、加载超过20秒、未回到顶部或超过扫描上限均报错，不回退旧容器、不返回部分列表。按完整岗位名补回上次只存在内存中的候选人，与原账本合并，再逐项检查附件、请求消息；原账本记录不会因列表缺失而直接删除。
 
-全部成功才解除恢复限制。发生超时、错误或中途停止时要求保留。stop 擦除 reading；若对账未完成则写入 reconciliationRequired:true，下次仍强制对账。对账只恢复 BOSS 页面证据，不能恢复未保存的人工筛选结论，新补回记录 decision 为 PENDING。全量列表扫描经过其他岗位的行，但逐项检查仅针对本岗位。
+全部成功才解除恢复限制。全量对账开始前持久化 reconciliationRequired:true，发生超时、错误或中途停止时保留该标记。对账只恢复 BOSS 页面证据，新补回记录 decision 为 PENDING。全量列表扫描经过其他岗位的行，但逐项检查仅针对本岗位。
 
 旧锁所属进程退出后可重新获取岗位锁。锁获取由 `.opening` 文件串行保护；若恰在获取期间崩溃，错误指出此文件，需要确认文件中的进程已退出后删除它。损坏 JSON、身份冲突、不可识别的锁均直接报错，不自动覆盖。
 

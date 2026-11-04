@@ -41,12 +41,12 @@ const candidate = { dataId: '123', name: '测试甲' };
 const probe = (target = candidate) => ({ ...target, attachment: 'NOT_OBSERVED', attachmentName: null,
   request: 'NOT_OBSERVED', requestEvidence: [], scope: 'loaded-messages', download: null });
 
-test('reading is durable before activation; seven fields change only in memory until stop', async t => {
+test('candidate changes are durable before acknowledgment without a dirty-session flag', async t => {
   const ledger = await Ledger.load(await directory(t), '岗位 A');
-  assert.equal(JSON.parse(await readFile(ledger.file, 'utf8')).header.reading, true);
+  assert.equal(JSON.parse(await readFile(ledger.file, 'utf8')).header.reading, undefined);
   ledger.add(candidate);
   ledger.decide('123', 'PASS');
-  assert.equal(JSON.parse(await readFile(ledger.file, 'utf8')).candidates.length, 0);
+  assert.equal(JSON.parse(await readFile(ledger.file, 'utf8')).candidates[0].decision, 'PASS');
   await ledger.stop();
   const saved = JSON.parse(await readFile(ledger.file, 'utf8'));
   assert.equal('reading' in saved.header, false);
@@ -119,7 +119,13 @@ test('explicit recheck needs no unread list, reads once and preserves prior comp
   await ledger.stop();
 });
 
-test('dirty startup blocks rounds; full reconciliation merges lost candidates only for its job', async t => {
+async function markLegacyDirty(file) {
+  const doc = JSON.parse(await readFile(file, 'utf8'));
+  doc.header.reading = true;
+  await writeFile(file, JSON.stringify(doc));
+}
+
+test('legacy dirty startup blocks rounds; full reconciliation merges lost candidates only for its job', async t => {
   const dir = await directory(t);
   let ledger = await Ledger.load(dir, '岗位 A');
   ledger.add(candidate);
@@ -127,6 +133,7 @@ test('dirty startup blocks rounds; full reconciliation merges lost candidates on
   ledger = await Ledger.load(dir, '岗位 A');
   ledger.add({ dataId: 'lost', name: '内存新增' });
   await ledger.abandon();
+  await markLegacyDirty(ledger.file);
   ledger = await Ledger.load(dir, '岗位 A');
   assert.equal(ledger.recoveryRequired, true);
   const calls = [];
@@ -134,8 +141,8 @@ test('dirty startup blocks rounds; full reconciliation merges lost candidates on
     calls.push(args);
     return JSON.stringify(probe({ name: args[1], dataId: args[3] }));
   });
-  await assert.rejects(runner.round('round'), /全量逐项对账/);
-  await assert.rejects(runner.round('recheck'), /全量逐项对账/);
+  await assert.rejects(runner.round('round'), /有信息需要恢复/);
+  await assert.rejects(runner.round('recheck'), /有信息需要恢复/);
   await runner.round('reconcile', [{ ...candidate, job: '岗位 A' },
     { dataId: 'lost', name: '内存新增', job: '岗位 A' }, { dataId: 'other', name: '另一岗位', job: '岗位 B' }]);
   assert.equal(calls.length, 2);
@@ -151,6 +158,7 @@ test('incomplete reconciliation remains mandatory even after a requested stop an
   await ledger.stop();
   ledger = await Ledger.load(dir, '岗位 A');
   await ledger.abandon();
+  await markLegacyDirty(ledger.file);
   ledger = await Ledger.load(dir, '岗位 A');
   const runner = new CollectionRunner(ledger, async () => { throw new AttachmentTimeoutError('probe', 15_000); });
   await assert.rejects(runner.round('reconcile', []), /未完成/);
@@ -160,19 +168,40 @@ test('incomplete reconciliation remains mandatory even after a requested stop an
   await ledger.stop();
 });
 
-test('ambiguous candidate pauses the round without advancing or changing the ledger', async t => {
+test('in-flight intent is durable; ambiguity leaves only the affected candidate pending', async t => {
   const ledger = await Ledger.load(await directory(t), '岗位 A');
   ledger.add(candidate); ledger.add({dataId:'456',name:'测试乙'});
   const before = structuredClone(ledger.entries());
   let calls=0;
   const runner = new CollectionRunner(ledger,async()=>{
     calls++;
+    assert.equal(JSON.parse(await readFile(ledger.file,'utf8')).candidates[0].status,'RECHECK');
     const error=new Error('重名，等待用户确认');error.name='CandidateSelectionRequired';throw error;
   });
   await assert.rejects(runner.round('round'),/重名/);
   assert.equal(calls,1);
-  assert.deepEqual(ledger.entries(),before);
+  assert.equal(ledger.get('123').status,'RECHECK');
+  assert.deepEqual(ledger.get('456'),before[1]);
   await ledger.stop();
+});
+
+test('three consecutive candidate timeouts pause before the fourth; reopening retains only affected IDs', async t => {
+  const dir = await directory(t);
+  const ledger = await Ledger.load(dir,'岗位 A');
+  for (const dataId of ['a','b','c','d']) ledger.add({dataId,name:dataId});
+  const visited = [];
+  const runner = new CollectionRunner(ledger,async args=>{
+    visited.push(args[3]);
+    throw new AttachmentTimeoutError('probe',15000);
+  });
+  await assert.rejects(runner.round('round'),/连续三位/);
+  await assert.rejects(runner.round('round'),/已暂停/);
+  assert.deepEqual(visited,['a','b','c']);
+  await ledger.abandon();
+  const recovered = await Ledger.load(dir,'岗位 A');
+  assert.equal(recovered.recoveryRequired,false);
+  assert.deepEqual(recovered.entries().map(row=>row.status),['RECHECK','RECHECK','RECHECK','PENDING']);
+  await recovered.stop();
 });
 
 test('unexpected command error is exposed, records RECHECK, and stops this round', async t => {
@@ -220,7 +249,7 @@ test('supervisor waits for worker exit, kills hangs, and exposes abnormal exits'
   await assert.rejects(runCommandProcess(['crash'], 3000, pathToFileURL(worker)), /异常退出/);
 });
 
-test('real collect CLI persists an explicit stop; EOF preserves reading for recovery', async t => {
+test('real collect CLI retains records across EOF and rejects unauthorized recovery before browser access', async t => {
   const dir = await directory(t);
   async function session(job, explicitStop) {
     const child = spawn(process.execPath, ['dist/cli/index.js', 'collect', '--job', job, '--ledger-dir', dir],
@@ -231,6 +260,10 @@ test('real collect CLI persists an explicit stop; EOF preserves reading for reco
     let stderr = '';
     child.stderr.on('data', data => { stderr += data; });
     const started = JSON.parse((await lines.next()).value);
+    for (const op of ['recheck','reconcile']) {
+      child.stdin.write(JSON.stringify({op})+'\n');
+      assert.equal(JSON.parse((await lines.next()).value).error,'有信息需要恢复。');
+    }
     child.stdin.write(JSON.stringify({ op: 'add', job, ...candidate }) + '\n');
     assert.equal(JSON.parse((await lines.next()).value).ok, true);
     if (explicitStop) {
@@ -245,6 +278,6 @@ test('real collect CLI persists an explicit stop; EOF preserves reading for reco
   assert.equal(stopped.candidates.length, 1);
   assert.equal(stopped.header.reading, undefined);
   const abandoned = await session('岗位 B', false);
-  assert.equal(abandoned.candidates.length, 0);
-  assert.equal(abandoned.header.reading, true);
+  assert.equal(abandoned.candidates[0].dataId, candidate.dataId);
+  assert.equal(abandoned.header.reading, undefined);
 });

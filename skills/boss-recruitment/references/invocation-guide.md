@@ -65,12 +65,12 @@ check 可组合 `--page`、`--overlay`、`--state`、`--name`、`--data-id`、`-
 
 ## 4. 昵称搜索、定位和读取聊天
 
-须已在 `/web/chat/index`；搜索框存在旧输入或结果时停止，不覆盖、不自动清理。定位不操作岗位下拉，BOSS自行重置岗位不算失败；重名仍暂停，不按已有ID挑选。
+须已在 `/web/chat/index`；搜索框存在旧输入或结果时停止，不覆盖、不自动清理。定位不操作岗位下拉，BOSS自行重置岗位不算失败；同名时用目标已知会话 ID 或 info 精确筛选，唯一才打开。
 
 | 调用 | 含义 | 结果／限制 |
 | --- | --- | --- |
 | `boss chat-search '张三' --json` | 显式搜索完整昵称并在唯一精确匹配时打开 | opened／needs-confirmation／not-found，均须检查status，不只检查退出码 |
-| `boss chat-search '张三' --data-id '123-0' --job '实际沟通岗位' --json` | 搜索后额外比较已知ID和岗位 | 比较参数不设置岗位，也不消除重名；不支持--check |
+| `boss chat-search '张三' --data-id '123-0' --job '实际沟通岗位' --json` | 用已知 ID 筛选，打开后核验岗位 | 岗位参数不参与消歧；不支持--check |
 | `boss chat '张三' --data-id '123-0' --json` | 当前身份一致则复用，否则搜索定位 | 成功返回summary、messages、附件事实；不表示完整聊天历史 |
 | `boss chat '张三' --json` | 按完整昵称搜索，打开后读聊天 | 只有姓名时不走联合键复用；--strict仅兼容旧调用 |
 | `boss chat '张三' --index 2 --unread --json` | 从调用时列表第2行取姓名／ID再搜索 | 不是按旧快照序号点击；保存快照后使用姓名＋ID |
@@ -78,7 +78,7 @@ check 可组合 `--page`、`--overlay`、`--state`、`--name`、`--data-id`、`-
 
 结果处理：
 
-`chat-search` 的 `match`／`matches`、`status.chatSearch.matches` 及失败诊断匹配项统一包含 `name`、`uniqueId`、`label`、`info`、`tag`。info是workDesc原文（公司或院校等补充信息），tag是exchangeDesc原文（交换提示），缺失返回null；不从label拆分猜补。搜索现场已有结果时使用 `boss status --json` 读取，不重新调用chat-search。已获得并与目标关联的info原文可用于 `boss chat-search '张三' --info '已知原文' --data-id '123-0' --json` 或 `boss chat '张三' --data-id '123-0' --info '已知原文' --json`。页面只输入昵称，返回后精确比较完整姓名和info，唯一且ID相符才打开；零匹配停止，同名同info或群聊歧义仍暂停。searchMatches保留全部原始匹配，info保留输入条件。当前会话姓名和ID一致直接复用。chat的--info须带--data-id，不与--index/--check混用；send和附件命令不接受--info，先chat定位后复用。无--tag，不从label猜填，不退回只按姓名搜索。
+`chat-search` 的 `match`／`matches`、`status.chatSearch.matches` 及失败诊断匹配项统一包含 `name`、`uniqueId`、`label`、`info`、`tag`。info是workDesc原文（公司或院校等补充信息），tag是exchangeDesc原文（交换提示），缺失返回null；不从label拆分猜补。搜索现场已有结果时使用 `boss status --json` 读取，不重新调用chat-search。已获得并与目标关联的info原文可用于 `boss chat-search '张三' --info '已知原文' --data-id '123-0' --json` 或 `boss chat '张三' --data-id '123-0' --info '已知原文' --json`。页面只输入昵称，返回后精确比较完整姓名和info，唯一且ID相符才打开；零匹配停止，筛选后仍有多项或存在群聊歧义时暂停。searchMatches保留全部原始匹配，info保留输入条件。未传 info 且当前会话姓名和 ID 一致时直接复用。chat 的 --info 可单独使用，不与--index/--check混用；send和附件命令不接受--info，先chat定位后复用。无--tag，不从label猜填，不退回只按姓名搜索。
 
 - `opened`：姓名、会话ID及详情姓名已核验；页面筛选不需要保持不变。
 - `needs-confirmation`：多个联系人或群聊等歧义，clicked=false，保留现场等用户，不继续下一人。
@@ -210,11 +210,11 @@ boss collect --job '全栈软件开发工程师 _ 深圳' --ledger-dir 'C:\Recru
 | `{"op":"decision","dataId":"123-0","decision":"PASS"}` | 保存通过结论，未下载者进入等待 |
 | `{"op":"decision","dataId":"123-0","decision":"FAIL"}` | 删除正式记录；本轮忽略原因另存回执 |
 | `{"op":"round"}` | 遍历账本对象，PASS者可能下载；不扫描新人、不自动发送。仅用于明确授权范围 |
-| `{"op":"recheck"}` | 复核RECHECK，只读附件证据，不下载发送 |
-| `{"op":"reconcile"}` | 操作页面全量对账，不是离线修复；清单岗位须与账本键可核验对应，缺少城市时不能猜补后宣告完成 |
+| `{"op":"recheck","recoveryAuthorized":true}` | 复核RECHECK，只读附件证据，不下载发送 |
+| `{"op":"reconcile","recoveryAuthorized":true}` | 操作页面全量对账，不是离线修复；清单岗位须与账本键可核验对应，缺少城市时不能猜补后宣告完成 |
 | `{"op":"stop"}` | 等在途工作退出并原子写回；等stopped与进程退出才算保存 |
 
-stdin不支持send、download、upload、recordProbe。独立下载回执不会自动转到账本。EOF／杀进程不是stop；reading或reconciliationRequired时停止普通业务。历史账本含薪资或缺城市时，明确迁移方案后再处理，不新建空账本绕过历史去重。完整协议见[账本与恢复](ledger-and-recovery.md)。
+stdin不支持send、download、upload、recordProbe。独立下载回执不会自动转到账本。逐人更新在成功回执前落盘，EOF 保留已完成记录；reading或reconciliationRequired时停止普通业务。历史账本含薪资或缺城市时，明确迁移方案后再处理，不新建空账本绕过历史去重。完整协议见[账本与恢复](ledger-and-recovery.md)。
 
 ## 11. 版本维护及不支持的调用
 
@@ -260,3 +260,17 @@ expect-url 必须是实际前一条历史的完整 URL，包含原有查询参�
 # 搜索预览的显式单次恢复（2026-10-29）
 
 用户明确授权时可用 `preview <姓名> --candidate-id <ID> --reopen-on-frame-error --json`（可与 `--open-only` 同用）。仅搜索页、仅目标Frame打开失败：核验原URL、固定搜索参数（保留城市等全部筛选，仅排除page）、岗位标签及同人双ID；允许列表动态追加/重排、分页和后台列表加载，目标姓名＋ID唯一核验不变，点击唯一可用关闭按钮一次，确认弹层消失，再核验条件并重开一次。身份歧义、条件变化、关闭失败、第二次失败及截图失败不恢复。无浏览器历史回退、刷新、改筛选或沟通。未带开关保持失败即停止；此为用户明确授权的有限恢复例外。成功查看仍须按原SOP核验、OCR与计数。
+
+## 推荐页打开已联系候选人的聊天
+
+收藏功能另见下方独立工具说明，不属于推荐联系步骤。
+
+`boss chat '卡片姓名' --recommend --open --candidate-id '已联系ID' --recommend-job '岗位名称 _ 发布城市' --job '聊天岗位原文' --json`
+
+仅在当前推荐页执行；recommend-job 校验推荐岗位与城市（忽略薪资），job 严格校验小窗岗位。只点一次同人“继续聊／继续沟通”，已有同人小窗则复用；不打招呼、不导航、不发送。返回 target 的实际姓名、ID、岗位及 conversationId。后续按返回 target 使用既有 embedded 检查、发送和关闭命令；本页内嵌会话章节的这些命令现在也支持推荐页主文档小窗。出现错误保存待办并停止，不补点、不补发。具体顺序、回执和限制以[推荐 SOP](recommend-sop.md#打招呼后的边界)为准；推荐路径尚未真实页面验收。
+
+## 收藏当前已打开的简历（可选工具）
+
+`boss favorite --candidate-id '当前简历ID' --check --json` 仅读取状态；去掉 `--check` 才执行收藏。ID 必须来自此前核验的当前简历，不支持只给姓名或按卡片序号猜测。命令只接受当前搜索／推荐页已打开的唯一简历，核对两处候选人 ID 和右侧按钮的文案、图标、组件状态。执行时原子核验，已收藏直接跳过，只有确认未收藏且未加载、按钮可用且无遮挡才单击一次。5000ms 内确认收藏状态后才返回成功，失败停止不重试，不取消收藏、不刷新、不打开／关闭简历、不联系候选人。
+
+回执：已收藏为 `status=already-favorited,clicked=false,favorited=true`；本次收藏确认为 `status=favorited,clicked=true,favorited=true`；只读看到未收藏为 `status=not-favorited,clicked=false,favorited=false`。只读还会给出 busy 和宿主视口 rect，不代表已通过点击前检查。未知文案或状态冲突直接报错，不据此点击。仅功能扩展，Agent 按用户指令临时调度，不增加任何 SOP 步骤。已提供隔离页面离线测试，尚未真实页面验收。

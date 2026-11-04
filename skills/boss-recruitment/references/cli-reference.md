@@ -46,7 +46,7 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 
 ## 列表与会话
 
-2026-10-26 用户确认的[沟通页候选人定位流程](chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期岗位"] --json`，必须已在沟通页。保留当前页面状态、不主动切岗 → 搜索图标 → 输入昵称 → 读取完整匹配项（含隐藏项） → 唯一匹配才点击 → 核验会话姓名、data-id及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令；比较参数不用于选择重名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不重试。此命令不支持 `--check`、不发送，不以人才搜索 `boss search` 代用，现有chat及指定对象发送／附件／探测均接入此搜索，滚动查找已删除；仍只处理起始快照中的对象。`status --json` 的 `chatSearch` 字段只读查看搜索输入及结果。
+2026-10-26 用户确认的[沟通页候选人定位流程](chat-candidate-location.md)：`boss chat-search "完整昵称" [--data-id "预期ID"] [--job "预期岗位"] --json`，必须已在沟通页。保留当前页面状态、不主动切岗 → 搜索图标 → 输入昵称 → 读取完整匹配项（含隐藏项） → 唯一匹配才点击 → 核验会话姓名、data-id及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令；可传与目标关联的 --data-id 或 --info 消除重名，两者同时提供时取交集。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不重试。此命令不支持 `--check`、不发送，不以人才搜索 `boss search` 代用，现有chat及指定对象发送／附件／探测均接入此搜索，滚动查找已删除；仍只处理起始快照中的对象。`status --json` 的 `chatSearch` 字段只读查看搜索输入及结果。
 
 沟通页通过公开 `switch-job --list` 获取选项，再用 `switch-job --job "完整文案"` 选岗，使用 `status --json` 的 `chatFilterJob` 核验。`scripts/switch-job.mjs` 不是公开 boss 子命令，其直连真实浏览器的旧许可已撤销；不得调用或包装成替代入口。见[岗位切换边界](switch-job.md)。
 
@@ -60,7 +60,7 @@ boss chat '张三' --data-id '123-0' --json
 
 list读取列表，--chatting选顶部“沟通中”，--unread选未读；输出姓名、data-id和岗位。不是F5，页面不匹配时仍会导航，筛选不一致时会点击。正常循环仅起始读取一次。
 
-chat仅用于已有会话，必须已在沟通页。姓名和--index入口直接按完整昵称搜索，不主动切换或恢复岗位，不再滚动查找；姓名始终精确匹配，--strict保留兼容。index从1开始，仅从调用时列表取得姓名、ID及岗位再搜索，不能复用旧序号。重名即使已给ID或序号也通过CandidateSelectionRequired暂停，等待用户手动确认或进一步指令；没有滚动回退。指定候选人的发送、附件及探测同样在重名时中止。--data-id入口先核验当前姓名、ID和详情姓名，一致则直接复用，否则才搜索。chat --json成功仍返回已加载消息、摘要与附件事实，不证明历史完整。
+不带 --embedded 或 --recommend 的普通 chat 仅用于已有会话，必须已在沟通页。姓名和--index入口直接按完整昵称搜索，不主动切换或恢复岗位，不再滚动查找；姓名始终精确匹配，--strict保留兼容。index从1开始，仅从调用时列表取得姓名、ID及岗位再搜索，不能复用旧序号。按已知会话 ID 或 info 原文精确筛选后仍有多人，通过 CandidateSelectionRequired 暂停，等待用户手动确认或进一步指令；没有滚动回退。指定候选人的发送、附件及探测同样在重名时中止。--data-id入口先核验当前姓名、ID和详情姓名，一致且未传 info 时直接复用，否则才搜索。chat --json成功仍返回已加载消息、摘要与附件事实，不证明历史完整。
 
 ## 推荐、搜索、预览与打招呼
 
@@ -160,7 +160,7 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 搜索业务执行顺序以[搜索 SOP（2026-10-22）](search-sop.md)为准：已指定沟通岗位不走联系选岗弹层；不限职位才按招聘目标岗位选择。内嵌窗口正式入口已提供，详见下节；完整真实发送仍待验收，不据greet点击回执推定send成功。
 
 
-### 搜索页内嵌聊天（本地新增，2026-10-22）
+### 搜索／推荐页内嵌聊天
 
 `chat --inspect-embedded --json` 仅读取当前窗口，不代表身份通过。
 `chat "实际姓名" --embedded --check --candidate-id "触达回执ID" --job "完整岗位" --json` 严格核验。
@@ -177,6 +177,14 @@ boss collect --job '岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledg
 - 无 ID 时维持姓名必须唯一；ID 缺失、姓名不符、重复 ID 或目标不在当前列表直接报错，不回退按姓名匹配，不刷新寻找。
 - 只有获得当前卡片的可靠 ID 后才可处理同名者，仍不唯一则暂停。推荐同样支持姓名＋ID；深度搜索不支持该参数。
 
+## 收藏（可选工具）
+
+可选收藏工具：`boss favorite --candidate-id '当前简历ID' [--check] [--json]`，仅搜索／推荐页已经打开的同人简历。未收藏时核验后点击一次，已收藏跳过，不能取消收藏；失败停止不重试。`--check` 仅读取状态，不保证可点击。仅按用户指令临时调用，不作为 SOP 的默认步骤。完整说明见[逐项调用手册](invocation-guide.md#收藏当前已打开的简历可选工具)。
+
 ## 搜索扩池与显式历史返回（2026-10-28）
 
 公开入口：`search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] --json` 与 `back --previous --expect-url <完整URL> --json`。前者限当前常规搜索页、按 ID 去重且不联系；后者只返回已核验的前一条浏览器历史一步，不刷新或重跑失败动作。完整参数、返回字段、上限与停止条件见[逐项调用手册](invocation-guide.md#12-有上限的搜索扩池与返回上一页)。仅离线测试通过，未做真实页面验收。
+
+### 推荐页继续聊（0.6.12-dev.0）
+
+`chat "卡片姓名" --recommend --open --candidate-id "已联系ID" --recommend-job "岗位名称 _ 发布城市" --job "聊天岗位原文" --json` 在推荐页打开已联系候选人的同人小窗；只点击一次“继续聊／继续沟通”，不打招呼、不导航、不发送。按返回 target 的实际姓名、ID、岗位使用上述 embedded 检查、发送及关闭入口。步骤、限制及离线验证范围见[推荐 SOP](recommend-sop.md#打招呼后的边界)。

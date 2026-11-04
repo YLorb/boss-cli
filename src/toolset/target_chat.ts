@@ -28,7 +28,7 @@ export async function openConversationByTarget(page: Page, input: ConversationTa
   if (!isBossChatIndexUrl(page.url())) throw new Error('候选人定位必须已在沟通页 /web/chat/index；当前=' + page.url());
   const reuseCurrent = matchesConversationIdentity(await readSelectedConversation(page), target);
   await closeAttachmentPreview(page);
-  if (!reuseCurrent) await requireChatSearch(page, target);
+  if (!reuseCurrent || target.info !== undefined) await requireChatSearch(page, target);
   // A later read/identity failure is terminal; never retry it through search.
   await assertSelectedConversation(page, target);
 }

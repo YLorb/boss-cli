@@ -26,15 +26,15 @@ scope: "ledger"
 | add | 新会话入账，核对完整岗位、姓名、dataId；不能用推荐脱敏名伪造ID |
 | decision | PASS保存通过；FAIL删除正式账本记录，本轮回执保留原因 |
 | round | `{"op":"round"}`遍历已有账本；不扫描新人、不评分、不自动发消息或上传。只用于用户明确范围的特殊模式 |
-| recheck | `{"op":"recheck"}`人工明确触发，复查RECHECK；进入全部，仅核对证据，不下载发送 |
-| reconcile | `{"op":"reconcile"}`人工明确触发，全量对账解除恢复；会操作页面，禁止页面操作时不能执行 |
-| stop | 等在途任务退出，原子写回；等stopped与进程退出才称保存成功 |
+| recheck | `{"op":"recheck","recoveryAuthorized":true}`人工明确触发，复查RECHECK；进入全部，仅核对证据，不下载发送 |
+| reconcile | `{"op":"reconcile","recoveryAuthorized":true}`人工明确触发，全量对账解除恢复；会操作页面，禁止页面操作时不能执行 |
+| stop | 等在途任务完成并释放账本锁；等stopped与进程退出才称保存成功 |
 
 ## 数据及持久化
 
 candidate字段：dataId、name、createdAt、updatedAt、attachment、status、decision。status为PENDING／WAITING_ATTACHMENT／DOWNLOADED／RECHECK；decision为PENDING／PASS，FAIL会删除。不要扩展为自造“已触达”状态，触达意图与等待回复写独立回执。
 
-启动写reading标记，业务修改主要在内存；正常stop写回。EOF、杀进程、崩溃不是正常保存，内存结果可能丢失。每完成一个动作及时保存独立回执，不等最后才记。
+新账本每次 add、decision（含 FAIL 删除）、探测结果或错误均在返回成功前逐人原子落盘。collect 启动时不写 reading。附件操作前先持久化本人的 RECHECK，成功后保存结果。EOF 保留已保存记录，未决操作留待授权复查。每完成一个动作及时保存独立回执，不等最后才记。
 
 回执至少含：runId、JD与规则、岗位、身份依据、观察计数、来源、评估证据、动作前意图、实际正文和时间、页面确认、附件路径／bytes／sha256、错误、停止原因。模板见[run.example.json](../assets/run.example.json)。忽略对象只放本轮记录。
 
@@ -46,7 +46,7 @@ candidate字段：dataId、name、createdAt、updatedAt、attachment、status、
 
 ## 恢复
 
-reading／reconciliationRequired存在时先停普通业务，保持原文件，展示错误及待恢复内容。reconcile需要用户授权页面全量对账；本轮已明确授权时不重复询问。要求“仅恢复本地、不操作页面”时，只核验本地回执，不清除必须页面对账的标记，保留未决并报告。
+reading／reconciliationRequired存在时先停普通业务，保持原文件，对用户仅提示“有信息需要恢复。”。recheck、reconcile 均须本轮用户明确授权对应岗位和范围，再传 recoveryAuthorized:true；reconcile 需要授权页面全量对账；本轮已明确授权时不重复询问。要求“仅恢复本地、不操作页面”时，只核验本地回执，不清除必须页面对账的标记，保留未决并报告。
 
 过期锁先核实所属PID已退出；损坏JSON、身份冲突、无法识别锁直接报错，不自动覆盖或删锁。恢复不能重发不明消息，也不能从历史未找到就推断没发。
 

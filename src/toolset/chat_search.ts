@@ -1,4 +1,5 @@
 import type { Page } from 'puppeteer-core';
+import { sleepRandom } from '../browser/timing.js';
 import { isBossChatIndexUrl } from '../common/auth.js';
 import { assertSelectedConversation, readSelectedConversation } from './conversation_identity.js';
 import { ChatSearchFailure, type ChatSearchFailureDetails } from '../common/chat_search_failure.js';
@@ -42,13 +43,50 @@ const resultsScript = `(() => {
     ready: Boolean(vm.showSearchResult), emptyCompleted: vm.showSearchResult === 0 };
 })()`;
 
+export async function clearChatSearch(page: Page, keyword: string, timeout = 5000) {
+  const url = page.url();
+  if (!isBossChatIndexUrl(url) || !keyword.trim()) throw Error('清空搜索需要在沟通页提供当前非空搜索词');
+  await page.evaluate(`(() => {
+    if (location.href !== ${JSON.stringify(url)}) throw Error('清空前页面已变化');
+    const visible = ${visible};
+    const state = ${resultsScript};
+    if (state.keyword !== ${JSON.stringify(keyword)} || state.content !== ${JSON.stringify(keyword)}) throw Error('当前搜索词与 --expect-keyword 不符，停止清空');
+    if ((!state.ready && !state.emptyCompleted) || state.count !== state.matches.length) throw Error('搜索结果尚未就绪，停止清空');
+    const root = [...document.querySelectorAll('.chat-top-search')].find(visible);
+    const buttons = [...root.querySelectorAll('.boss-svg.search-close')].filter(visible);
+    if (root.__vue__.showClose !== true || buttons.length !== 1) throw Error('搜索框清空按钮缺失或不唯一');
+    const button = buttons[0], rect = button.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    if (!hit || !button.contains(hit)) throw Error('搜索框清空按钮不可点击或被遮挡');
+    button.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, view:window}));
+  })()`);
+  try {
+    await page.waitForFunction(`(() => {
+      if (location.href !== ${JSON.stringify(url)}) throw Error('清空后页面已变化');
+      const visible = ${visible};
+      const roots = [...document.querySelectorAll('.chat-top-search')];
+      if (!roots.length) return [...document.querySelectorAll('.chat-search-btn')].filter(visible).length === 1;
+      if (roots.length !== 1) return false;
+      const root = roots[0], vm = root.__vue__;
+      return root.querySelector('input.search-input')?.value === '' && vm?.content === '' &&
+        vm.searchList?.length === 0 && vm.searchGroupList?.length === 0 && vm.showSearchResult === false &&
+        !root.querySelector('.geek-search-list li');
+    })()`, {timeout});
+  } catch (cause) {
+    throw new Error(`已点击一次清空，未核验搜索框复位：keyword=${keyword}；${String(cause)}`, {cause});
+  }
+  return {status:'cleared', keyword, clicked:true};
+}
+
 export async function searchChatCandidate(page: Page, options: ChatSearchOptions, timeout = chatSearchTimeoutMs()) {
   const name = options.name.trim();
   if (!name || (options.dataId !== undefined && !options.dataId.trim()) || (options.job !== undefined && !options.job.trim()) || (options.info !== undefined && !options.info.trim())) throw Error('候选人昵称及提供的比较标准不能为空');
   if (!isBossChatIndexUrl(page.url())) throw Error(`chat-search 必须已在沟通页 /web/chat/index；当前=${page.url()}`);
   const context: Omit<ChatSearchFailureDetails, 'diagnostics'> = { stage: 'open-search', timeoutMs: timeout, name, expectedDataId: options.dataId, expectedInfo: options.info, clickState: 'not-attempted', locationVerified: false };
   const infoCondition = options.info === undefined ? '' : ` && x.info === ${JSON.stringify(options.info)}`;
-  const matchingScript = `s.matches.filter(x => x.name === ${JSON.stringify(name)}${infoCondition})`;
+  // 已知会话ID时参与筛选：同名同公司的多条会话按 uniqueId 唯一命中，避免误判为重名而中断。
+  const dataIdCondition = options.dataId === undefined ? '' : ` && x.uniqueId === ${JSON.stringify(options.dataId.trim())}`;
+  const matchingScript = `s.matches.filter(x => x.name === ${JSON.stringify(name)}${infoCondition}${dataIdCondition})`;
   try {
     context.stage = 'open-search';
     await page.evaluate(`(() => {
@@ -62,7 +100,7 @@ export async function searchChatCandidate(page: Page, options: ChatSearchOptions
     })()`);
     await page.waitForSelector('.chat-top-search input.search-input', { visible: true, timeout });
     const initial = await page.evaluate(resultsScript) as SearchState;
-    if (initial.keyword || initial.content || initial.matches.length || initial.groups) throw Error('沟通搜索已有输入或结果，请先由用户清空；不覆盖或复用旧搜索');
+    if (initial.keyword || initial.content || initial.matches.length || initial.groups) throw Error('沟通搜索已有输入或结果，请先核对现场并显式清空；不覆盖或复用旧搜索');
     // BOSS initializes this marker to boolean false, then sets a numeric result count
     // in the search callback. Never confuse initial false with a completed numeric zero.
     if (initial.resultSignal !== false) throw Error('搜索完成标记不是初始false，无法区分旧结果与本次查询，请先清空搜索');
@@ -89,7 +127,14 @@ export async function searchChatCandidate(page: Page, options: ChatSearchOptions
     const evidence = { info: options.info, searchMatches: state.matches };
     if (matches.length === 0 && state.groups === 0) {
       let reason = 'search-empty';
-      if (state.matches.length) reason = state.matches.some(x => x.name === name) ? 'info-no-match' : 'name-no-match';
+      if (state.matches.length) {
+        const sameName = state.matches.filter(x => x.name === name);
+        reason = 'name-no-match';
+        if (sameName.length) {
+          const idMatches = !options.dataId || sameName.some(x => x.uniqueId === options.dataId!.trim());
+          reason = idMatches ? 'info-no-match' : 'data-id-no-match';
+        }
+      }
       return { status: 'not-found' as const, clicked: false as const, name, matches: [], groupCount: 0, ...evidence, reason };
     }
     if (matches.length !== 1 || state.groups > 0) {
@@ -100,11 +145,14 @@ export async function searchChatCandidate(page: Page, options: ChatSearchOptions
     if (options.dataId && match.uniqueId !== options.dataId.trim()) throw Error(`搜索结果会话ID不符：expected=${options.dataId}；actual=${match.uniqueId}`);
     context.stage = 'click-result';
     context.expectedDataId = match.uniqueId;
+    const searchUrl = page.url();
+    await sleepRandom(500, 1000);
     context.clickState = 'attempted';
     await page.evaluate(`(() => {
+      if (location.href !== ${JSON.stringify(searchUrl)}) throw Error('等待期间沟通页已变化，停止点击');
       const s = ${resultsScript};
       const matches = ${matchingScript};
-      if (s.keyword !== ${JSON.stringify(name)} || s.content !== ${JSON.stringify(name)} || s.groups || s.count !== s.matches.length || matches.length !== 1 || JSON.stringify(matches[0]) !== ${JSON.stringify(JSON.stringify(match))}) throw Error('点击前搜索身份或结果数量已变化');
+      if (!s.ready || s.keyword !== ${JSON.stringify(name)} || s.content !== ${JSON.stringify(name)} || s.groups || s.count !== s.matches.length || matches.length !== 1 || JSON.stringify(matches[0]) !== ${JSON.stringify(JSON.stringify(match))}) throw Error('点击前搜索身份或结果数量已变化');
       const rows = [...document.querySelectorAll('.chat-top-search .geek-search-list li')];
       const row = rows[s.matches.indexOf(matches[0])];
       if (!(${visible})(row)) throw Error('唯一搜索结果不可见，停止；不展开或改选其他结果');

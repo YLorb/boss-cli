@@ -101,6 +101,7 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
  if(!c.name&&!c.dataId&&!c.candidateId&&!c.state&&c.embedded===undefined) return !c.job||sameJob(pageJob,c.job);
  let identity=s.conversation,job=pageJob;
  if(c.embedded) {
+  if(!['search','recommend'].includes(s.pageType))return false;
   identity=s.embeddedIdentity;job=identity?.job;
   if(!identity||!identity.conversationId||identity.conversationId!==identity.editorId||!identity.friendId||identity.friendId!==identity.rootFriendId)return false;
  } else if(c.candidateId||(s.resume&&c.name)||(s.pageType==='recommend'&&c.name)) {
@@ -114,7 +115,7 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
  if(c.name&&identity?.name!==c.name)return false;
  if(c.dataId&&identity?.dataId!==c.dataId)return false;
  if(c.candidateId&&identity?.candidateId!==c.candidateId)return false;
- if(c.job&&!sameJob(c.state==='job-selected'?s.selectedJob:job,c.job))return false;
+ if(c.job&&!(c.embedded?job===c.job:sameJob(c.state==='job-selected'?s.selectedJob:job,c.job)))return false;
  const norm=(v:string)=>(v||'').replace(/\r\n/g,'\n').trim();
  const seen=c.text!==undefined&&s.messages.some((m:string)=>norm(m)===norm(c.text!));
  switch(c.state){

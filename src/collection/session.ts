@@ -9,7 +9,9 @@ export async function runCollectionSession(directory: string, job: string): Prom
   const ledger = await Ledger.load(directory, job);
   const runner = new CollectionRunner(ledger);
   const emit = (value: unknown) => stdout.write(JSON.stringify(value) + '\n');
-  emit({ ok: true, event: 'started', job, file: ledger.file, recoveryRequired: ledger.recoveryRequired });
+  const pendingRecovery = ledger.recoveryRequired || ledger.entries().some(row => row.status === 'RECHECK');
+  emit({ ok: true, event: 'started', job, file: ledger.file, recoveryRequired: ledger.recoveryRequired,
+    ...(pendingRecovery ? {notice:'有信息需要恢复。'} : {}) });
   const rl = createInterface({ input: stdin, terminal: false });
   let queue = Promise.resolve();
   let stopped = false;
@@ -33,12 +35,15 @@ export async function runCollectionSession(directory: string, job: string): Prom
     queue = queue.then(async () => {
       if (command.op === 'stop') { await stop(); return; }
       if (runner.stopRequested) { emit({ ok: false, op: command.op, error: '已收到 stop，尚未开始的命令已取消。' }); return; }
+      if ((command.op === 'reconcile' || command.op === 'recheck') && command.recoveryAuthorized !== true) {
+        throw new Error('有信息需要恢复。');
+      }
       switch (command.op) {
         case 'show':
           emit({ ok: true, op: 'show', recoveryRequired: ledger.recoveryRequired, candidates: ledger.entries() });
           break;
         case 'add': {
-          if (ledger.recoveryRequired) throw new Error('必须先 reconcile 全量对账。');
+          if (ledger.recoveryRequired) throw new Error('有信息需要恢复。');
           if (command.job !== job) throw new Error(`add 必须明确指定当前岗位 job=${job}`);
           ledger.add({ dataId: command.dataId as string, name: command.name as string });
           emit({ ok: true, op: 'add', dataId: command.dataId });
@@ -54,6 +59,7 @@ export async function runCollectionSession(directory: string, job: string): Prom
           emit({ ok: true, op: command.op, results: await runner.round(command.op) });
           break;
         case 'reconcile': {
+          ledger.beginReconciliation();
           const inventory = JSON.parse(await runFullCandidateInventory(() => runner.stopRequested)) as { candidates: Candidate[] };
           if (runner.stopRequested) break;
           emit({ ok: true, op: 'reconcile', results: await runner.round('reconcile', inventory.candidates) });
@@ -81,7 +87,7 @@ export async function runCollectionSession(directory: string, job: string): Prom
     if (!stopped) {
       runner.stopRequested = true;
       await ledger.abandon();
-      throw new Error('输入已关闭但未收到 stop；未写回内存账本，保留 reading，下次必须全量对账。');
+      throw new Error('输入已关闭但未收到 stop；已确认的候选人更新已逐笔保存。');
     }
   } finally {
     process.off('SIGINT', onSignal);

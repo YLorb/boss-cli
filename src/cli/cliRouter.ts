@@ -12,6 +12,7 @@ import { detachBrowserSession } from '../browser/index.js';
 import {
   implChatAction,
   implChatSearch,
+  implClearChatSearch,
   implLogin,
   implListCandidates,
   implListUnreadCandidates,
@@ -40,6 +41,8 @@ import { runBack } from '../toolset/back.js';
 import { parseSearchMoreArgs, runSearchMore } from '../toolset/search-more.js';
 import { inspectEmbeddedChat, checkEmbeddedChat, sendEmbeddedChat, closeEmbeddedChat } from '../toolset/embedded-chat.js';
 import { dismissContactNotice } from '../toolset/contact-notice.js';
+import { favoriteResume } from '../toolset/favorite.js';
+import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
@@ -168,8 +171,8 @@ function printHelp(): void {
       截图后由 Agent 后台调用，评估前等待完成并优先读 textPath；失败报错，不重试、不连接浏览器
   boss collect --job <岗位完整名称> [--ledger-dir <目录>]
       一岗一账的常驻会话；stdin 每行一个 JSON 命令，stdout 每行一个 JSON 结果
-      op: add / decision / round / recheck / reconcile / show / stop；仅 stop 或 Ctrl+C 正常写回
-      recheck 必须显式发出；发现 reading 残留时，必须 reconcile 全量逐项对账
+      候选人更新逐笔保存；stop 等待在途操作并退出。待恢复时提示“有信息需要恢复。”
+      recheck / reconcile 仅在用户明确授权对应范围后传 recoveryAuthorized:true；旧 reading 需要全量对账
   boss version | ver（或 -v / --version）
       显示当前版本并检查 npm 是否有更新
   boss update
@@ -177,7 +180,7 @@ function printHelp(): void {
   boss version-check [--json]
       离线校验 CLI 与实际加载的 Skill 配套版本；外部 Skill 必须设置绝对路径 BOSS_SKILL_DIR
       不匹配返回退出码 2，业务启动被阻止；用户确认后本轮业务命令可加 --confirm-version-mismatch <令牌>
-  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/search-more/deep-search/preview/greet/dismiss-contact-notice/back）
+  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/search-more/deep-search/preview/greet/favorite/dismiss-contact-notice/back）
       输出各命令的原始字段；JSON 模式 stdout 仅输出结果，诊断日志写 stderr
       失败输出 {ok:false,command,error:{name,message}} 并返回非零退出码
       jd --json 返回 Markdown 正文与缓存路径；download-resume 默认已输出 JSON
@@ -187,30 +190,36 @@ function printHelp(): void {
       只读检查现有浏览器中的首个 BOSS 标签页；返回true/false，无法判定时报错，不打开或跳转页面
   boss check --page <chat|search|recommend|deep-search|online-resume|positions|login|other> [--state <状态>] [--name <姓名>] [--data-id <ID>] [--candidate-id <ID>] [--job <完整岗位>] [--text <正文>]
   boss status [--json]
-      check 和业务 --check 严格只读，输出 true/false；status 输出当前页面信息。读取失败报错。
+      check 和业务 --check 严格只读，通常输出 true/false；favorite --check 返回收藏状态详情。status 输出当前页面信息。读取失败报错。
   boss search-sidebar [--json]
       在会话锁及页面守护下只读当前搜索侧栏文字和元素描述；不点击订阅、不导航或刷新。
   boss list [--unread] [--chatting] [--json]
       --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
   boss chat --inspect-embedded
+  boss chat <卡片姓名> --recommend --open --candidate-id <已联系ID> --recommend-job <推荐岗位与城市> --job <聊天岗位原文>
+    仅在推荐卡片点击一次“继续聊／继续沟通”，核验同人小窗；不打招呼、不跳转，不发送。
   boss dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位>
     仅关闭当前搜索简历的已知畅聊卡使用成功提示；核验身份及已联系状态，点一次关闭，不点查看对话。
+  boss favorite --candidate-id <当前简历ID> [--check] [--json]
+    仅搜索／推荐页已打开简历；--check 只读状态。仅未收藏时点击一次，已收藏直接跳过；不取消收藏、不导航。
   boss chat <实际姓名> --embedded --close --candidate-id <ID> --job <完整岗位>
-    仅关闭当前已核验的搜索页内嵌窗口；有草稿、遮挡或身份不符则停止，不刷新或重试。
-  boss chat <实际姓名> --embedded --check --candidate-id <搜索候选人ID> --job <完整岗位>
-  boss send --embedded --name <实际姓名> --candidate-id <搜索候选人ID> --job <完整岗位> --text <正文> [--check]
-    只处理当前搜索页内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
-  boss chat <姓名> [--strict]
+    仅关闭当前已核验的搜索／推荐页内嵌窗口；有草稿、遮挡或身份不符则停止，不刷新或重试。
+  boss chat <实际姓名> --embedded --check --candidate-id <候选人ID> --job <完整岗位>
+  boss send --embedded --name <实际姓名> --candidate-id <候选人ID> --job <完整岗位> --text <正文> [--check]
+    只处理当前搜索／推荐页主文档内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
+  boss chat <姓名> [--strict] [--info <已知原文>]
       直接按完整昵称搜索，不主动切换或恢复岗位；按姓名和会话ID核验成功，重名保持搜索现场暂停；--strict 保留兼容
+  boss chat-search --clear --expect-keyword <当前完整昵称> [--json]
+      在沟通页核对旧搜索词后点击清空一次，仅复位搜索框。重名时先保存匹配项，再用已知 info 单独定位。
   boss chat-search <完整昵称> [--info <已知原文>] [--data-id <预期会话ID>] [--job <预期完整岗位>] [--json]
       须已在沟通页；直接搜索，唯一匹配打开并核验姓名和会话ID；BOSS自行重置筛选不算定位失败；重名保持搜索现场暂停
       零匹配且查询已完成返回not-found；查询未完成仍超时，业务定位遇零匹配抛CandidateNotFound停止
       匹配项含name/uniqueId/label/info/tag；info为原始workDesc，tag为exchangeDesc，缺失返回null；--info 按完整姓名和已获取的info原文精确筛选，不向页面输入info
       BOSS_CHAT_SEARCH_TIMEOUT_MS 设置每次搜索/身份等待上限，默认20000ms，范围1000–60000；错误附阶段和只读DOM诊断，不自动重试
-      --job 比较实际岗位，--data-id 核验会话ID；不用于自动挑选重名；不支持 --check，不发送消息
+      --job 比较实际岗位，--data-id 核验会话ID；已知 ID 或 info 可精确筛选同名者；不支持 --check，不发送消息
   boss chat [姓名] --index <序号> [--unread] [--strict]
       从当前列表 1-based 序号读取姓名、ID及岗位，再按昵称搜索定位；--unread 用于读取未读列表的序号对象
-      同时提供姓名时精确校验；序号或ID不能绕过重名暂停，不滚动查找
+      同时提供姓名时精确校验；以当次快照ID筛选，仍有多个匹配时暂停，不滚动查找
       仅用于已建立联系的候选人（即在 list 里可见的会话对象）
   boss chat <姓名> --data-id <会话ID> [--info <已知原文>]
       先核验当前姓名、会话ID及详情姓名，一致则直接使用；不一致才搜索定位，不主动切换或恢复岗位，搜索可用已知info精确筛选；仍多匹配则暂停，无匹配即停止，无失败回退
@@ -463,7 +472,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['switch-job', 'ocr', 'check', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -550,11 +559,22 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'chat-search') {
-    const { rest, opts, flags } = parseOpts(tail);
+    const { rest, opts, flags } = parseOpts(tail, new Set(['clear']));
+    if (flags.has('clear')) {
+      const keyword = opts['expect-keyword'];
+      if (!keyword?.trim() || rest.length || flags.size !== 1 || Object.keys(opts).length !== 1) die('用法: chat-search --clear --expect-keyword <当前完整昵称> [--json]');
+      return implClearChatSearch(keyword, json);
+    }
     if (rest.length !== 1 || !rest[0]!.trim() || flags.size || Object.keys(opts).some(k => !['data-id', 'job', 'info'].includes(k)) || Object.values(opts).some(v => !v.trim())) die('用法: chat-search <完整昵称> [--info <已知原文>] [--data-id <预期ID>] [--job <预期岗位>] [--json]');
     return implChatSearch({ name: rest[0]!, dataId: opts['data-id'], job: opts.job, ...(opts.info !== undefined ? { info: opts.info } : {}) }, json);
   }
 
+  if (cmd === 'favorite') {
+    const {rest,flags,opts}=parseOpts(tail,new Set(['check']));
+    if(rest.length||[...flags].some(f=>f!=='check')||!opts['candidate-id']?.trim()||Object.keys(opts).some(k=>k!=='candidate-id'))
+      die('favorite --candidate-id <当前简历ID> [--check] [--json]');
+    return favoriteResume(opts['candidate-id'],flags.has('check'));
+  }
   if (cmd === 'dismiss-contact-notice') {
     const {rest,flags,opts}=parseOpts(tail);
     if(!rest.join(' ').trim()||flags.size||!opts['candidate-id']?.trim()||!opts.job?.trim()||Object.keys(opts).some(k=>!['candidate-id','job'].includes(k)))
@@ -562,7 +582,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
     return dismissContactNotice({name:rest.join(' ').trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()});
   }
   if (cmd === 'chat') {
-    const { rest, flags, opts } = parseOpts(tail, new Set(['check', 'embedded', 'inspect-embedded', 'close']));
+    const { rest, flags, opts } = parseOpts(tail, new Set(['check', 'embedded', 'inspect-embedded', 'close', 'recommend', 'open']));
+    if(flags.has('recommend')||flags.has('open')) {
+      if(flags.size!==2||!flags.has('recommend')||!flags.has('open')||!rest.join(' ').trim()||
+        !opts['candidate-id']?.trim()||!opts.job?.trim()||!opts['recommend-job']?.trim()||Object.keys(opts).some(k=>!['candidate-id','job','recommend-job'].includes(k)))
+        die('chat <卡片姓名> --recommend --open --candidate-id <已联系ID> --recommend-job <推荐岗位与城市> --job <聊天岗位原文>');
+      return openRecommendChat({name:rest.join(' ').trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim(),recommendJob:opts['recommend-job'].trim()});
+    }
     if (flags.has('inspect-embedded')) {
       if(rest.length || Object.keys(opts).length || flags.size!==1) die('chat --inspect-embedded 不能与其他选项混用');
       return inspectEmbeddedChat();
@@ -588,10 +614,10 @@ export async function executeCommand(argv: string[]): Promise<string> {
     const exact = true;
     const indexRaw = (opts.index ?? opts.i ?? '').trim();
     const dataId = (opts['data-id'] ?? '').trim();
-    if (flags.has('info') || (opts.info !== undefined && (!opts.info.trim() || !dataId || !!indexRaw || flags.has('check')))) {
-      die('chat --info 需要非空原文及 --data-id，不与 --check/--index 混用');
+    if (flags.has('info') || (opts.info !== undefined && (!opts.info.trim() || !!indexRaw || flags.has('check')))) {
+      die('chat --info 需要非空原文，不与 --check/--index 混用');
     }
-    if (flags.has('data-id')) {
+    if (flags.has('data-id') || (opts['data-id'] !== undefined && !dataId)) {
       die('❌ chat --data-id 必须提供会话 ID。');
     }
     if (flags.has('check')) {
@@ -624,7 +650,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!nameArg) {
       die('❌ 用法: chat <姓名> [--strict]；或 chat [姓名] --index <序号> [--unread]');
     }
-    return implOpenChat(nameArg, exact, json);
+    return implOpenChat(nameArg, exact, json, false, opts.info);
   }
 
   if (cmd === 'action') {

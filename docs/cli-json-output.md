@@ -1,5 +1,7 @@
 # CLI JSON 输出
 
+`favorite --candidate-id ID [--check] --json` 返回 `status,clicked,favorited,busy,identityVerified,candidateId,rect,checkOnly,page,coordinateSpace`。只读检查的 status 为 `not-favorited` 或 `already-favorited`；该检查不是可点击保证。执行时已收藏返回 `already-favorited/ clicked=false`，未收藏且单击后确认成功返回 `favorited/ clicked=true`。rect 为当前宿主视口 CSS 坐标，coordinateSpace 为 `main-document` 或 `recommend-frame`，不能当作固定屏幕坐标使用。错误为标准 JSON，message 含 candidateId、stage、clicked；原子点击阶段抛错时 clicked=false 仅表示未取得点击回执，动作结果可能未知，禁止重试。命令不加入 SOP，由 Agent 按用户指令显式调用。
+
 业务命令加 `--json`，输出该功能已读取的字段和执行结果，供 Agent 自行分析。默认文本输出保留；`list --json` 和 `download-resume` 的现有 JSON 字段不改变。
 
 ```powershell
@@ -84,3 +86,11 @@ npm run test:json
 `switch-job --list --json` 返回 ok/changed=false/before/options/url/closeClick/note，options 含 label/unavailable；closeClick 含视口 CSS 坐标 x/y、随机范围 rect 和点击前选中会话 ID 数组 selected。会展开菜单并单次点击已核验的左侧随机空白点收起，非只读。`switch-job --job "完整文案" --json` 返回 ok/changed/before/job/url。失败遵循标准 JSON 错误，非零退出码，不自动重试。两者复用会话锁及守卫，不发送消息。
 
 截图成功回执增加 `closed` 与 `next="await-agent-result"`：沟通收集 `action resume` 仅在左侧空白点击退出并核验后返回 closed=true；推荐／搜索的 preview 返回 closed=false，保持底部等待 Agent 决策。截图失败不退出；截图已保存但退出失败时错误保留截图路径。
+
+### 推荐页内嵌聊天
+
+`chat <卡片姓名> --recommend --open --candidate-id ID --recommend-job <推荐岗位与城市> --job <聊天岗位原文> --json` 返回 `{status:"embedded-opened"|"embedded-already-open",clicked,identityVerified:true,target:{name,candidateId,job},cardName,recommendJob,conversationId}`。target.name 是核验 ID 后的小窗实际姓名，供后续 embedded 检查、发送、关闭使用。只点击继续聊，不发起首次触达，不导航或发送。异常采用标准错误 JSON，禁止据此补点或补发。
+
+`send --embedded`、`chat --embedded --check/--close` 和 `chat --inspect-embedded` 支持搜索／推荐页主文档小窗。发送成功仍返回 message-visible，已加载同人己方完整正文存在时返回 already-visible、sent:false；不代表查遍全部历史。推荐路径尚未线上验收。
+
+按发送键后的未确认错误为 `EmbeddedSendUnconfirmedError`。`error.details` 包含 `phase:"after-enter"`、`sendAttempted:true`、`outcome:"unconfirmed"`、`retryAllowed:false`、原始 `cause:{name,message}` 及一次只读 `diagnostic`。diagnostic 包含 URL/身份是否一致、friendId 类型、消息数量，以及每条消息的 hasId/isNew/self/recipientMatches/recipientType/visible/exactText/textLength，不包含正文。诊断读取失败写入 diagnosticError，不替换原错误、不转为成功。以上是失败后的快照，不证明超时时刻各字段状态。禁止凭超时补发；禁止凭正文片段宣称全文已送达。

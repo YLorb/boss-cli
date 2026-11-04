@@ -10,7 +10,7 @@ mock.module('../dist/toolset/search-sidebar.js',{namedExports:{runSearchSidebar:
 mock.module('../dist/toolset/contact-notice.js',{namedExports:{dismissContactNotice:async(...args)=>{calls.push({name:'dismissContactNotice',args});return JSON.stringify({status:'contact-notice-dismissed'});}}});
 mock.module('../dist/toolset/check.js',{namedExports:{runCheck:async (...args)=>{calls.push({name:'runCheck',args});return 'true';},runStatus:async()=>'{"pageType":"chat"}'}});
 const names = ['implChatAction','implChatSearch','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
-mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries(names.map(name => [name, async (...args) => {
+mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries([...names,'implClearChatSearch'].map(name => [name, async (...args) => {
   calls.push({name,args});
   return JSON.stringify({reader:name,args});
 }])) });
@@ -59,13 +59,15 @@ test('new bounded search and explicit history-back routes forward JSON and rejec
 test('every business command forwards --json to its reader, including aliases and flag placement', async () => {
   const cases = [
     [['login','--json'],'implLogin',[true]],
+    [['chat-search','--clear','--expect-keyword','黄子佳','--json'],'implClearChatSearch',['黄子佳',true]],
     [['chat-search','黄子佳','--data-id','123-0','--job','目标岗位','--json'],'implChatSearch',[{name:'黄子佳',dataId:'123-0',job:'目标岗位'},true]],
     [['chat-search','黄子佳','--data-id','123-0','--info',' 已知公司 ','--json'],'implChatSearch',[{name:'黄子佳',dataId:'123-0',job:undefined,info:' 已知公司 '},true]],
     [['list','--unread','--json'],'implListCandidates',[{unreadOnly:true,chattingOnly:false,json:true}]],
     [['list-candidates','--json','--chatting'],'implListCandidates',[{unreadOnly:false,chattingOnly:true,json:true}]],
     [['chat','--json','测试候选人','--data-id','123'],'implOpenTargetChat',[{name:'测试候选人',dataId:'123'},true]],
     [['chat','测试候选人','--data-id','123','--info','已知公司','--json'],'implOpenTargetChat',[{name:'测试候选人',dataId:'123',info:'已知公司'},true]],
-    [['chat','测试候选人','--strict','--json'],'implOpenChat',['测试候选人',true,true]],
+    [['chat','测试候选人','--strict','--json'],'implOpenChat',['测试候选人',true,true,false,undefined]],
+    [['chat','测试候选人','--info',' 公司 ','--json'],'implOpenChat',['测试候选人',true,true,false,' 公司 ']],
     [['chat','--index','2','--unread','--json'],'implOpenChatByIndex',[{index:2,unreadOnly:true,expectedName:undefined,exact:true,json:true}]],
     [['action','remark','--remark','包含换行\n和引号"','--json'],'implChatAction',[{action:'remark',remark:'包含换行\n和引号"',json:true}]],
     [['accept-resume','测试候选人','--data-id','123','--json'],'implAcceptTargetResume',[{name:'测试候选人',dataId:'123'},true,false]],
@@ -92,12 +94,15 @@ test('every business command forwards --json to its reader, including aliases an
 test('info cannot be silently ignored by readonly, index or unsupported commands',async()=>{
   const before=calls.length;
   for(const args of [
-    ['chat','候选人','--info','公司'],
+    ['chat','候选人','--data-id=','--info','公司'],
     ['chat','候选人','--data-id','id','--info'],
     ['chat','候选人','--data-id','id','--info',' '],
     ['chat','候选人','--data-id','id','--info','公司','--check'],
     ['chat','候选人','--index','1','--info','公司'],
     ['chat-search','候选人','--info',' '],
+    ['chat-search','--clear'],
+    ['chat-search','--clear','--expect-keyword','旧搜索','--info','公司'],
+    ['chat-search','候选人','--clear','--expect-keyword','旧搜索'],
     ['check','--page','chat','--info','公司'],
   ]) await assert.rejects(executeCommand(args));
   assert.equal(calls.length,before);

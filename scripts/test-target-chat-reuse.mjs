@@ -49,11 +49,11 @@ test('missing or mismatched current identity selects the search path once', asyn
   }
 });
 
-test('known info is passed unchanged only when searching; a verified current ID still reuses', async () => {
+test('explicit info requires search even with a verified current ID', async () => {
   const known={...target,info:' 已知_公司 '};
   const matchingPage=fixture();
   await openConversationByTarget(matchingPage,known);
-  assert.ok(!matchingPage.events.includes('search'));
+  assert.ok(matchingPage.events.includes('search'));
   const different=fixture({...matching,dataId:'other'});
   different.search=async received=>{assert.deepEqual(received,known);different.current={...matching};};
   await openConversationByTarget(different,known);

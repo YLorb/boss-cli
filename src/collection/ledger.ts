@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { hostname } from 'node:os';
+import { closeSync, fsyncSync, openSync, renameSync, writeFileSync } from 'node:fs';
 import { validateAttachmentProbe, type AttachmentProbe } from '../toolset/attachment.js';
 
 export type Decision = 'PENDING' | 'PASS' | 'FAIL';
@@ -18,15 +19,15 @@ export type Entry = {
 type Header = { version: 1; job: string; reading?: true; reconciliationRequired?: true };
 type Document = { header: Header; candidates: Entry[] };
 
-async function atomicWrite(file: string, value: Document): Promise<void> {
+function atomicWrite(file: string, value: Document): void {
   const temporary = `${file}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, 'wx');
+  const handle = openSync(temporary, 'wx');
   try {
-    await handle.writeFile(JSON.stringify(value, null, 2) + '\n', 'utf8');
-    await handle.sync();
-  } finally { await handle.close(); }
+    writeFileSync(handle, JSON.stringify(value, null, 2) + '\n', 'utf8');
+    fsyncSync(handle);
+  } finally { closeSync(handle); }
   // A failed rename leaves the previous valid ledger and the temporary file for inspection.
-  await rename(temporary, file);
+  renameSync(temporary, file);
 }
 
 function validate(doc: Document, job: string): void {
@@ -52,7 +53,7 @@ function validate(doc: Document, job: string): void {
   }
 }
 
-/** One owner and one JSON per job. In-memory updates are committed only by stop(). */
+/** One owner per job. Publish each mutation to disk before exposing it in memory. */
 export class Ledger {
   private rows = new Map<string, Entry>();
   private closed = false;
@@ -111,8 +112,9 @@ export class Ledger {
       }
       validate(doc, job);
       const recovery = doc.header.reading === true || doc.header.reconciliationRequired === true;
-      await atomicWrite(file, { ...doc, header: { ...doc.header, reading: true } });
-      return new Ledger(file, job, lockFile, structuredClone(doc), recovery);
+      const ledger = new Ledger(file, job, lockFile, doc, recovery);
+      ledger.save(ledger.rows);
+      return ledger;
     } catch (error) {
       await rm(lockFile);
       throw new Error(`加载岗位账本失败：job=${job} file=${file}；${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -120,6 +122,18 @@ export class Ledger {
   }
 
   entries(): Entry[] { return structuredClone([...this.rows.values()]); }
+
+  private save(rows: Map<string, Entry>, recovery = this.recoveryRequired): void {
+    const header: Header = { version: 1, job: this.job };
+    if (recovery) header.reconciliationRequired = true;
+    atomicWrite(this.file, {header, candidates: [...rows.values()]});
+  }
+
+  private put(row: Entry): void {
+    const next = new Map(this.rows).set(row.dataId, row);
+    this.save(next);
+    this.rows = next;
+  }
 
   private requireOpen(): void { if (this.closed) throw new Error('账本会话已停止。'); }
 
@@ -139,19 +153,26 @@ export class Ledger {
       return;
     }
     const now = new Date().toISOString();
-    this.rows.set(target.dataId, { dataId: target.dataId, name: target.name, createdAt: now, updatedAt: now,
+    this.put({ dataId: target.dataId, name: target.name, createdAt: now, updatedAt: now,
       attachment: { probe: null, lastError: null }, status: this.recoveryRequired ? 'RECHECK' : 'PENDING', decision: 'PENDING' });
   }
 
   decide(dataId: string, decision: 'PASS' | 'FAIL'): void {
     const row = this.get(dataId);
-    if (decision === 'FAIL') { this.rows.delete(dataId); return; }
-    if (this.recoveryRequired || row.status === 'RECHECK') throw new Error(`候选人必须先复查/对账：${dataId}`);
+    if (this.recoveryRequired) throw new Error('有信息需要恢复。');
+    if (decision === 'FAIL') {
+      const next = new Map(this.rows);
+      next.delete(dataId);
+      this.save(next);
+      this.rows = next;
+      return;
+    }
+    if (row.status === 'RECHECK') throw new Error(`候选人必须先复查/对账：${dataId}`);
     if (decision !== 'PASS') throw new Error('筛选结果只接受 PASS 或 FAIL。');
     row.decision = decision;
     row.updatedAt = new Date().toISOString();
     row.status = row.attachment.probe?.download ? 'DOWNLOADED' : 'WAITING_ATTACHMENT';
-    this.rows.set(dataId, row);
+    this.put(row);
   }
 
   recordProbe(dataId: string, probe: AttachmentProbe): void {
@@ -168,7 +189,7 @@ export class Ledger {
     row.attachment = { probe, lastError: null };
     row.status = probe.download ? 'DOWNLOADED' : row.decision === 'PASS' ? 'WAITING_ATTACHMENT' : 'PENDING';
     row.updatedAt = new Date().toISOString();
-    this.rows.set(dataId, row);
+    this.put(row);
   }
 
   recordFailure(dataId: string, error: Error): void {
@@ -176,25 +197,29 @@ export class Ledger {
     row.status = 'RECHECK';
     row.attachment.lastError = `${error.name}: ${error.message}`;
     row.updatedAt = new Date().toISOString();
-    this.rows.set(dataId, row);
+    this.put(row);
+  }
+
+  beginReconciliation(): void {
+    this.requireOpen();
+    this.save(this.rows, true);
+    this.recoveryRequired = true;
   }
 
   completeReconciliation(): void {
     this.requireOpen();
     if (this.entries().some(row => row.status === 'RECHECK')) throw new Error('仍有未完成逐项对账的记录，不能解除恢复状态。');
+    this.save(this.rows, false);
     this.recoveryRequired = false;
   }
 
   async stop(): Promise<void> {
     this.requireOpen();
-    const header: Header = { version: 1, job: this.job };
-    if (this.recoveryRequired) header.reconciliationRequired = true;
-    await atomicWrite(this.file, { header, candidates: this.entries() });
     this.closed = true;
     await rm(this.lockFile);
   }
 
-  /** EOF/crash is not stop: preserve reading and the last disk snapshot. */
+  /** EOF releases the lock without discarding previously saved candidate updates. */
   async abandon(): Promise<void> {
     if (!this.closed) { this.closed = true; await rm(this.lockFile); }
   }

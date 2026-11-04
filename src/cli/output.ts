@@ -1,4 +1,5 @@
 import { ChatSearchFailure } from '../common/chat_search_failure.js';
+import { EmbeddedSendUnconfirmedError } from '../common/embedded_send_failure.js';
 
 /** --json is a boolean output flag; tokens after -- remain literal arguments. */
 export function splitJsonFlag(argv: string[]): { args: string[]; json: boolean } {
@@ -17,6 +18,6 @@ export function jsonError(command: string, error: unknown): string {
   return JSON.stringify({ ok: false, command, error: {
     name: error instanceof Error ? error.name : 'Error',
     message: error instanceof Error ? error.message : String(error),
-    ...(error instanceof ChatSearchFailure ? { details: error.details } : {}),
+    ...(error instanceof ChatSearchFailure || error instanceof EmbeddedSendUnconfirmedError ? { details: error.details } : {}),
   } });
 }

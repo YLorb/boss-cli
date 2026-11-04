@@ -3,6 +3,7 @@ import type { Page } from 'puppeteer-core';
 import { CHAT_INPUT_TEXT_READER } from '../common/chat_input_text.js';
 import { selectAllModifierKey } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
+import { EmbeddedSendUnconfirmedError } from '../common/embedded_send_failure.js';
 
 export type EmbeddedTarget = { name: string; candidateId: string; job: string };
 export type EmbeddedState = {
@@ -39,7 +40,8 @@ export function validateEmbeddedState(state: EmbeddedState, target: EmbeddedTarg
     throw new Error('内嵌会话身份/岗位校验失败：'+JSON.stringify({expected:target,actual:{name:state.name,candidateId:state.candidateId,job:state.job,conversationId:state.conversationId,editorId:state.editorId}}));
 }
 export async function readEmbeddedState(page: Page): Promise<EmbeddedState> {
-  if(new URL(page.url()).pathname!=='/web/chat/search') throw new Error('内嵌聊天只支持当前搜索页，不自动跳转');
+  const url=new URL(page.url());
+  if(url.origin!=='https://www.zhipin.com'||!['/web/chat/search','/web/chat/recommend'].includes(url.pathname)) throw new Error('内嵌聊天只支持当前 BOSS 搜索／推荐页，不自动跳转');
   return await page.evaluate(EMBEDDED_STATE_SCRIPT) as EmbeddedState;
 }
 export async function assertEmbeddedConversation(page: Page, target: EmbeddedTarget): Promise<EmbeddedState> {
@@ -49,14 +51,14 @@ export async function inspectEmbeddedChat(): Promise<string> {
   return withBossSessionPage(async page=>JSON.stringify({status:'diagnostic-only',identityVerified:false,...await readEmbeddedState(page)}),{ensureChatShell:false,ensureMenuList:false});
 }
 export async function checkEmbeddedChat(target: EmbeddedTarget): Promise<string> {
-  return runCheck({page:'search',state:'conversation',embedded:true,...target});
+  return runCheck({state:'conversation',embedded:true,...target});
 }
 
 /** A single scoped close click; identity and draft are checked in the same browser task. */
 export function embeddedCloseScript(target: EmbeddedTarget, conversationId: string): string {
   return `(() => {
-    if(location.hostname!=='www.zhipin.com'||location.pathname!=='/web/chat/search')
-      throw new Error('关闭前已离开 BOSS 搜索页，未点击');
+    if(location.hostname!=='www.zhipin.com'||!['/web/chat/search','/web/chat/recommend'].includes(location.pathname))
+      throw new Error('关闭前已离开 BOSS 搜索／推荐页，未点击');
     const target=${JSON.stringify(target)}, expectedConversation=${JSON.stringify(conversationId)};
     const s=${EMBEDDED_STATE_SCRIPT};
     if(s.name!==target.name||s.candidateId!==target.candidateId||s.job!==target.job||
@@ -110,43 +112,93 @@ export async function closeEmbeddedChat(target: EmbeddedTarget): Promise<string>
 export async function sendEmbeddedChat(target: EmbeddedTarget, rawText: string, check=false): Promise<string> {
   const text=rawText.replace(/\r\n/g,'\n').trim();
   if(!text) throw new Error('消息正文不能为空');
-  if(check) return runCheck({page:'search',state:'send-ready',embedded:true,...target,text});
+  if(check) return runCheck({state:'send-ready',embedded:true,...target,text});
   return withBossSessionPage(async page=>{
+    const url=page.url();
+    let navigated=false;
+    const onNavigation=(frame:unknown)=>{if(frame===page.mainFrame())navigated=true;};
+    page.on('framenavigated',onNavigation);
+    try {
     const before=await assertEmbeddedConversation(page,target);
+    const assertCurrent=async()=>{
+      if(navigated||page.url()!==url)throw new Error('内嵌发送期间页面发生导航，停止且不重试');
+      const current=await assertEmbeddedConversation(page,target);
+      if(current.conversationId!==before.conversationId||current.friendId!==before.friendId)throw new Error('内嵌会话关联发生变化，停止且不重试');
+      return current;
+    };
+    await assertCurrent();
     if(!before.editable) throw new Error('内嵌输入框不可编辑，未发送');
-    if(before.messages.some(m=>m.self&&m.text.replace(/\r\n/g,'\n').trim()===text))
+    if(before.messages.some(m=>m.id&&m.self&&m.toId===before.friendId&&m.text.replace(/\r\n/g,'\n').trim()===text))
       return JSON.stringify({status:'already-visible',target,sent:false});
     const readInput=`(() => { const read=${CHAT_INPUT_TEXT_READER};return read(document.querySelector('#boss-chat-global-input'));})()`;
     if(String(await page.evaluate(readInput)).trim()) throw new Error('内嵌输入框已有草稿，停止以避免覆盖');
     const input=await page.$('#boss-chat-global-input');
     if(!input) throw new Error('内嵌输入框消失');
+    const assertFocus=async()=>{
+      await assertCurrent();
+      await page.evaluate(`(() => {
+        if(location.href!==${JSON.stringify(url)})throw Error('内嵌输入焦点检查时页面导航');
+        const visible=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};
+        const roots=[...document.querySelectorAll('.chat-global-conversation')].filter(visible);
+        if(roots.length!==1||document.activeElement!==roots[0].querySelector('#boss-chat-global-input'))
+          throw Error('内嵌输入焦点已变化，未输入或发送');
+      })()`);
+    };
     await page.bringToFront();
     await input.click();
-    await assertEmbeddedConversation(page,target);
+    await assertCurrent();
     const cdp=await page.createCDPSession();
     try {
       await cdp.send('Browser.setPermission',{permission:{name:'clipboard-write',allowWithoutSanitization:false},setting:'granted',origin:new URL(page.url()).origin});
       await page.evaluate(`navigator.clipboard.writeText(${JSON.stringify(text)})`);
     } finally {await cdp.detach();}
-    await assertEmbeddedConversation(page,target);
+    await assertCurrent();
     await input.click();
     if(String(await page.evaluate(readInput)).trim()) throw new Error('粘贴前发现内嵌输入框已有草稿，停止');
+    await assertFocus();
     const mod=selectAllModifierKey();
     await page.keyboard.down(mod);
     try {await page.keyboard.press('KeyV');} finally {await page.keyboard.up(mod);}
     await page.waitForFunction(`(${readInput}).replace(/\\r\\n/g,'\\n').trim()===${JSON.stringify(text)}`,{timeout:5000});
-    const ready=await assertEmbeddedConversation(page,target);
+    const ready=await assertCurrent();
     if(!ready.editable||ready.sendDisabled) throw new Error('内嵌发送被页面禁用，已输入但未发送');
-    await page.keyboard.press('Enter');
+    if(String(await page.evaluate(readInput)).replace(/\r\n/g,'\n').trim()!==text)throw new Error('发送前正文变化，未发送');
+    await assertFocus();
     const previous=before.messages.map(m=>m.id);
-    await page.waitForFunction(`(() => {
+    try {
+    await page.keyboard.press('Enter');
+    const confirmation=await page.waitForFunction(`(() => {
+      if(location.href!==${JSON.stringify(url)})return {error:'发送后页面发生导航，禁止重试'};
       const s=${EMBEDDED_STATE_SCRIPT};
-      if(s.candidateId!==${JSON.stringify(target.candidateId)}||s.name!==${JSON.stringify(target.name)}||s.job!==${JSON.stringify(target.job)}||s.editorId!==s.conversationId||s.friendId!==s.rootFriendId)
-        throw new Error('发送后内嵌会话身份变化，禁止重试');
+      if(s.candidateId!==${JSON.stringify(target.candidateId)}||s.name!==${JSON.stringify(target.name)}||s.job!==${JSON.stringify(target.job)}||s.editorId!==s.conversationId||s.friendId!==s.rootFriendId||s.conversationId!==${JSON.stringify(before.conversationId)}||s.friendId!==${JSON.stringify(before.friendId)})
+        return {error:'发送后内嵌会话身份变化，禁止重试'};
       return s.messages.some(m=>m.id&&m.self&&m.visible&&m.toId===s.friendId&&!${JSON.stringify(previous)}.includes(m.id)&&m.text.replace(/\\r\\n/g,'\\n').trim()===${JSON.stringify(text)});
     })()`,{timeout:15000});
-    const after=await assertEmbeddedConversation(page,target);
+    try {const value=await confirmation.jsonValue() as true|{error:string};if(value!==true)throw new Error(value.error);}
+    finally {await confirmation.dispose();}
+    const after=await assertCurrent();
     return JSON.stringify({status:'message-visible',sent:true,target,conversationId:after.conversationId,text,
-      messageIds:after.messages.filter(m=>m.self&&!previous.includes(m.id)&&m.text.replace(/\r\n/g,'\n').trim()===text).map(m=>m.id)});
+      messageIds:after.messages.filter(m=>m.id&&m.self&&m.visible&&m.toId===after.friendId&&!previous.includes(m.id)&&m.text.replace(/\r\n/g,'\n').trim()===text).map(m=>m.id)});
+    } catch(error) {
+      // One read-only diagnostic, never an alternative success path or another send.
+      let diagnostic:unknown;
+      try {
+        const s=await readEmbeddedState(page);
+        diagnostic={
+          urlUnchanged:!navigated&&page.url()===url,
+          identityMatches:s.name===target.name&&s.candidateId===target.candidateId&&s.job===target.job&&s.conversationId===before.conversationId&&s.editorId===s.conversationId&&s.friendId===before.friendId&&s.rootFriendId===s.friendId,
+          friendIdType:typeof s.friendId,messageCount:s.messages.length,
+          messages:s.messages.map(m=>({
+            hasId:!!m.id,isNew:!!m.id&&!previous.includes(m.id),self:m.self,
+            recipientMatches:m.toId===s.friendId,recipientType:typeof m.toId,
+            visible:m.visible,exactText:m.text.replace(/\r\n/g,'\n').trim()===text,
+            textLength:m.text.length,
+          })),
+        };
+      } catch(readError) {diagnostic={diagnosticError:readError instanceof Error?readError.message:String(readError)};}
+      throw new EmbeddedSendUnconfirmedError({phase:'after-enter',sendAttempted:true,outcome:'unconfirmed',retryAllowed:false,
+        cause:{name:error instanceof Error?error.name:'Error',message:error instanceof Error?error.message:String(error)},diagnostic});
+    }
+    } finally {page.off('framenavigated',onNavigation);}
   },{ensureChatShell:false,ensureMenuList:false});
 }

@@ -1,7 +1,7 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import puppeteer from 'puppeteer-core';
-import { searchChatCandidate } from '../dist/toolset/chat_search.js';
+import { clearChatSearch, searchChatCandidate } from '../dist/toolset/chat_search.js';
 import { STATUS_SCRIPT } from '../dist/toolset/check.js';
 import { captureChatSearchDiagnostics } from '../dist/toolset/chat_search_diagnostics.js';
 import { spawnSync } from 'node:child_process';
@@ -48,6 +48,8 @@ test('isolated search: unique result, hidden duplicates, drafts, missing result 
         input.value=${JSON.stringify(draft)};
         input.oninput=()=>{ window.inputEvents++; root.__vue__.content=input.value; setTimeout(()=>{
           const matches=${JSON.stringify(matches)};root.__vue__.searchList=matches;root.__vue__.searchGroupList=Array(${groups}).fill({});root.__vue__.showSearchResult=${completed} ? matches.length+${groups} : false;
+          window.resultsReadyAt=performance.now();
+          ul.onclick=()=>{window.clickDelay=performance.now()-window.resultsReadyAt;};
           for(const [i,m] of matches.entries()) {
             const li=document.createElement('li');li.innerHTML='<span class="content-text"></span>';li.querySelector('span').textContent=m.name+'_公司'+i;
             if(i>0 && ${hideAdditional})li.style.display='none';
@@ -64,6 +66,7 @@ test('isolated search: unique result, hidden duplicates, drafts, missing result 
       const opened = await searchChatCandidate(page, {name:'吴丽'}, 700);
       assert.equal(opened.status, 'opened');
       assert.equal(opened.dataId, exact.uniqueId);
+      assert.ok(await page.evaluate('window.clickDelay >= 500'));
       assert.equal(opened.searchMatches.length, 2);
       assert.deepEqual(await page.evaluate('[window.clicks,window.clickedIndex]'), [1,rows.indexOf(exact)]);
     }
@@ -125,8 +128,8 @@ test('isolated search: unique result, hidden duplicates, drafts, missing result 
       () => runDownloadTargetResume({name:'黄子佳',dataId:'123-0'}),
       () => runProbeTargetResume({name:'黄子佳',dataId:'123-0'}),
     ]) {
-      await setup([...unique,{name:'黄子佳',uniqueId:'456-0'}]);
-      await assert.rejects(locate(),error=>error.name==='CandidateSelectionRequired' && /等待用户/.test(error.message));
+      await setup([...unique,{...unique[0]}]);
+      await assert.rejects(locate(),error=>error.name==='CandidateSelectionRequired' && /等待用户/.test(error.message),String(locate));
       assert.deepEqual(await page.evaluate('[window.clicks,window.wheelEvents]'),[0,0]);
       assert.deepEqual(await page.evaluate('window.jobSelections'),[]);
       assert.equal(await page.evaluate("document.querySelector('.ui-dropmenu-label').textContent"),'岗位A');
@@ -134,18 +137,18 @@ test('isolated search: unique result, hidden duplicates, drafts, missing result 
     }
     await setup([...unique,{name:'黄子佳',uniqueId:'456-0'}]);
     const duplicate=await searchChatCandidate(page,{name:'黄子佳',dataId:'123-0'},700);
-    assert.equal(duplicate.status,'needs-confirmation');assert.equal(duplicate.matches.length,2);
-    assert.equal(await page.evaluate('window.clicks'),0);
+    assert.equal(duplicate.status,'opened');assert.equal(duplicate.dataId,'123-0');
+    assert.equal(await page.evaluate('window.clicks'),1);
     assert.deepEqual(await page.evaluate('window.jobSelections'),[]);
     // Company/school descriptions are raw metadata, never inferred from labels.
-    // Even identical metadata and a known ID must not bypass ambiguity.
+    // Without a supplied ID or info, report every exact-name match.
     const enriched=[
       {name:'黄子佳',uniqueId:'123-0',workDesc:'研发_A 公司',exchangeDesc:'已交换简历'},
       {name:'黄子佳',uniqueId:'456-0',workDesc:'研发_A 公司',exchangeDesc:'已交换简历'},
       {name:'黄子佳',uniqueId:'789-0',workDesc:'某大学',exchangeDesc:''},
     ];
     await setup(enriched);
-    const enrichedResult=await searchChatCandidate(page,{name:'黄子佳',dataId:'123-0'},700);
+    const enrichedResult=await searchChatCandidate(page,{name:'黄子佳'},700);
     assert.equal(enrichedResult.status,'needs-confirmation');
     assert.deepEqual(enrichedResult.matches.map(x=>[x.info,x.tag]),[
       ['研发_A 公司','已交换简历'],['研发_A 公司','已交换简历'],['某大学',''],
@@ -172,12 +175,38 @@ test('isolated search: unique result, hidden duplicates, drafts, missing result 
       {name:'黄子佳阳',uniqueId:'partial-0',workDesc:' 已知_公司 '},
     ];
     await setup(byInfo,{hideAdditional:false});
+    const pending = await searchChatCandidate(page,{name:'黄子佳'},700);
+    assert.equal(pending.status,'needs-confirmation');
+    await page.evaluate(`(() => {
+      const root=document.querySelector('.chat-top-search');
+      const button=document.createElementNS('http://www.w3.org/2000/svg','svg');
+      button.setAttribute('class','boss-svg search-close');
+      button.setAttribute('width','18');button.setAttribute('height','18');
+      button.style.pointerEvents='all';
+      root.prepend(button);root.__vue__.showClose=true;window.clearClicks=0;
+      button.onclick=()=>{window.clearClicks++;};
+    })()`);
+    await assert.rejects(clearChatSearch(page,'不同姓名'),/搜索词.*不符/);
+    await page.evaluate("document.querySelector('.search-close').style.pointerEvents='none'");
+    await assert.rejects(clearChatSearch(page,'黄子佳'),/遮挡/);
+    assert.equal(await page.evaluate('window.clearClicks'),0);
+    await page.evaluate("document.querySelector('.search-close').style.pointerEvents='all'");
+    await assert.rejects(clearChatSearch(page,'黄子佳',100),/未核验搜索框复位/);
+    assert.equal(await page.evaluate('window.clearClicks'),1);
+    await page.evaluate(`document.querySelector('.search-close').addEventListener('click',()=>{
+      const root=document.querySelector('.chat-top-search');
+      Object.assign(root.__vue__,{content:'',searchList:[],searchGroupList:[],showClose:false,showSearchResult:false});
+      root.querySelector('input').value='';root.querySelector('ul').replaceChildren();
+      root.querySelector('.search-close').remove();root.hidden=true;
+    })`);
+    assert.equal((await clearChatSearch(page,'黄子佳')).status,'cleared');
+    assert.deepEqual(await page.evaluate('[window.clearClicks,window.clicks,window.inputEvents]'),[2,0,1]);
     const locatedByInfo=await searchChatCandidate(page,{name:'黄子佳',dataId:'123-0',info:' 已知_公司 '},700);
     assert.equal(locatedByInfo.status,'opened');
     assert.equal(locatedByInfo.match.uniqueId,'123-0');
     assert.equal(locatedByInfo.searchMatches.length,3);
     assert.equal(await page.evaluate('window.clickedIndex'),1);
-    assert.deepEqual(await page.evaluate('[window.clicks,window.jobClicks,window.inputEvents]'),[1,0,1]);
+    assert.deepEqual(await page.evaluate('[window.clicks,window.jobClicks,window.inputEvents]'),[1,0,2]);
     await setup(byInfo,{hideAdditional:false});
     const noInfoMatch=await searchChatCandidate(page,{name:'黄子佳',info:'已知_公司'},700);
     assert.equal(noInfoMatch.status,'not-found');assert.equal(noInfoMatch.reason,'info-no-match');
@@ -186,14 +215,16 @@ test('isolated search: unique result, hidden duplicates, drafts, missing result 
     await assert.rejects(openConversationByTarget(page,{name:'黄子佳',dataId:'123-0',info:'不存在'}),e=>e.name==='CandidateNotFound');
     assert.deepEqual(await page.evaluate('[window.clicks,window.inputEvents]'),[0,1]);
     await setup([byInfo[1],{...byInfo[1],uniqueId:'duplicate-0'}]);
-    const sameInfo=await searchChatCandidate(page,{name:'黄子佳',dataId:'123-0',info:' 已知_公司 '},700);
+    const sameInfo=await searchChatCandidate(page,{name:'黄子佳',info:' 已知_公司 '},700);
     assert.equal(sameInfo.status,'needs-confirmation');assert.equal(sameInfo.matches.length,2);
     assert.equal(await page.evaluate('window.clicks'),0);
     await setup(byInfo); // the unique matching second row is hidden
     await assert.rejects(searchChatCandidate(page,{name:'黄子佳',info:' 已知_公司 '},700),/不可见/);
     assert.equal(await page.evaluate('window.clicks'),0);
     await setup(byInfo,{hideAdditional:false});
-    await assert.rejects(searchChatCandidate(page,{name:'黄子佳',dataId:'wrong-0',info:' 已知_公司 '},700),/会话ID不符/);
+    assert.equal((await searchChatCandidate(page,{name:'黄子佳',dataId:'wrong-0',info:' 已知_公司 '},700)).reason,'data-id-no-match');
+    await setup(byInfo,{hideAdditional:false});
+    assert.equal((await searchChatCandidate(page,{name:'黄子佳',dataId:'other-0',info:' 已知_公司 '},700)).reason,'info-no-match');
     assert.equal(await page.evaluate('window.clicks'),0);
     await setup(byInfo,{hideAdditional:false,groups:1});
     assert.equal((await searchChatCandidate(page,{name:'黄子佳',info:' 已知_公司 '},700)).status,'needs-confirmation');

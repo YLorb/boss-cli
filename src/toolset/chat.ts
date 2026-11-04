@@ -514,9 +514,9 @@ export async function runOpenCandidateChatByIndex(
   return renderOpenedCandidateChat(page, row.name, params.json);
 }
 
-export async function runOpenCandidateChat(page: Page, candidateName: string, _exact = true, json = false): Promise<string> {
+export async function runOpenCandidateChat(page: Page, candidateName: string, _exact = true, json = false, info?: string): Promise<string> {
   if (!isBossChatIndexUrl(page.url())) throw new Error('候选人定位必须已在沟通页 /web/chat/index；当前=' + page.url());
   await closeAttachmentPreview(page);
-  const result = await requireChatSearch(page, {name:candidateName});
+  const result = await requireChatSearch(page, {name:candidateName, info});
   return renderOpenedCandidateChat(page, result.name, json);
 }
