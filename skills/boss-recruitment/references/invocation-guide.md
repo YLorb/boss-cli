@@ -259,7 +259,7 @@ expect-url 必须是实际前一条历史的完整 URL，包含原有查询参�
 `boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]` 无页面前置条件；上传指定图片，保留原图及原始响应，按 `dt_boxes` 重排。成功返回 `status=completed,imagePath,imageSha256,textPath,boxesPath,rawPath,resultPath,layout,lineCount,lowConfidenceIds,needsReview,timing`。具体 Agent 异步调用与停止规则见[OCR规范](resume-ocr.md)。
 # 搜索预览的显式单次恢复（2026-10-29）
 
-用户明确授权时可用 `preview <姓名> --candidate-id <ID> --reopen-on-frame-error --json`（可与 `--open-only` 同用）。仅搜索页、仅目标Frame打开失败：核验原URL、固定搜索参数（保留城市等全部筛选，仅排除page）、岗位标签及同人双ID；允许列表动态追加/重排、分页和后台列表加载，目标姓名＋ID唯一核验不变，点击唯一可用关闭按钮一次，确认弹层消失，再核验条件并重开一次。身份歧义、条件变化、关闭失败、第二次失败及截图失败不恢复。无浏览器历史回退、刷新、改筛选或沟通。未带开关保持失败即停止；此为用户明确授权的有限恢复例外。成功查看仍须按原SOP核验、OCR与计数。
+用户明确授权时可用 `preview <姓名> --candidate-id <ID> --reopen-on-frame-error --json`（可与 `--open-only` 同用）。仅搜索页、仅目标Frame打开失败：核验原URL、固定搜索参数（保留城市等全部筛选，仅排除page）、岗位标签及同人双ID；允许列表动态追加/重排、分页和后台列表加载，目标姓名＋ID唯一核验不变，点击唯一可用关闭按钮一次，确认弹层消失，再核验条件并重开一次。身份歧义、条件变化、关闭失败、第二次失败及截图失败不恢复。无浏览器历史回退、刷新、改筛选或沟通。未带开关时按[查看失败处理](non-contact-continuation.md)的常规规则执行，可对同人重试查看一次；一旦使用过本开关的内置重开，即视为该候选人的重试额度已用尽，不得再重试。成功查看仍须按原SOP核验、OCR与计数。
 
 ## 推荐页打开已联系候选人的聊天
 
