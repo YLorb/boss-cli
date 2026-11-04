@@ -10,7 +10,7 @@ mock.module('../dist/toolset/search-sidebar.js',{namedExports:{runSearchSidebar:
 mock.module('../dist/toolset/contact-notice.js',{namedExports:{dismissContactNotice:async(...args)=>{calls.push({name:'dismissContactNotice',args});return JSON.stringify({status:'contact-notice-dismissed'});}}});
 mock.module('../dist/toolset/check.js',{namedExports:{runCheck:async (...args)=>{calls.push({name:'runCheck',args});return 'true';},runStatus:async()=>'{"pageType":"chat"}'}});
 const names = ['implChatAction','implChatSearch','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
-mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries([...names,'implClearChatSearch'].map(name => [name, async (...args) => {
+mock.module('../dist/toolset/index.js', { namedExports: Object.fromEntries([...names,'implClearChatSearch','implSearchControl'].map(name => [name, async (...args) => {
   calls.push({name,args});
   return JSON.stringify({reader:name,args});
 }])) });
@@ -79,6 +79,11 @@ test('every business command forwards --json to its reader, including aliases an
     [['positions','--json'],'implListPositions',[true]],
     [['jd','测试岗位','--json'],'implListPositionsWithOptions',[{detail:true,name:'测试岗位',json:true}]],
     [['search','--json','评估'],'implNormalSearch',['评估',true]],
+    [['search','后训练','--city','深圳','--job','后训练平台工程师','--json'],'implNormalSearch',['后训练',true,{city:'深圳',job:'后训练平台工程师'}]],
+    [['search','--job','后训练平台工程师','--json'],'implSearchControl',[{action:'job',value:'后训练平台工程师'},true]],
+    [['search','--city','深圳','--json'],'implSearchControl',[{action:'city',value:'深圳'},true]],
+    [['search','--keyword','字节、京东、腾讯、阿里','--json'],'implSearchControl',[{action:'keyword',value:'字节、京东、腾讯、阿里'},true]],
+    [['search','--submit','--json'],'implSearchControl',[{action:'submit'},true]],
     [['recommend','测试岗位','--json'],'implRecommend',['测试岗位',true,false]],
     [['deep-search','--core','Python','--bonus','评测','--json'],'implBossSearch',[{jobKeyword:undefined,coreRequirements:['Python'],bonusRequirements:['评测'],match:false,json:true}]],
     [['preview','测试候选人','--json'],'implPreview',[{candidateTarget:'测试候选人',json:true}]],
@@ -175,8 +180,11 @@ const {runSendChatMessage}=await import('../dist/toolset/send.js');
 const {runChatActionOnCurrentConversation}=await import('../dist/toolset/action.js');
 
 function framePage(kind,evaluate) {
-  const frame={url:()=>`https://www.zhipin.com/web/frame/${kind}`,waitForFunction:async()=>{},evaluate};
-  return {url:()=>`https://www.zhipin.com/web/chat/${kind}`,waitForSelector:async()=>({contentFrame:async()=>frame})};
+  const main={};
+  const frame={url:()=>`https://www.zhipin.com/web/frame/${kind}`,parentFrame:()=>main,waitForFunction:async()=>{},evaluate};
+  const host={contentFrame:async()=>frame};
+  return {url:()=>`https://www.zhipin.com/web/chat/${kind}`,mainFrame:()=>main,waitForSelector:async()=>host,
+    waitForFunction:async()=>({asElement:()=>host,dispose:async()=>{}})};
 }
 
 test('recommend and search expose original fields, including values omitted by text rendering', async () => {

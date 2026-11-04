@@ -14,6 +14,7 @@ import { runSendChatMessage } from './send.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { runBossSearch, runBossSearchSet } from './deep-search.js';
 import { runNormalSearch } from './normal-search.js';
+import { runSearchControl, type SearchControl } from './normal-search.js';
 import { runRecommend } from './recommend.js';
 import { runPreview } from './preview.js';
 import { runRecommendGreet } from './greet.js';
@@ -142,8 +143,11 @@ export async function implBossSearch(
   return runBossSearch(opts);
 }
 
-export async function implNormalSearch(keyword?: string, json = false): Promise<string> {
-  return runNormalSearch(keyword, json);
+export async function implNormalSearch(keyword?: string, json = false, filters?: import('./search_filters.js').SearchFilters): Promise<string> {
+  return runNormalSearch(keyword, json, filters);
+}
+export async function implSearchControl(control:SearchControl,json=false):Promise<string> {
+  return runSearchControl(control,json);
 }
 
 export async function implBossSearchSet(opts: {

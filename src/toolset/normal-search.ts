@@ -2,6 +2,7 @@ import type { Frame, Page } from 'puppeteer-core';
 import { RESUME_PREVIEW_OPEN_GAP_MS, sleepRandom } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { ensurePage } from '../common/ensure_page.js';
+import { selectCity, readSearchSettings, selectSearchFilters, searchFiltersMatch, type SearchFilters } from './search_filters.js';
 import { SEARCH_STATE_SCRIPT, submitSearchQuery, searchMatchesEvidenceScript, type SearchQueryEvidence } from './search_query.js';
 
 const BOSS_CHAT_SEARCH_URL = 'https://www.zhipin.com/web/chat/search';
@@ -95,17 +96,21 @@ export async function assertNormalSearchPageReadyForPreview(page: Page): Promise
   return frame;
 }
 
-async function runKeywordSearch(frame: Frame, keyword: string): Promise<SearchQueryEvidence> {
+async function runKeywordSearch(frame: Frame, keyword: string, filters?: SearchFilters, submitOnly = false): Promise<SearchQueryEvidence> {
   const kwLiteral = JSON.stringify(keyword);
   return submitSearchQuery(frame,keyword,async()=>{
   const ok = (await frame.evaluate(`(() => {
     const input = document.querySelector(".search-input");
     if (!(input instanceof HTMLInputElement)) return false;
     const kw = ${kwLiteral};
-    input.focus();
+    ${submitOnly ? `if(input.value !== kw)throw Error('提交前关键词变化');` : `input.focus();
     input.value = kw;
     input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));`}
+    ${filters ? `if (!(${searchFiltersMatch(filters)}) || input.value !== kw) throw Error('提交前搜索条件变化');
+    const buttons = [...document.querySelectorAll('.search-container .icon-search')].filter(el => el.getClientRects().length && el.textContent.trim()==='搜索');
+    if (buttons.length !== 1) throw Error('搜索按钮缺失或不唯一');
+    buttons[0].click();` : `
     input.dispatchEvent(new KeyboardEvent("keydown", {
       key: "Enter",
       code: "Enter",
@@ -121,13 +126,49 @@ async function runKeywordSearch(frame: Frame, keyword: string): Promise<SearchQu
       which: 13,
       bubbles: true,
       cancelable: true,
-    }));
+    }));`}
     return true;
   })()`)) as boolean;
   if (!ok) {
     throw new Error('未找到常规搜索关键词输入框（.search-input）。');
   }
 
+  },20_000,filters?.city);
+}
+
+export type SearchControl = {action:'city'|'job'|'keyword'|'submit';value?:string};
+
+export async function runSearchControl(control:SearchControl,json=false):Promise<string> {
+  return withBossSessionPage(async page=>{
+    const frame=await assertNormalSearchPageReadyForPreview(page);
+    const before=await readSearchSettings(frame);
+    let evidence:SearchQueryEvidence|undefined;
+    if(control.action==='city') await selectCity(frame,control.value!);
+    if(control.action==='job') await selectSearchFilters(frame,{city:before.city,job:control.value!});
+    if(control.action==='keyword') {
+      await frame.evaluate(`(() => {
+        const inputs=[...document.querySelectorAll('.search-input')].filter(el=>el.getClientRects().length);
+        if(inputs.length!==1)throw Error('关键词输入框缺失或不唯一');
+        const input=inputs[0];
+        input.focus();input.value=${JSON.stringify(control.value)};
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+      })()`);
+    }
+    if(control.action==='submit') {
+      if(!before.keyword?.trim()||!before.city||!before.job)throw Error('提交前须明确城市、岗位和非空关键词');
+      evidence=await runKeywordSearch(frame,before.keyword,{city:before.city,job:before.job},true);
+    }
+    const settings=await readSearchSettings(frame);
+    if(control.action==='city'&&settings.city!==control.value ||
+       control.action==='job'&&(settings.job!==control.value||settings.city!==before.city) ||
+       control.action==='keyword'&&(settings.keyword!==control.value||settings.city!==before.city||settings.job!==before.job)) throw Error('独立设置后的搜索条件核验失败');
+    if(evidence&&!await frame.evaluate(searchMatchesEvidenceScript(evidence)))throw Error('提交后结果发生变化');
+    const candidates=evidence?await readNormalSearchCandidates(frame):undefined;
+    if(evidence&&JSON.stringify(candidates!.map(c=>c.candidateId))!==JSON.stringify(evidence.cards.map(c=>c.id)))throw Error('候选人结果与本次提交不符');
+    if(evidence&&(!await frame.evaluate(searchMatchesEvidenceScript(evidence)) ||
+      !await frame.evaluate(searchFiltersMatch({city:before.city,job:before.job}))))throw Error('读取结果期间搜索条件变化');
+    const result={action:control.action,submitted:!!evidence,...settings,...(candidates&&{candidates})};
+    return json?JSON.stringify(result):JSON.stringify(result,null,2);
   });
 }
 
@@ -248,17 +289,18 @@ function renderNormalSearchCandidates(
   return lines.join('\n');
 }
 
-export async function runNormalSearch(keyword?: string, json = false): Promise<string> {
+export async function runNormalSearch(keyword?: string, json = false, filters?: SearchFilters): Promise<string> {
   const kw = (keyword ?? '').trim();
   if (kw.length > 20) {
     throw new Error('常规搜索关键词最多 20 个字符。');
   }
   try {
     return await withBossSessionPage(async (page) => {
-      const frame = await ensureInNormalSearchPage(page);
+      const frame = filters ? await assertNormalSearchPageReadyForPreview(page) : await ensureInNormalSearchPage(page);
+      if (filters) await selectSearchFilters(frame, filters);
       let evidence:SearchQueryEvidence|undefined;
       if (kw) {
-        evidence=await runKeywordSearch(frame, kw);
+        evidence=await runKeywordSearch(frame, kw, filters);
       }
 
       const [currentKeyword, currentJob, candidates] = await Promise.all([
@@ -268,7 +310,8 @@ export async function runNormalSearch(keyword?: string, json = false): Promise<s
       ]);
       if(evidence && !(await frame.evaluate(searchMatchesEvidenceScript(evidence))))throw Error('读取结果期间搜索条件或列表已变化，停止');
       if(evidence && JSON.stringify(candidates.map(x=>x.candidateId))!==JSON.stringify(evidence.cards.map(x=>x.id)))throw Error('输出候选人与本次搜索响应不一致');
-      if (json) return JSON.stringify({ keyword: currentKeyword || kw, job: currentJob, candidates });
+      if (filters && !await frame.evaluate(searchFiltersMatch(filters))) throw Error('读取结果期间城市或岗位变化');
+      if (json) return JSON.stringify({ keyword: currentKeyword || kw, job: currentJob, ...(filters && {city:filters.city}), candidates });
       return renderNormalSearchCandidates(candidates, {
         keyword: currentKeyword || kw,
         job: currentJob,

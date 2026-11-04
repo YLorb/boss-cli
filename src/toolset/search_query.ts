@@ -9,7 +9,7 @@ export const SEARCH_STATE_SCRIPT = `(() => {
  if(typeof v.loadding$!=='boolean'||!Array.isArray(v.renderList$)||!v.params$)throw Error('搜索完成状态字段不符');
  const key=g=>({id:g?.encryptGeekId||'',lid:g?.lid||''});
  return {loading:v.loadding$,initializing:v.isInitPage$,keyword:document.querySelector('.search-input')?.value,
-  params:{keywords:v.params$.keywords,jobId:v.params$.jobId||'',page:Number(v.params$.page)},
+  params:{keywords:v.params$.keywords,jobId:v.params$.jobId||'',city:v.params$.city,cityName:v.params$.cityName,page:Number(v.params$.page)},
   rendered:v.renderList$.filter(x=>x.geekCard).map(x=>key(x.geekCard)),
   cards:[...document.querySelectorAll('.geek-info-card')].map(e=>key(e.__vue__?.$props?.geek?.geekCard))};
 })()`;
@@ -36,9 +36,10 @@ export function searchMatchesEvidenceScript(e:SearchQueryEvidence):string {
 }
 
 /** Passive response observation only; the browser UI issues the single query. */
-export async function submitSearchQuery(frame:Frame,keyword:string,submit:()=>Promise<void>,timeout=20_000):Promise<SearchQueryEvidence> {
+export async function submitSearchQuery(frame:Frame,keyword:string,submit:()=>Promise<void>,timeout=20_000, cityName?:string):Promise<SearchQueryEvidence> {
  const initial=await frame.evaluate(SEARCH_STATE_SCRIPT) as any;
  if(initial.loading||initial.initializing!==false)throw Error('搜索列表仍在加载，不能提交新查询');
+ if(cityName && (initial.params.cityName!==cityName || !initial.params.city))throw Error('城市参数尚未确认，不能提交搜索');
  const page=frame.page(),pending=new Set<HTTPRequest>();
  let requestCount=0, settled=false;
  let resolve!:(value:{data?:any;error?:Error})=>void;
@@ -47,6 +48,7 @@ export async function submitSearchQuery(frame:Frame,keyword:string,submit:()=>Pr
  const request=(req:HTTPRequest)=>{
   const u=new URL(req.url());
   if(req.frame()!==frame||u.pathname!==endpoint)return;
+  if(cityName && u.searchParams.get('city')!==String(initial.params.city))return;
   if(u.searchParams.get('keywords')!==keyword||(u.searchParams.get('jobId')||'')!==initial.params.jobId||u.searchParams.get('page')!=='1')return;
   requestCount++;pending.add(req);
   if(requestCount>1)finish({error:new Error('同次搜索出现多个匹配请求，停止，不能确认结果归属')});

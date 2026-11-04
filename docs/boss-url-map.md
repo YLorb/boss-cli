@@ -1,5 +1,8 @@
 # Boss URL 与功能对照
 
+每次新的常规搜索请求，依次独立执行 `boss search --city "城市" --json`、`boss search --job "岗位原名" --json`、`boss search --keyword "完整关键词" --json`。每条核对回执中的城市、岗位和关键词，设置阶段返回 `submitted=false`。选岗若改写城市，CLI 先恢复该步骤开始前的已选城市。三项同时符合本轮请求后，再单独执行 `boss search --submit --json`，只点击一次搜索并核验对应响应后读取简历列表。关键词中的“、”按原文保留。任一步失败保存回执并停止，不能继续提交。页面可能因筛选自动加载，CLI 不刷新页面。
+
+
 沟通页 `chat` 和 `chat-search` 可用与目标关联的 `--data-id` 或 `--info` 区分完全同名者，两者同时提供时必须都匹配。
 
 沟通页 `/web/chat/index` 支持 `boss chat-search --clear --expect-keyword "当前完整昵称" --json`。先保存旧结果并核对目标信息，清空时只点击一次已核验的搜索框 ×。返回 `status=cleared` 后可另起一次 `chat-search "完整昵称" --info "已知原文" --json`。全名和 info 唯一匹配才打开，群聊歧义仍暂停。
@@ -83,7 +86,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 - 推荐选岗按“岗位名称＋城市”比较，忽略薪资后缀；如 `recommend '全栈软件开发工程师 _ 深圳' --ensure-job --json`。下拉搜索只输入岗位名称，读取选项后再比较名称和城市；任何模式出现多项匹配均停止。当前岗位键相同不重复点击；`check --page recommend --job`／`recommend --check-job` 使用同一比较口径，返回的岗位标签仍保留页面原文。
 
 - 推荐列表只读取 `.candidate-card-wrap`，不同时把外层列表项作为候选人；新增 `work`、`education` 数组，`experience` 保留两者合并的文字。字段为空不阻止查看简历。推荐 preview/greet 支持 `--candidate-id`：完整姓名精确匹配，无 ID 重名暂停；提供 ID 时要求联合唯一、该 ID 在列表唯一，且卡片 DOM 和组件姓名/ID 一致。preview 打开后再核对两处简历组件 ID；缺失、不符或重复直接报错，不尝试其他卡片。推荐 greet 只在列表执行，`--check` 不点击；简历覆盖列表时为 false。
-- 常规搜索带关键词时仅提交一次，等待该 frame 本次关键词、当前岗位 ID、第1页对应的 geeks.json 响应成功，再比较组件及 DOM 列表的候选人 ID 和查询标识 lid。只有成功响应的空数组且页面同步为空才是零结果；响应超时、接口错误、列表不一致分别报错，无固定延迟、旧结果或重新查询回退。无关键词只等待当前列表加载完成后读取；不主动设置搜索岗位。
+- 常规搜索带关键词时仅提交一次，等待该 frame 本次关键词、当前岗位 ID、第1页对应的 geeks.json 响应成功，再比较组件及 DOM 列表的候选人 ID 和查询标识 lid。只有成功响应的空数组且页面同步为空才是零结果；响应超时、接口错误、列表不一致分别报错，无固定延迟、旧结果或重新查询回退。无关键词只等待当前列表加载完成后读取；指定 `--city` 和 `--job` 时须已在常规搜索页，依次选择城市、岗位，复核城市后输入关键词并点击一次搜索按钮。选项不唯一即停止，不刷新页面。
 - `status` 在推荐页输出 `recommendJob`，`searchJob` 为空；常规搜索页使用 `searchJob`。`check --page recommend --job` 比较 `recommendJob`，不是设置岗位。
 
 - 昵称搜索匹配项统一输出 `name`、`uniqueId`、`label`、`info`、`tag`：`info` 直接取组件 `workDesc`（可为公司或院校描述），`tag` 直接取 `exchangeDesc`（交换信息提示），保留原字符串，缺失为null、空字符串仍为空字符串、非字符串时报错。不拆分label推测字段。覆盖chat-search的match/matches、status.chatSearch.matches及失败diagnostics.search[].matches；status无需重搜即可读取当前结果。chat-search及chat --data-id支持可选 --info：仅使用此前已获取并与目标关联的原文，在昵称查询返回后按完整姓名和info精确筛选，不向页面输入公司关键词。筛选后唯一且ID相符才点击；同名同info或群聊歧义仍暂停；零匹配停止，不退回仅姓名。tag仅输出，不支持--tag。当前会话身份一致仍直接复用，不因info再次搜索。

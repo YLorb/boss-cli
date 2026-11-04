@@ -89,6 +89,7 @@ node dist/cli/index.js help
 | `boss action <操作>` | 索要简历 / 不合适 / 备注 / 交换微信等 |
 | `boss recommend [岗位关键字]` | 读取推荐候选人列表 |
 | `boss search [关键词]` | 常规搜索牛人列表 |
+| `boss search "SFT" --city "深圳" --job "后训练平台工程师" --json` | 在当前搜索页设置城市和岗位后点击一次搜索，返回简历卡片 |
 | `boss greet <姓名> [--job <岗位>]` | 在当前推荐/深度搜索页对候选人打招呼（不会自动跳转） |
 | `boss preview <姓名>` | 在线简历预览（每日次数有限） |
 | `boss deep-search [岗位关键字] [--core <要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]` | 深度搜索表单状态；`--core` / `--bonus` 可重复，并按传入列表同步分组；`--clear-*` 清空分组；默认不输出候选列表，`--match` 输出最新 20 条 |

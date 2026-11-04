@@ -20,6 +20,7 @@ import {
   implListPositions,
   implListPositionsWithOptions,
   implNormalSearch,
+  implSearchControl,
   implOpenChat,
   implOpenTargetChat,
   implAcceptTargetResume,
@@ -251,7 +252,13 @@ function printHelp(): void {
 
   boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
       进入推荐页并读取推荐列表；岗位名称＋城市作为匹配键，忽略薪资后缀；同岗位不重复选择；--ensure-job 要求该键唯一精确匹配
-  boss search [关键词]
+  boss search [关键词] [--city 城市 --job 搜索岗位]
+  boss search --job 搜索岗位 [--json]
+  boss search --city 候选人城市 [--json]
+  boss search --keyword 关键词 [--json]
+  boss search --submit [--json]
+      须已在搜索页，三项独立设置完成后再 --submit。设置回执 submitted=false；选岗复核并保留已选城市。提交仅点击一次搜索
+      同时指定城市与岗位时须已在常规搜索页。设置筛选条件，输入关键词并点击一次搜索，不刷新
       进入「搜索」页并读取当前结果；带关键词时提交一次，等待本次响应成功并核对页面候选人 ID/查询标识；失败不重试
   boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]
       仅当前常规搜索页，逐次向下滚动并核验下一页响应；关键词／岗位保持不变，按候选人ID去重，不联系。
@@ -771,11 +778,27 @@ export async function executeCommand(argv: string[]): Promise<string> {
   if (cmd === 'search-more') return runSearchMore(parseSearchMoreArgs(tail), json);
 
   if (cmd === 'search') {
-    const { rest, opts, flags } = parseOpts(tail);
-    if (flags.size > 0 || Object.keys(opts).length > 0) {
-      die('❌ 用法: search [关键词]');
+    const { rest, opts, flags } = parseOpts(tail,new Set(['submit']));
+    if ([...flags].some(f=>f!=='submit') || Object.keys(opts).some(key=>!['city','job','keyword'].includes(key))) {
+      die('❌ 用法: search [关键词] [--city 城市 --job 岗位]');
     }
     const keyword = rest.join(' ').trim();
+    if(flags.has('submit')) {
+      if(keyword||Object.keys(opts).length)die('search --submit 不与设置选项混用');
+      return implSearchControl({action:'submit'},json);
+    }
+    const keys=Object.keys(opts);
+    if(!keyword&&keys.length===1) {
+      const action=keys[0] as 'city'|'job'|'keyword';
+      const value=opts[action]?.trim();
+      if(!value || action==='keyword'&&value.length>20)die('独立设置需要非空值，关键词最多20字符');
+      return implSearchControl({action,value},json);
+    }
+    if (Object.keys(opts).length) {
+      if(opts.keyword!==undefined)die('--keyword 须独立使用');
+      if (!keyword || !opts.city?.trim() || !opts.job?.trim()) die('筛选搜索须同时提供城市、岗位和关键词');
+      return implNormalSearch(keyword,json,{city:opts.city.trim(),job:opts.job.trim()});
+    }
     return implNormalSearch(keyword || undefined, json);
   }
 
