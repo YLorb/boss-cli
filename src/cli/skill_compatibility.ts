@@ -4,8 +4,8 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const COMPATIBILITY = Object.freeze({
-  cliVersion: '0.6.13-dev.0',
-  skillVersion: '1.0.22',
+  cliVersion: '0.6.14-dev.0',
+  skillVersion: '1.0.23',
   compatibilityId: '2026-10-30-recommend-chat-v1',
 });
 const installRoot = fileURLToPath(new URL('../../', import.meta.url));
