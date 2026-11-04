@@ -1,8 +1,29 @@
 import test,{mock} from 'node:test';import assert from 'node:assert/strict';import puppeteer from 'puppeteer-core';
 mock.module('../dist/browser/index.js',{namedExports:{JOB_SEARCH_ACTION_GAP_MS:{min:0,max:0},JOB_SELECT_ACTION_GAP_MS:{min:0,max:0},RESUME_PREVIEW_OPEN_GAP_MS:{min:0,max:0},sleepRandom:async()=>{}}});
-const {readRecommendList,openRecommendResumePreview,clickGreet}=await import('../dist/toolset/recommend.js');
+const {ensureInRecommendPage,readRecommendList,openRecommendResumePreview,clickGreet}=await import('../dist/toolset/recommend.js');
 const {readRecommendCandidateId,assertRecommendResumeIdentity}=await import('../dist/toolset/recommend_identity.js');
 const {STATUS_SCRIPT,matchesStatus}=await import('../dist/toolset/check.js');
+test('initial readiness observes a replacement iframe without reloading or clicking',async()=>{
+ const browser=await puppeteer.launch({executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',headless:true});
+ try {
+  const page=await browser.newPage();
+  await page.setRequestInterception(true);
+  const main='https://www.zhipin.com/web/chat/recommend';
+  let mainLoads=0;
+  page.on('request',r=>{
+   const first=r.url()===main;
+   if(first)mainLoads++;
+   const body=first?'<iframe name="recommendFrame" src="/web/frame/recommend?old"></iframe>':
+    r.url().endsWith('?new')?'<div class="job-selecter-wrap"><span class="ui-dropmenu-label">目标岗位</span></div><div class="card-list"></div>':'<div>loading</div>';
+   void r.respond({status:200,contentType:'text/html;charset=utf-8',body});
+  });
+  await page.goto(main);
+  const ready=ensureInRecommendPage(page);
+  await page.evaluate(`setTimeout(()=>{const old=document.querySelector('iframe');const next=document.createElement('iframe');next.name=old.name;next.src='/web/frame/recommend?new';old.replaceWith(next)},100)`);
+  assert.ok((await ready).url().endsWith('?new'));
+  assert.equal(mainLoads,1);
+ } finally {await browser.close();}
+});
 test('recommendation canonical roots, exact name/ID, component identity and optional experience',async()=>{
  const browser=await puppeteer.launch({executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',headless:true});
  try{

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, mock } from 'node:test';
 import vm from 'node:vm';
+import { EventEmitter } from 'node:events';
 import { PNG } from 'pngjs';
 
 mock.module('../dist/browser/index.js', { namedExports: {
@@ -14,7 +15,8 @@ mock.module('../dist/common/c_resume_capture.js', { namedExports: {
   closeCResumePanel: async () => { closes++; if (!stuck) panel = false; },
 } });
 const { backFromOnlineResume } = await import('../dist/toolset/back.js');
-const { selectRecommendJob } = await import('../dist/toolset/recommend.js');
+const { selectRecommendJob: selectJob } = await import('../dist/toolset/recommend.js');
+const selectRecommendJob = async (...args) => (await selectJob(...args)).label;
 const {recommendJobKey,recommendJobQuery}=await import('../dist/toolset/recommend_job.js');
 const {matchesStatus}=await import('../dist/toolset/check.js');
 const { captureVisibleRegion } = await import('../dist/common/resume_scroll_capture.js');
@@ -30,7 +32,7 @@ test('same complete job never clicks or waits, with default, false or true mode'
   assert.equal(await selectRecommendJob(frame, '行政专员【深圳】', true), '行政专员 【深圳】');
   assert.equal(reads, 3);
   let checks = 0;
-  await assert.rejects(selectRecommendJob({evaluate:async () => ++checks === 1 ? '当前岗位' : false}, '其他岗位', true), /未找到岗位下拉入口/);
+  await assert.rejects(selectRecommendJob({page:()=>new EventEmitter(),evaluate:async () => ++checks === 1 ? '当前岗位' : false}, '其他岗位', true), /未找到岗位下拉入口/);
   assert.equal(checks, 2);
   const salaryFrame={evaluate:async()=> 'LLM 推理网关 _ 深圳 15-30K'};
   assert.equal(await selectRecommendJob(salaryFrame,'LLM 推理网关 _ 深圳',true),'LLM 推理网关 _ 深圳 15-30K');
@@ -39,6 +41,23 @@ test('same complete job never clicks or waits, with default, false or true mode'
   assert.equal(recommendJobQuery('LLM 推理网关 / 计费平台工程师（Bifrost） _ 深圳 15-30K'),'LLM 推理网关 / 计费平台工程师（Bifrost）');
   assert.equal(matchesStatus({pageType:'recommend',recommendJob:'全栈开发 _ 深圳 15-30K'},{page:'recommend',job:'全栈开发 _ 深圳'}),true);
   assert.equal(matchesStatus({pageType:'recommend',recommendJob:'全栈开发 _ 深圳 15-30K'},{page:'recommend',job:'全栈开发 _ 西安'}),false);
+});
+
+test('top navigation and recommendation frame detachment stop selection with distinct diagnostics', async () => {
+  for (const [event, message] of [['framedetached', /推荐 iframe 已分离/], ['framenavigated', /顶层页面导航/]]) {
+    const page = new EventEmitter();
+    const main = {};
+    page.mainFrame = () => main;
+    let reads = 0;
+    const frame = {page: () => page, evaluate: async () => {
+      if (++reads === 1) return '当前岗位';
+      page.emit(event, event === 'framedetached' ? frame : main);
+      throw Error('context destroyed');
+    }};
+    await assert.rejects(selectRecommendJob(frame, '目标岗位', true), message);
+    assert.equal(reads, 2);
+    assert.equal(page.listenerCount(event), 0);
+  }
 });
 
 test('different jobs select once; partial current-job matches only close dropdown; exact duplicates fail', async () => {
@@ -55,17 +74,27 @@ test('different jobs select once; partial current-job matches only close dropdow
   const input=new HTMLInputElement();
   const dropdown=new HTMLElement();dropdown.querySelector=()=>input;
   dropdown.getBoundingClientRect=()=>({width:open?100:0,height:open?100:0});
-  function row(text){const el=new HTMLElement(text);el.querySelector=()=>({textContent:text});el.click=()=>{selected++;label=text;open=false;};return el;}
+  const page=new EventEmitter(), main={};
+  page.mainFrame=()=>main;
+  function row(text){const el=new HTMLElement(text);el.querySelector=()=>({textContent:text});el.click=()=>{selected++;label=text;open=false;page.emit('framedetached',frame);};return el;}
   let rows=[row('行政专员助理'),row('行政专员')];
   const context={HTMLElement,HTMLInputElement,Event:class {},getComputedStyle:()=>({display:'block',visibility:'visible'}),document:{
     querySelector:sel=>sel.includes('ui-dropmenu-label')?host:sel==='.job-selecter-options'?dropdown:sel.includes('chat-job-search')?input:new HTMLElement(),
     querySelectorAll:()=>rows,
   }};
   context.window=context;
-  const frame={evaluate:async script=>vm.runInNewContext(script,context),waitForFunction:async script=>{
+  const frame={page:()=>page,evaluate:async script=>vm.runInNewContext(script,context),waitForFunction:async script=>{
     assert.equal(vm.runInNewContext(script,context),true,'wait must evaluate a boolean, not return a function');
   }};
-  assert.equal(await selectRecommendJob(frame,'行政专员',true),'行政专员');
+  const updated={parentFrame:()=>main,evaluate:async()=>label};
+  const iframe={contentDocument:{location:{origin:'https://www.zhipin.com',pathname:'/web/frame/recommend/'},
+    querySelectorAll:()=>[{textContent:label,getClientRects:()=>[{}]}],querySelector:()=>({})}};
+  page.waitForFunction=async script=>{
+    assert.equal(vm.runInNewContext(script,{document:{querySelectorAll:()=>[iframe]},location:iframe.contentDocument.location}),iframe);
+    return {asElement:()=>({contentFrame:async()=>updated}),dispose:async()=>{}};
+  };
+  const result=await selectJob(frame,'行政专员',true);
+  assert.equal(result.label,'行政专员');assert.equal(result.frame,updated);
   assert.equal(clicks,1);assert.equal(selected,1);
   rows=[row('行政专员')];
   assert.equal(await selectRecommendJob(frame,'行政'),'行政专员');
@@ -81,6 +110,11 @@ test('different jobs select once; partial current-job matches only close dropdow
   rows=[row('全栈开发 _ 深圳 15-30K'),row('全栈开发 _ 西安 15-30K')];
   assert.equal(await selectRecommendJob(frame,'全栈开发 _ 深圳',true),'全栈开发 _ 深圳 15-30K');
   assert.equal(input.value,'全栈开发');assert.equal(selected,3);
+  await assert.rejects(selectRecommendJob(frame,'全栈开发',true),/ambiguous/);
+  assert.equal(selected,3);
+  rows=[row('后训练平台工程师 _ 深圳 35-60K')];
+  assert.equal(await selectRecommendJob(frame,'后训练平台工程师',true),'后训练平台工程师 _ 深圳 35-60K');
+  assert.equal(selected,4);
 });
 
 test('back closes a panel; checked list is a no-op; close failure never triggers history', async () => {

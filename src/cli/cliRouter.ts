@@ -251,7 +251,7 @@ function printHelp(): void {
       仅支持已知列表、在线简历页及权益页；登录、验证、未知页或简历弹层仍打开时停止。
 
   boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
-      进入推荐页并读取推荐列表；岗位名称＋城市作为匹配键，忽略薪资后缀；同岗位不重复选择；--ensure-job 要求该键唯一精确匹配
+      --ensure-job 优先精确匹配岗位名和城市，忽略薪资；精确零匹配时用原参数做一次关键词匹配。不带该选项直接按关键词匹配。多项匹配即停止
   boss search [关键词] [--city 城市 --job 搜索岗位]
   boss search --job 搜索岗位 [--json]
   boss search --city 候选人城市 [--json]

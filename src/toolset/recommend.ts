@@ -1,4 +1,4 @@
-import type { Frame, Page } from 'puppeteer-core';
+import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 import {
   JOB_SEARCH_ACTION_GAP_MS,
   JOB_SELECT_ACTION_GAP_MS,
@@ -49,45 +49,6 @@ export function isBossChatRecommendUrl(url: string): boolean {
   }
 }
 
-async function getRecommendFrame(page: Page): Promise<Frame> {
-  const timeoutMs = 18_000;
-  const iframe = await page.waitForSelector('iframe[name="recommendFrame"]', {
-    timeout: timeoutMs,
-  });
-  if (!iframe) {
-    throw new Error('未找到推荐 iframe（iframe[name="recommendFrame"]）。');
-  }
-
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const frame = await iframe.contentFrame();
-    if (frame && frame.url().includes('/web/frame/recommend')) {
-      return frame;
-    }
-    await sleepRandom(120, 220);
-  }
-
-  const iframeSrc = (await page.evaluate(
-    `(() => document.querySelector('iframe[name="recommendFrame"]')?.getAttribute("src") ?? "")()`,
-  )) as string;
-  const frameUrls = page.frames().map((f) => f.url()).join(' | ');
-  throw new Error(
-    `已检测到推荐 iframe，但无法获取其页面上下文。iframe src：${iframeSrc || 'unknown'}；frames：${frameUrls || 'empty'}`,
-  );
-}
-
-async function ensureRecommendFrameReady(frame: Frame): Promise<void> {
-  await frame.waitForFunction(
-    `(() => {
-      const sel = ${JSON.stringify(RECOMMEND_CARD_ROOT_SELECTOR)};
-      if (document.querySelector(sel)) return true;
-      const root = document.querySelector(".card-list, .geek-list-wrap .geek-list");
-      return !!root;
-    })()`,
-    { timeout: 18_000 },
-  );
-}
-
 export async function readCurrentRecommendJobLabel(frame: Frame): Promise<string> {
   return (await frame.evaluate(`(() => {
     const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
@@ -127,26 +88,67 @@ async function waitForRecommendJobSearchResults(frame: Frame, keyword: string): 
   );
 }
 
-async function waitForRecommendJobSelected(frame: Frame, expectedLabel: string): Promise<void> {
-  await frame.waitForFunction(
-    `((label) => {
-      const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
-      const current = norm(document.querySelector(".job-selecter-wrap .ui-dropmenu-label")?.textContent);
-      return !!current && current === label;
-    })(${JSON.stringify(expectedLabel)})`,
-    { timeout: 10_000 },
-  );
-  await ensureRecommendFrameReady(frame);
+async function waitForReadyRecommendFrame(page: Page, expected?: string) {
+  const expectedKey = expected === undefined ? null : recommendJobKey(expected);
+  const element = await page.waitForFunction(`(() => {
+    const frames = document.querySelectorAll('iframe[name="recommendFrame"]');
+    if (frames.length > 1) throw Error('推荐 iframe 不唯一');
+    const host = frames[0], doc = host?.contentDocument;
+    if (!doc || doc.location.origin !== location.origin || doc.location.pathname.replace(/\\/+$/, '') !== '/web/frame/recommend') return false;
+    const labels = doc.querySelectorAll('.job-selecter-wrap .ui-dropmenu-label');
+    if (labels.length !== 1 || !labels[0].getClientRects().length) return false;
+    const key = ${recommendJobKey.toString()};
+    const label = key(labels[0].textContent || '');
+    const expectedKey = ${JSON.stringify(expectedKey)};
+    return !!label && (expectedKey === null || label === expectedKey) &&
+      !!doc.querySelector(${JSON.stringify(RECOMMEND_CARD_ROOT_SELECTOR + ', .card-list, .geek-list-wrap .geek-list')}) && host;
+  })()`, {timeout:expected === undefined ? 18000 : 10000});
+  try {
+    const host = element.asElement() as ElementHandle<HTMLIFrameElement> | null;
+    const frame = await host?.contentFrame();
+    if (!frame || frame.parentFrame() !== page.mainFrame()) throw Error('核验后的推荐 iframe 已失效');
+    const label = await readCurrentRecommendJobLabel(frame);
+    if (!label || (expectedKey !== null && recommendJobKey(label) !== expectedKey)) throw Error('只读复核的推荐岗位与目标不符');
+    return {label, frame};
+  } finally { await element.dispose(); }
 }
 
-export async function selectRecommendJob(frame: Frame, keyword: string, checkJob = false): Promise<string> {
+export async function selectRecommendJob(frame: Frame, keyword: string, checkJob = false) {
   const kw = keyword.trim();
   if (!kw) {
-    return readCurrentRecommendJobLabel(frame);
+    return {label: await readCurrentRecommendJobLabel(frame), frame};
   }
   const current = await readCurrentRecommendJobLabel(frame);
   const normalize = recommendJobKey;
-  if (normalize(current) === normalize(kw)) return current;
+  if (normalize(current) === normalize(kw)) return {label:current, frame};
+  const page = frame.page();
+  let topNavigation = false, frameNavigation = false, frameDetached = false;
+  const navigated = (changed: Frame) => {
+    if (changed === page.mainFrame()) topNavigation = true;
+    if (changed === frame) frameNavigation = true;
+  };
+  const detached = (changed: Frame) => { if (changed === frame) frameDetached = true; };
+  let confirming = false;
+  const verify = (cause?: unknown) => {
+    const reason = topNavigation ? '顶层页面导航' : !confirming && frameDetached ? '推荐 iframe 已分离' : !confirming && frameNavigation ? '推荐 iframe 导航' : '';
+    if (reason) throw new Error(`推荐页切换岗位中止：${reason}，目标岗位=${kw}`, {cause});
+  };
+  page.on('framenavigated', navigated);
+  page.on('framedetached', detached);
+  try {
+    const result = await changeRecommendJob(frame, kw, checkJob, verify, () => { confirming = true; });
+    verify();
+    return result;
+  } catch (error) {
+    verify(error);
+    throw error;
+  } finally {
+    page.off('framenavigated', navigated);
+    page.off('framedetached', detached);
+  }
+}
+
+async function changeRecommendJob(frame: Frame, kw: string, checkJob: boolean, verify: () => void, startConfirmation: () => void) {
   const kwLiteral = JSON.stringify(kw);
   const query = recommendJobQuery(kw);
 
@@ -164,6 +166,7 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
   }
   await sleepRandom(JOB_SELECT_ACTION_GAP_MS.min, JOB_SELECT_ACTION_GAP_MS.max);
   await waitForRecommendJobDropdownReady(frame);
+  verify();
 
   const searched = (await frame.evaluate(`(() => {
     const kw = ${JSON.stringify(query)};
@@ -180,16 +183,16 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
   }
   await sleepRandom(JOB_SEARCH_ACTION_GAP_MS.min, JOB_SEARCH_ACTION_GAP_MS.max);
   await waitForRecommendJobSearchResults(frame, query);
+  verify();
 
-  const picked = (await frame.evaluate(`(() => {
+  const resolveOption = `(() => {
     const kw = ${kwLiteral};
     const norm = ${recommendJobKey.toString()};
     const rows = Array.from(document.querySelectorAll(".job-selecter-options .job-list .job-item"));
     if (rows.length === 0) return { ok: false, reason: "empty" };
-    const matches = rows.filter((el) => {
-      const label = norm(el.querySelector(".label")?.textContent || el.textContent || "");
-      return ${checkJob} ? label === norm(kw) : label.includes(norm(kw));
-    });
+    const key = el => norm(el.querySelector(".label")?.textContent || el.textContent || "");
+    const exact = ${checkJob} ? rows.filter(el => key(el) === norm(kw)) : [];
+    const matches = exact.length ? exact : rows.filter(el => key(el).includes(norm(kw)));
     if (matches.length > 1) return { ok: false, reason: "ambiguous" };
     const target = matches[0];
     if (!(target instanceof HTMLElement)) return { ok: false, reason: "not_found" };
@@ -200,30 +203,47 @@ export async function selectRecommendJob(frame: Frame, keyword: string, checkJob
     const host = document.querySelector(".job-selecter-wrap .ui-dropmenu-label");
     if (!(host instanceof HTMLElement)) throw new Error('选择前无法读取当前推荐岗位');
     if (norm(host.textContent) === norm(label)) {
-      host.click();
       return { ok: true, label, changed: false };
     }
-    target.scrollIntoView({ block: "center", inline: "nearest" });
-    target.click();
-    return { ok: true, label, changed: true };
+    return { ok: true, label, changed: true, target };
+  })()`;
+  const picked = (await frame.evaluate(`(() => {
+    const { target, ...result } = ${resolveOption}; return result;
   })()`)) as { ok: boolean; label?: string; reason?: string; changed?: boolean };
   if (!picked.ok) {
     throw new Error(`岗位选择失败：${kw}；reason=${picked.reason}。`);
   }
   if (!picked.label) throw new Error(`岗位选择结果缺少名称：${kw}`);
   const label = picked.label;
+  verify();
   if (picked.changed === false) {
+    await frame.evaluate(`(() => {
+      const row = ${resolveOption};
+      if (!row.ok || row.changed || row.label !== ${JSON.stringify(label)}) throw Error('收起前岗位已变化');
+      document.querySelector('.job-selecter-wrap .ui-dropmenu-label').click();
+    })()`);
     await frame.waitForFunction(`(() => {
       const el = document.querySelector('.job-selecter-options');
       if (!el) return true;
       const rect = el.getBoundingClientRect(), style = getComputedStyle(el);
       return rect.width <= 0 || rect.height <= 0 || style.display === 'none' || style.visibility === 'hidden';
     })()`, { timeout: 8_000 });
-    return label;
+    return {label, frame};
   }
-  await sleepRandom(JOB_SELECT_ACTION_GAP_MS.min, JOB_SELECT_ACTION_GAP_MS.max);
-  await waitForRecommendJobSelected(frame, label);
-  return label;
+  startConfirmation();
+  try {
+    await frame.evaluate(`(() => {
+      const row = ${resolveOption};
+      if (!row.ok || !row.changed || row.label !== ${JSON.stringify(label)}) throw Error('点击前目标岗位已变化');
+      row.target.scrollIntoView({block:'center',inline:'nearest'});
+      row.target.click();
+    })()`);
+  } catch (error) {
+    // Replacing the iframe can destroy the command response. Only observe the selected job from here.
+    if (!(error instanceof Error) || !/execution context was destroyed|detached frame|frame got detached|cannot find context with specified id/i.test(error.message)) throw error;
+  }
+  verify();
+  return waitForReadyRecommendFrame(frame.page(), label);
 }
 
 export async function ensureInRecommendPage(page: Page): Promise<Frame> {
@@ -232,9 +252,7 @@ export async function ensureInRecommendPage(page: Page): Promise<Frame> {
     targetUrl: BOSS_CHAT_RECOMMEND_URL,
     matches: isBossChatRecommendUrl,
   });
-  const frame = await getRecommendFrame(page);
-  await ensureRecommendFrameReady(frame);
-  return frame;
+  return (await waitForReadyRecommendFrame(page)).frame;
 }
 
 /**
@@ -247,9 +265,7 @@ export async function assertRecommendPageReady(
   if (!isBossChatRecommendUrl(page.url())) {
     throw new Error(`当前不在推荐列表页（/web/chat/recommend），无法${actionName}。`);
   }
-  const frame = await getRecommendFrame(page);
-  await ensureRecommendFrameReady(frame);
-  return frame;
+  return (await waitForReadyRecommendFrame(page)).frame;
 }
 
 export async function assertRecommendPageReadyForPreview(page: Page): Promise<Frame> {
@@ -485,9 +501,11 @@ export async function openRecommendResumePreview(frame: Frame, target: string, c
 export async function runRecommend(jobKeyword?: string, json = false, checkJob = false): Promise<string> {
   try {
     return await withBossSessionPage(async (page) => {
-      const frame = await ensureInRecommendPage(page);
-      const selectedJob = await selectRecommendJob(frame, (jobKeyword ?? '').trim(), checkJob);
-      const candidates = await readRecommendList(frame);
+      const frame = await ensureInRecommendPage(page).catch((cause: unknown) => {
+        throw new Error(`推荐页起始就绪检查失败，尚未开始选岗：${cause instanceof Error ? cause.message : String(cause)}`, {cause});
+      });
+      const {label:selectedJob, frame:currentFrame} = await selectRecommendJob(frame, (jobKeyword ?? '').trim(), checkJob);
+      const candidates = await readRecommendList(currentFrame);
       if (json) return JSON.stringify({ job: selectedJob, candidates });
       const title = selectedJob ? `当前岗位：${selectedJob}` : '当前岗位：默认';
       return [title, '', renderRecommendList(candidates)].join('\n');
