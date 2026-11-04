@@ -144,6 +144,14 @@ function buildNoContentResponseHeaders(headers: RequestHeaders) {
  */
 const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
   'use strict';
+  const key = Symbol.for('boss-cli.page-guard');
+  const config = 'v1:' + __SHOULD_ALLOW_CONSOLE_CLEAR__ + ':' + __SHOULD_ALLOW_VERBOSE_CONSOLE__;
+  const prior = Object.getOwnPropertyDescriptor(document, key);
+  if (prior) {
+    if (prior.value === config) return;
+    throw Error('当前文档的守卫安装未完成或配置不一致，停止操作');
+  }
+  Object.defineProperty(document, key, {value:'installing', configurable:true});
 
   var _Object = Object;
   var _defineProperty = _Object.defineProperty;
@@ -170,7 +178,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
       configurable: true,
       enumerable: false,
     });
-  } catch (e) {}
+  } catch (e) { throw Error("页面守卫安装失败：" + e); }
 
   /** 包装替身函数：把它伪装成 "function NAME() { [native code] }"。 */
   var asNative = function(replacement, nativeName) {
@@ -183,7 +191,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
         configurable: true,
         enumerable: false,
       });
-    } catch (e) {}
+    } catch (e) { throw Error("页面守卫安装失败：" + e); }
     return replacement;
   };
 
@@ -200,9 +208,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
         enumerable: !!desc.enumerable,
       });
       return desc.value;
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { throw Error("守卫属性安装失败：" + key + " " + e); }
   };
 
   /** 改写 prototype 上的 accessor：仅替换 getter/setter，保留 configurable/enumerable 形态。 */
@@ -218,9 +224,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
       if (options.set || desc.set) nextDesc.set = options.set || desc.set;
       _defineProperty(proto, key, nextDesc);
       return desc;
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { throw Error("守卫属性安装失败：" + key + " " + e); }
   };
 
   // ===== navigator.webdriver：在 Navigator.prototype 上覆盖 getter，保持 accessor 形态 =====
@@ -231,7 +235,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
         get: asNative(function() { return false; }, 'get webdriver'),
       });
     }
-  } catch (e) {}
+  } catch (e) { throw Error("页面守卫安装失败：" + e); }
 
   // ===== navigator.languages：仅在为空时回填，使用 prototype getter =====
   try {
@@ -244,7 +248,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
         });
       }
     }
-  } catch (e) {}
+  } catch (e) { throw Error("页面守卫安装失败：" + e); }
 
   // ===== window.close：改为空函数（保留 native 形态）=====
   try {
@@ -252,7 +256,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
     if (winProto) {
       replaceProtoMethod(winProto, 'close', asNative(function close() {}, 'close'));
     }
-  } catch (e) {}
+  } catch (e) { throw Error("页面守卫安装失败：" + e); }
 
   // ===== history.back / forward / go =====
   try {
@@ -266,7 +270,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
         return origGo.call(this, n);
       }, 'go'));
     }
-  } catch (e) {}
+  } catch (e) { throw Error("页面守卫安装失败：" + e); }
 
   // ===== Location.assign / replace / href setter =====
   var BLOCK_PATH = /\\/web\\/common\\/(?:403|nonsupport)\\.html|\\/web\\/user\\/safe\\/verify|\\/web\\/passport\\/(?:zp\\/(?:403|verify|security)\\.html|cm\\/(?:403|verify|security-check)\\.html)/i;
@@ -301,7 +305,7 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
         enumerable: !!hrefDesc.enumerable,
       });
     }
-  } catch (e) {}
+  } catch (e) { throw Error("页面守卫安装失败：" + e); }
 
   // ===== console.clear：可选替身，原生形态空函数 =====
   if (!__SHOULD_ALLOW_CONSOLE_CLEAR__) {
@@ -320,9 +324,9 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
             configurable: true,
             enumerable: !!clearSrcDesc.enumerable,
           });
-        } catch (_) {}
+        } catch (e) { throw Error("控制台守卫安装失败：" + e); }
       }
-    } catch (e) {}
+    } catch (e) { throw Error("页面守卫安装失败：" + e); }
   }
 
   // ===== console 时间差探测对抗 =====
@@ -384,26 +388,24 @@ const BOSS_PAGE_GUARD_SCRIPT_TEMPLATE = `(function() {
               configurable: true,
               enumerable: !!srcDesc.enumerable,
             });
-          } catch (_) {}
+          } catch (e) { throw Error("控制台守卫安装失败：" + e); }
         })(consoleMethodNames[ci]);
       }
-    } catch (e) {}
+    } catch (e) { throw Error("页面守卫安装失败：" + e); }
   }
+  Object.defineProperty(document, key, {value:config, configurable:false});
 })();`;
 
 function buildPageGuardScript(): string {
   return BOSS_PAGE_GUARD_SCRIPT_TEMPLATE
-    .replace('__SHOULD_ALLOW_CONSOLE_CLEAR__', SHOULD_ALLOW_CONSOLE_CLEAR ? 'true' : 'false')
-    .replace('__SHOULD_ALLOW_VERBOSE_CONSOLE__', SHOULD_ALLOW_VERBOSE_CONSOLE ? 'true' : 'false');
+    .replaceAll('__SHOULD_ALLOW_CONSOLE_CLEAR__', SHOULD_ALLOW_CONSOLE_CLEAR ? 'true' : 'false')
+    .replaceAll('__SHOULD_ALLOW_VERBOSE_CONSOLE__', SHOULD_ALLOW_VERBOSE_CONSOLE ? 'true' : 'false');
 }
 
 const browsersWithTargetGuard = new WeakSet<Browser>();
-const pagesWithInitGuard = new WeakSet<Page>();
-const pagesWithNavigationGuard = new WeakSet<Page>();
-const pagesWithRequestGuard = new WeakSet<Page>();
+const pageInstallations = new WeakMap<Page, Promise<void>>();
 
 async function ensurePageInitGuard(page: Page): Promise<void> {
-  if (pagesWithInitGuard.has(page)) return;
   const script = buildPageGuardScript();
   // 走 puppeteer 的 evaluateOnNewDocument：内部会把脚本同步注册到主 frame CDP session，
   // 并在 OOPIF/iframe target 通过 `onAttachedToTarget` attach 时再次 addScript，
@@ -411,25 +413,19 @@ async function ensurePageInitGuard(page: Page): Promise<void> {
   await page.evaluateOnNewDocument(script);
   // 当前文档已在加载中或已加载完成时，evaluateOnNewDocument 不会回溯执行；
   // 这里对当前主 frame 直接注入一次，让幂等的 try/catch 守卫立即生效。
-  await page.evaluate(script).catch(() => {
-    /* 当前文档可能还没创建执行上下文，由后续 navigation 触发 evaluateOnNewDocument 即可 */
-  });
-  pagesWithInitGuard.add(page);
+  await page.evaluate(script);
 }
 
 function ensurePageNavigationGuard(page: Page): void {
-  if (pagesWithNavigationGuard.has(page)) return;
   page.on('framenavigated', (frame) => {
     if (frame !== page.mainFrame()) return;
     const url = frame.url();
     if (!isRiskNavigationUrl(url)) return;
     console.error(`[boss-cli] 页面进入验证或异常页面，停止自动恢复，不导航、不回退：${url}`);
   });
-  pagesWithNavigationGuard.add(page);
 }
 
 async function ensurePageRequestGuard(page: Page): Promise<void> {
-  if (pagesWithRequestGuard.has(page)) return;
   const cdp = await page.createCDPSession();
   await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
   await cdp.send('Fetch.enable', {
@@ -478,14 +474,20 @@ async function ensurePageRequestGuard(page: Page): Promise<void> {
         console.error(`[boss-cli] 风险请求阻断失败：${url}`);
       });
   });
-  pagesWithRequestGuard.add(page);
 }
 
 export async function installBossPageGuards(page: Page): Promise<void> {
   if (page.isClosed()) return;
-  await ensurePageInitGuard(page);
-  ensurePageNavigationGuard(page);
-  await ensurePageRequestGuard(page);
+  let installation = pageInstallations.get(page);
+  if (!installation) {
+    installation = (async () => {
+      await ensurePageInitGuard(page);
+      ensurePageNavigationGuard(page);
+      await ensurePageRequestGuard(page);
+    })();
+    pageInstallations.set(page, installation);
+  }
+  await installation;
 }
 
 async function installTargetPageGuards(target: Target): Promise<void> {
