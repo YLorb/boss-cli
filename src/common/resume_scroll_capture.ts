@@ -6,6 +6,9 @@ import { traceResumeCapture } from './resume_capture_trace.js';
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const MAX_PIXELS = 80_000_000;
+// A rounded crop origin can shift by half a pixel even when its far edge
+// is trimmed by one pixel to match the bitmap.
+const MAX_CROP_SIZE_DELTA = 1.5;
 
 /** One reading pause after opening the resume, before any capture scrolling. */
 export function resumeReadingDelayMs(random = Math.random): number {
@@ -82,7 +85,9 @@ export function stitchResumeTiles(tiles: ResumeTile[], cssWidth: number, cssHeig
   if (!tiles.length || Math.abs(tiles[0].top) > 0.5) throw new Error('简历截图缺少顶部');
   if (!Number.isFinite(scale) || scale <= 0) throw new Error('简历截图像素缩放比例无效');
   const width = tiles[0].image.width;
-  if (Math.abs(width - cssWidth * scale) > 1) throw new Error('简历截图宽度与实际像素缩放不一致');
+  if (Math.abs(width - cssWidth * scale) > MAX_CROP_SIZE_DELTA ||
+      Math.abs(tiles[0].image.height - cssHeight * scale) > MAX_CROP_SIZE_DELTA)
+    throw new Error('简历截图尺寸与实际像素缩放不一致');
   const last = tiles[tiles.length - 1];
   if (Math.abs(last.top + cssHeight - total) > 1) throw new Error('简历截图未覆盖到底部');
   // clientHeight/scrollHeight are integer CSS pixels. Use the measured final tile
@@ -93,7 +98,7 @@ export function stitchResumeTiles(tiles: ResumeTile[], cssWidth: number, cssHeig
   let covered = 0;
   for (const { top, image } of tiles) {
     const start = Math.round(top * scale);
-    if (image.width !== width || Math.abs(image.height - cssHeight * scale) > 1)
+    if (image.width !== width || image.height !== tiles[0].image.height)
       throw new Error('简历截图尺寸在滚动过程中发生变化');
     if (start > covered || (covered && start + image.height <= covered))
       throw new Error(`简历截图存在缺口或滚动未前进：top=${top}, start=${start}, covered=${covered}, tileHeight=${image.height}, scale=${scale}`);
@@ -145,15 +150,27 @@ export function composeResumeFrame(shell: PNG, body: PNG, x: number, y: number, 
 /** Capture only the current viewport; crop locally without a browser clip override. */
 export async function captureVisibleRegion(page: Page, clip: { x: number; y: number; width: number; height: number }, scale: number): Promise<PNG> {
   const viewport = await page.evaluate('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,scale:devicePixelRatio})') as {width:number;height:number;x:number;y:number;scale:number};
+  if (!Number.isFinite(scale) || scale <= 0) throw new Error('简历截图像素缩放比例无效');
   if (viewport.scale !== scale) throw new Error('截图期间像素缩放发生变化');
+  const left = clip.x - viewport.x, top = clip.y - viewport.y;
+  const right = clip.x + clip.width - viewport.x, bottom = clip.y + clip.height - viewport.y;
+  if (!(left >= 0 && top >= 0 && right > left && bottom > top && right <= viewport.width && bottom <= viewport.height))
+    throw new Error(`截图区域超出当前 CSS 视口：clip=${JSON.stringify(clip)}；viewport=${JSON.stringify(viewport)}`);
+
   const image = PNG.sync.read(Buffer.from(await page.screenshot({ type: 'png', fullPage: false, captureBeyondViewport: false })));
-  const x = Math.round((clip.x - viewport.x) * scale), y = Math.round((clip.y - viewport.y) * scale);
-  const width = Math.round(clip.width * scale), height = Math.round(clip.height * scale);
-  if (Math.abs(image.width - viewport.width * scale) > 1 || Math.abs(image.height - viewport.height * scale) > 1 ||
-      x < 0 || y < 0 || width <= 0 || height <= 0 || x + width > image.width || y + height > image.height)
-    throw new Error('当前视口截图尺寸或裁剪边界异常');
   const after = await page.evaluate('({width:innerWidth,height:innerHeight,x:scrollX,y:scrollY,scale:devicePixelRatio})');
   if (JSON.stringify(viewport) !== JSON.stringify(after)) throw new Error('截图期间主页面视口或滚动位置变化');
+  const expectedWidth = viewport.width * scale, expectedHeight = viewport.height * scale;
+  if (Math.abs(image.width - expectedWidth) > 1 || Math.abs(image.height - expectedHeight) > 1)
+    throw new Error(`视口截图位图尺寸异常：PNG=${image.width}×${image.height}；CSS×DPR=${expectedWidth}×${expectedHeight}；DPR=${scale}`);
+
+  const x = Math.round(left * scale), y = Math.round(top * scale);
+  const pixelRight = Math.round(right * scale), pixelBottom = Math.round(bottom * scale);
+  // The CSS bounds passed above. Allow only a one-pixel rounding difference at the bitmap edge.
+  const width = Math.min(pixelRight, image.width) - x;
+  const height = Math.min(pixelBottom, image.height) - y;
+  if (width <= 0 || height <= 0 || pixelRight > image.width + 1 || pixelBottom > image.height + 1)
+    throw new Error(`视口截图像素裁剪边界异常：bounds=(${x},${y})–(${pixelRight},${pixelBottom})；PNG=${image.width}×${image.height}；DPR=${scale}`);
   const cropped = new PNG({ width, height });
   PNG.bitblt(image, cropped, x, y, width, height, 0, 0);
   return cropped;
@@ -285,10 +302,9 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
     const shellBox = outer ? bodyClip : frameBox;
     const scale = viewport.pixelRatio;
     const shell = await captureVisibleRegion(page, shellBox, scale);
-    if (!Number.isFinite(scale) || scale <= 0 || Math.abs(shell.width - shellBox.width * scale) > 1 || Math.abs(shell.height - shellBox.height * scale) > 1)
-      throw new Error('简历截图尺寸与浏览器像素缩放不一致');
     traceResumeCapture('pixel-scale', { scale, cssWidth: shellBox.width, imageWidth: shell.width });
-    const insetX = Math.round((bodyClip.x - shellBox.x) * scale), insetY = Math.round((bodyClip.y - shellBox.y) * scale);
+    const insetX = Math.round(bodyClip.x * scale) - Math.round(shellBox.x * scale);
+    const insetY = Math.round(bodyClip.y * scale) - Math.round(shellBox.y * scale);
     const tiles: ResumeTile[] = [];
     let complete = false, pixels = 0;
     for (let i = 0; i < 100; i++) {

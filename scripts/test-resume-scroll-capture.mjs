@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PNG } from 'pngjs';
 import { runInNewContext } from 'node:vm';
-import { stitchResumeTiles, composeResumeFrame, wheelDeltas, resumeReadingDelayMs, captureResumeByWheel, RESUME_SCROLL_ROOT_SCRIPT } from '../dist/common/resume_scroll_capture.js';
+import { stitchResumeTiles, composeResumeFrame, wheelDeltas, resumeReadingDelayMs, captureVisibleRegion, captureResumeByWheel, RESUME_SCROLL_ROOT_SCRIPT } from '../dist/common/resume_scroll_capture.js';
 
 test('reading delay stays within 2000–10000ms', () => {
   assert.equal(resumeReadingDelayMs(() => 0), 2000);
@@ -53,6 +53,25 @@ test('preserve iframe header/footer outside inner scroll container', () => {
   for (let y = 0; y < 350; y++) assert.deepEqual(result.data.subarray(((y + 20) * 140 + 10) * 4, ((y + 20) * 140 + 130) * 4), body.data.subarray(y * 120 * 4, (y + 1) * 120 * 4));
 });
 
+test('viewport capture rounds both crop edges and only trims rounding at the PNG edge', async () => {
+  const scale = 1.25;
+  const clip = { x: 22, y: 20, width: 1162, height: 300 };
+  const viewport = { width: 1184, height: 706, x: 0, y: 0, scale };
+  let png = strip(0, 883, 1480);
+  const page = { evaluate: async () => viewport, screenshot: async () => PNG.sync.write(png) };
+
+  const result = await captureVisibleRegion(page, clip, scale);
+  assert.equal(result.width, 1452);
+  assert.equal(result.height, 375);
+  assert.deepEqual(result.data.subarray(0, result.width * 4), png.data.subarray((25 * 1480 + 28) * 4, 26 * 1480 * 4));
+
+  png = strip(0, 883, 1479);
+  assert.equal((await captureVisibleRegion(page, clip, scale)).width, 1451);
+  await assert.rejects(captureVisibleRegion(page, { ...clip, width: 1162.5 }, scale), /超出当前 CSS 视口/);
+  png = strip(0, 883, 1478);
+  await assert.rejects(captureVisibleRegion(page, clip, scale), /位图尺寸异常.*1478.*1480/);
+});
+
 test('wheel profiles accelerate/decelerate with randomized shape and exact signed distance', () => {
   for (const distance of [-200, 400]) {
     const a = wheelDeltas(distance, () => 0.2), b = wheelDeltas(distance, () => 0.8);
@@ -97,14 +116,14 @@ function mockSurface({ blocked = false, changed = false, outer = false } = {}) {
   return { page, iframe, inspect: () => ({ top: Math.round(top), shots, events, disposed }) };
 }
 
-test('capture uses wheel only, verifies bottom, restores initial position and writes complete PNG', async () => {
+test('capture uses wheel only, verifies bottom and writes complete PNG', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'boss-scroll-test-'));
   try {
     const fixture = mockSurface(), path = join(dir, 'complete.png');
     await captureResumeByWheel(fixture.page, fixture.iframe, path);
     assert.deepEqual(PNG.sync.read(await readFile(path)).data, strip(0, 350).data);
     const result = fixture.inspect();
-    assert.equal(result.top, 40); assert.equal(result.disposed, true);
+    assert.equal(result.top, 150); assert.equal(result.disposed, true);
     assert.ok(result.shots >= 2); assert.ok(result.events.some(n => n < 0)); assert.ok(result.events.some(n => n > 0));
   } finally { await rm(dir, { recursive: true }); }
 });
@@ -116,17 +135,17 @@ test('blocked wheel / changed content fail without saving and release handles', 
       const fixture = mockSurface(options), path = join(dir, 'incomplete.png');
       await assert.rejects(captureResumeByWheel(fixture.page, fixture.iframe, path), /滚轮无响应|重叠校验失败/);
       await assert.rejects(access(path));
-      assert.equal(fixture.inspect().top, 40); assert.equal(fixture.inspect().disposed, true);
+      assert.equal(fixture.inspect().top, options.blocked ? 40 : 150); assert.equal(fixture.inspect().disposed, true);
     }
   } finally { await rm(dir, { recursive: true }); }
 });
 
-test('content-height iframe uses its outer scroll container and restores it', async () => {
+test('content-height iframe uses its outer scroll container and verifies bottom', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'boss-scroll-outer-'));
   try {
     const fixture=mockSurface({outer:true}), path=join(dir,'complete.png');
     await captureResumeByWheel(fixture.page, fixture.iframe, path);
     assert.deepEqual(PNG.sync.read(await readFile(path)).data,strip(0,350).data);
-    assert.equal(fixture.inspect().top,40);assert.equal(fixture.inspect().disposed,true);
+    assert.equal(fixture.inspect().top,150);assert.equal(fixture.inspect().disposed,true);
   } finally {await rm(dir,{recursive:true});}
 });
