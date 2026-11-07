@@ -43,7 +43,7 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 ## 评估先于触达（decide）
 
 - 评估完当前候选人后，Agent 执行 `decide --candidate-id X --verdict fit|not-fit|unknown` 记录结论；decide 只能针对当前 `open=X`。
-- 实际 `greet X` 前，CLI 强制 `decided[X].verdict==='fit'`，否则拒绝：未评估 →「尚未评估，请先 decide」；not-fit →「已评估为不合适，请 back」；unknown →「评估结果待确认，请 back 后继续下一位」。
+- 实际联系动作（`greet`、`greet --select-job`、`greet --confirm-contact`）前，CLI 强制 `decided[X].verdict==='fit'`，否则拒绝：未评估 →「尚未评估，请先 decide」；not-fit →「已评估为不合适，请 back」；unknown →「评估结果待确认，请 back 后继续下一位」。
 - `unknown` 只报告、不阻断本轮：back 后继续下一位，不视为淘汰。
 
 ## 执行日志（journal）

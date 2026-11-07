@@ -931,13 +931,16 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!target) {
       die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
-    const actualContact = !flags.has('check') && !flags.has('confirm-contact') && !flags.has('continue-chat') && !opts['select-job'];
+    const contactForm = !flags.has('check') && !flags.has('continue-chat');
+    const actualContact = contactForm && !flags.has('confirm-contact') && !opts['select-job'];
     const greetCandidateId = opts['candidate-id']?.trim();
     const greetFlow = flowStatePath();
-    if (actualContact && greetFlow) {
-      if (!greetCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下实际 greet 必须提供 --candidate-id。');
+    if (contactForm && greetFlow) {
+      if (!greetCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下联系动作（greet/select-job/confirm-contact）必须提供 --candidate-id。');
       await verifyFlowCandidate(greetFlow, greetCandidateId, target);
       await verifyFlowDecided(greetFlow, greetCandidateId, target);
+    }
+    if (actualContact && greetFlow) {
       await verifyFlowGreetNotReplayed(greetFlow, greetCandidateId, target);
     }
     const greetResult = await withFlowJournal(actualContact ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: 'greet' }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));

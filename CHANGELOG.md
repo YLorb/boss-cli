@@ -2,6 +2,10 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · fix(cli): 选岗/确认联系分支补决策门
+
+- 决策门（decide fit）原仅作用于 plain greet，`greet --select-job` 与 `greet --confirm-contact` 绕过；现统一作用于所有联系动作（greet/select-job/confirm-contact）。重放门仍只在 plain greet。
+
 ## 2026-11-08 · fix(cli): 接续判断修正 greet 中断/未知的需核验
 
 - 修正 `deriveFlowContinuation`：greet 仅有 intent 无 result（进程中断）或 greet 结果 failed/unknown 均判为 needs-verify，且优先级高于 back，避免"建议触达但重放门拒绝"的冲突，以及"greet 未知后被 back 覆盖成 done"的漏判。
