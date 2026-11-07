@@ -250,8 +250,8 @@ export async function verifyFlowNotReplayed(path: string, candidateId: string, n
   const state = await readFlowState(path);
   if (action === 'send') {
     const last = [...state.journal].reverse().find(e => e.candidateId === candidateId && e.action === 'send' && e.phase === 'result');
-    if (last && (last.result === 'unknown' || last.result === 'failed')) {
-      throw new FlowLockError(`候选人 ${name}（${candidateId}）上次 send 结果=${last.result}，禁止重发；请核验是否已发送。`);
+    if (last && last.result === 'unknown') {
+      throw new FlowLockError(`候选人 ${name}（${candidateId}）上次 send 结果未知，禁止重发；请核验是否已发送。`);
     }
     return;
   }

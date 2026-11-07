@@ -280,6 +280,16 @@ test('replay: send unknown blocks re-send', async () => {
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('replay: send failed allows retry', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-send-failed-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await recordJournalIntent(path, 'id-A', '张三', 'send');
+    await recordJournalResult(path, 'id-A', '张三', 'send', 'failed');
+    await verifyFlowNotReplayed(path, 'id-A', '张三', 'send'); // 不抛（确定失败可重试）
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('replay: confirm-contact success blocks re-greet', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'flow-confirm-replay-'));
   const path = join(dir, 'flow.json');
