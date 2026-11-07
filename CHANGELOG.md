@@ -2,6 +2,12 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat: 简历解析提速（mode=screen + 确定性字段 + 首滚延迟缩短）
+
+- `resume-analysis-session.mjs` 新增 `--spec` 评分模式（mode=screen）：结构化 verdict + 证据行号，脚本展开校验；新增确定性字段提取（邮箱/手机/城市/年限，唯一命中）返回 `suggested` 提示；unknown 报告但不停止。
+- 在线简历首次滚动前随机等待从 2000~10000ms 缩短为 2000~5000ms。
+- 新增 screen 模式与 suggested 的离线测试（test:resume-analysis 5 例）；更新 resume-analysis.md。
+
 ## 2026-11-08 · feat(cli): 搜索/推荐逐人闭环锁（BOSS_FLOW_STATE）
 
 - 新增逐人闭环锁：设置 `BOSS_FLOW_STATE=<状态文件绝对路径>` 后，`preview` 成功上锁、`greet`/`back` 成功解锁，未对当前候选人决策前拒绝打开下一位，防止「批量看完才评估导致列表刷新后无法联系」。

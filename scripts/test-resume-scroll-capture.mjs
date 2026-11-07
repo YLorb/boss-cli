@@ -9,8 +9,8 @@ import { stitchResumeTiles, composeResumeFrame, wheelDeltas, resumeReadingDelayM
 
 test('reading delay stays within 2000–10000ms', () => {
   assert.equal(resumeReadingDelayMs(() => 0), 2000);
-  assert.equal(resumeReadingDelayMs(() => 0.999999), 10000);
-  assert.equal(resumeReadingDelayMs(() => 0.5), 6000);
+  assert.equal(resumeReadingDelayMs(() => 0.999999), 5000);
+  assert.equal(resumeReadingDelayMs(() => 0.5), 3500);
 });
 
 function strip(top, height, width = 120, scale = 1) {
