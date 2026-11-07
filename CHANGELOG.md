@@ -2,6 +2,11 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · fix(cli): 重新查看同一人不再混用旧状态
+
+- full preview 重新打开同一候选人时清除其旧 decide（fresh=true），旧 fit 不再被决策门接受；`--open-only` 不清除。
+- `deriveFlowContinuation` 当前打开的候选人不再因旧 back/greet success 被报为 done。
+
 ## 2026-11-08 · fix(cli): 选岗/确认联系分支补决策门
 
 - 决策门（decide fit）原仅作用于 plain greet，`greet --select-job` 与 `greet --confirm-contact` 绕过；现统一作用于所有联系动作（greet/select-job/confirm-contact）。重放门仍只在 plain greet。

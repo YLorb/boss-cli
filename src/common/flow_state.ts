@@ -120,13 +120,16 @@ export async function verifyFlowCandidate(path: string, candidateId: string, nam
   }
 }
 
-/** preview 成功打开后落锁：记录当前打开且未决策的候选人。 */
-export async function acquireFlowOpen(path: string, candidateId: string, name: string): Promise<void> {
+/** preview 成功打开后落锁：记录当前打开且未决策的候选人；fresh=true 表示重新查看，清除该候选人旧 decide，避免旧状态混用。 */
+export async function acquireFlowOpen(path: string, candidateId: string, name: string, fresh = true): Promise<void> {
   const state = await readFlowState(path);
   if (state.open && state.open.candidateId !== candidateId) {
     throw new FlowLockError(`候选人 ${state.open.name}（${state.open.candidateId}）已打开未决策，不能记录为 ${name}（${candidateId}）。`);
   }
-  await writeFlowState(path, { version: 1, open: { candidateId, name, openedAt: new Date().toISOString() }, decided: state.decided, journal: state.journal });
+  const decided = fresh
+    ? Object.fromEntries(Object.entries(state.decided).filter(([id]) => id !== candidateId))
+    : state.decided;
+  await writeFlowState(path, { version: 1, open: { candidateId, name, openedAt: new Date().toISOString() }, decided, journal: state.journal });
 }
 
 /** greet/back 成功后解锁。 */
@@ -206,12 +209,16 @@ export function deriveFlowContinuation(state: FlowState): ContinuationReport {
     const back = r?.get('back');
     const decided = state.decided[id];
     const greetIntent = state.journal.some(e => e.candidateId === id && e.action === 'greet' && e.phase === 'intent');
-    if (greet?.result === 'success') return { candidateId: id, name, state: 'done' };
-    // greet 结果 failed/unknown，或仅有 intent 无 result（中断）→ 需核验；优先级高于 back。
+    const isOpen = state.open?.candidateId === id;
+    // greet 结果 failed/unknown，或仅有 intent 无 result（中断）→ 需核验；优先级最高，不受 open 影响。
     if ((greet && (greet.result === 'failed' || greet.result === 'unknown')) || (greetIntent && !greet)) {
       return { candidateId: id, name, state: 'needs-verify', next: 'verify-greet' };
     }
-    if (back?.result === 'success') return { candidateId: id, name, state: 'done' };
+    // 已关闭（非当前打开）的候选人才可能 done；重新打开的人不能因旧 back/greet success 被报告为 done。
+    if (!isOpen) {
+      if (greet?.result === 'success') return { candidateId: id, name, state: 'done' };
+      if (back?.result === 'success') return { candidateId: id, name, state: 'done' };
+    }
     if (decided?.verdict === 'fit') return { candidateId: id, name, state: 'continue', next: 'greet' };
     if (decided && (decided.verdict === 'not-fit' || decided.verdict === 'unknown')) return { candidateId: id, name, state: 'continue', next: 'back' };
     return { candidateId: id, name, state: 'continue', next: 'decide' };

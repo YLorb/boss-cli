@@ -148,3 +148,20 @@ test('continuation: greet intent without result and greet-unknown-then-back are 
   assert.equal(b.state, 'needs-verify'); // unknown 后 back success 仍需核验
   assert.equal(b.next, 'verify-greet');
 });
+
+test('re-open same candidate clears old decide and is not done', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-reopen-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await acquireFlowOpen(path, 'id-A', '张三');            // 第一次打开
+    await recordFlowDecision(path, 'id-A', 'fit');          // 评估 fit
+    await releaseFlowOpen(path);                            // 返回
+    await recordJournalResult(path, 'id-A', '张三', 'back', 'success'); // 旧 back success
+    await acquireFlowOpen(path, 'id-A', '张三');            // 重新打开（fresh 清旧 fit）
+    await assert.rejects(() => verifyFlowDecided(path, 'id-A', '张三'), FlowLockError); // 旧 fit 不再被接受
+    const report = deriveFlowContinuation(JSON.parse(readFileSync(path, 'utf8')));
+    assert.equal(report.open.candidateId, 'id-A');
+    assert.equal(report.open.state, 'continue');            // 不是 done
+    assert.equal(report.open.next, 'decide');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

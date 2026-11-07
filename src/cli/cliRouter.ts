@@ -876,7 +876,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       await verifyFlowCandidate(previewFlow, previewCandidateId, candidateTarget);
     }
     const previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }));
-    if (previewFlow) await acquireFlowOpen(previewFlow, previewCandidateId!, candidateTarget);
+    if (previewFlow) await acquireFlowOpen(previewFlow, previewCandidateId!, candidateTarget, !flags.has('open-only'));
     return previewResult;
   }
 
