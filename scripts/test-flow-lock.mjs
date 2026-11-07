@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -9,6 +10,8 @@ import {
   releaseFlowOpen,
   recordFlowDecision,
   verifyFlowDecided,
+  recordJournalIntent,
+  recordJournalResult,
   FlowLockError,
   flowStatePath,
 } from '../dist/common/flow_state.js';
@@ -69,5 +72,23 @@ test('decide requires the currently-open candidate', async () => {
     await assert.rejects(() => recordFlowDecision(path, 'id-B', 'fit'), FlowLockError);
     await releaseFlowOpen(path);
     await assert.rejects(() => recordFlowDecision(path, 'id-A', 'fit'), FlowLockError);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('journal records intent then result with evidence', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-journal-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await acquireFlowOpen(path, 'id-A', '张三');
+    await recordJournalIntent(path, 'id-A', '张三', 'greet');
+    await recordJournalResult(path, 'id-A', '张三', 'greet', 'success');
+    await recordJournalResult(path, 'id-A', '张三', 'decide', 'success', undefined, { verdict: 'fit' });
+    const state = JSON.parse(readFileSync(path, 'utf8'));
+    assert.equal(state.journal.length, 3);
+    assert.equal(state.journal[0].phase, 'intent');
+    assert.equal(state.journal[0].action, 'greet');
+    assert.equal(state.journal[1].phase, 'result');
+    assert.equal(state.journal[1].result, 'success');
+    assert.deepEqual(state.journal[2].evidence, { verdict: 'fit' });
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

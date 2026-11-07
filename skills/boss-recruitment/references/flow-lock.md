@@ -46,6 +46,19 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 - 实际 `greet X` 前，CLI 强制 `decided[X].verdict==='fit'`，否则拒绝：未评估 →「尚未评估，请先 decide」；not-fit →「已评估为不合适，请 back」；unknown →「评估结果待确认，请 back 后继续下一位」。
 - `unknown` 只报告、不阻断本轮：back 后继续下一位，不视为淘汰。
 
+## 执行日志（journal）
+
+流程状态文件的 `journal` 数组机械记录每个候选人动作的「意图 → 结果」：
+
+```json
+{ "candidateId": "id-A", "name": "张三", "action": "greet", "phase": "intent", "at": "…" },
+{ "candidateId": "id-A", "name": "张三", "action": "greet", "phase": "result", "result": "success", "at": "…" }
+```
+
+- 动作（preview/greet/back/decide）开始前 CLI 写 `phase=intent`，结束后写 `phase=result`，`result ∈ success/failed/unknown`；`failed` 带 error，`decide` 的 result 带 `evidence.verdict`。
+- 详细证据（截图路径、联系状态）仍在命令回执与 Agent 回执中，日志以 `(candidateId, action, at)` 关联。
+- 日志只在锁模式（`BOSS_FLOW_STATE`）下写入；未开锁不落日志。
+
 ## 边界
 
 - 仅作用于携带 `--candidate-id` 的 search/recommend 流程；深度搜索无 `--candidate-id`，不支持本锁，请勿对深度搜索设置该环境变量。

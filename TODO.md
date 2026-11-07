@@ -9,6 +9,8 @@
 - [ ] permit 命令白名单（目标 1 的另一半）：按 SOP 逐入口的静态命令/动作白名单（本次只做了逐人闭环锁，未做"允许哪些命令"的清单门）。
 - [x] 加速 Agent 解析（目标 2 / 阶段 C）：resume-analysis-session 增加 mode=screen 评分紧凑交接；确定性字段（邮箱/电话/年限/城市）先提取，Agent 只确认/纠正。
 - [ ] 文档一致性校验脚本 scripts/check-doc-drift.mjs + test:docs：从 `boss help` 抽命令名与 README/cli-reference 比对，防止再次漂移。
+- [ ] 接续判断四态（已完成/可继续/需核验/必须暂停）：search/recommend 已有 journal 日志但无四态状态机；结果未知的副作用动作（greet/send）未机械标记"需核验、禁止重放"。
+- [ ] 独立停滞监测（watchdog）：区分正常等待 / 任务暂停 / 进程消失；journal 已有时间戳，缺超时判定与告警。
 
 ## 2026-10-22
 

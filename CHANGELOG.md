@@ -2,6 +2,11 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 逐人闭环执行日志（意图→结果）
+
+- 流程状态文件新增 `journal` 数组，preview/greet/back/decide 动作由 CLI 机械落盘「意图（前）→ 结果（后）」：result ∈ success/failed/unknown，failed 带 error，decide 带 evidence.verdict。
+- 为接续判断与停滞监测提供可复算的动作链；仅锁模式（BOSS_FLOW_STATE）下写入。新增离线测试（test:flow-lock 6 例）。
+
 ## 2026-11-08 · feat(cli): 评估先于触达（decide 门）
 
 - 逐人闭环锁增加决策记录：新增 `boss decide --candidate-id X --verdict fit|not-fit|unknown`，仅能针对当前打开的候选人记录评估结论。

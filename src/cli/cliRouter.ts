@@ -48,7 +48,7 @@ import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirm
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
 import { join } from 'node:path';
-import { acquireFlowOpen, flowStatePath, recordFlowDecision, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided } from '../common/flow_state.js';
+import { acquireFlowOpen, flowStatePath, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, type JournalAction } from '../common/flow_state.js';
 import {
   printPackageUpdateNoticeIfDue,
   printVersionInfo,
@@ -470,6 +470,24 @@ function startProcessingSpinner(): () => void {
   };
 }
 
+/** 动作前后机械落盘意图/结果到流程日志；flow 为空（未开锁）时直接执行，不改日志。 */
+async function withFlowJournal<T>(
+  flow: string | null,
+  target: { candidateId: string; name: string; action: JournalAction },
+  fn: () => Promise<T>,
+): Promise<T> {
+  if (!flow) return fn();
+  await recordJournalIntent(flow, target.candidateId, target.name, target.action);
+  try {
+    const value = await fn();
+    await recordJournalResult(flow, target.candidateId, target.name, target.action, 'success');
+    return value;
+  } catch (error) {
+    await recordJournalResult(flow, target.candidateId, target.name, target.action, 'failed', error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+}
+
 /**
  * 执行一条子命令并返回结果（与传入 `process.argv` 切片语义一致，不含 `boss` 本身）。
  */
@@ -528,8 +546,18 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if(!['fit','not-fit','unknown'].includes(opts.verdict))die('❌ decide --verdict 必须是 fit/not-fit/unknown');
     const decideFlow=flowStatePath();
     if(!decideFlow)die('❌ decide 需要在锁模式（BOSS_FLOW_STATE）下使用');
-    await recordFlowDecision(decideFlow,opts['candidate-id'].trim(),opts.verdict as 'fit'|'not-fit'|'unknown');
-    return json?JSON.stringify({ok:true,candidateId:opts['candidate-id'].trim(),verdict:opts.verdict}):`已记录评估结论：${opts['candidate-id'].trim()} ${opts.verdict}`;
+    const decideCandidateId=opts['candidate-id'].trim();
+    const decideVerdict=opts.verdict as 'fit'|'not-fit'|'unknown';
+    const decideOpenName=(await readFlowOpen(decideFlow))?.name ?? '';
+    await recordJournalIntent(decideFlow,decideCandidateId,decideOpenName,'decide');
+    try {
+      await recordFlowDecision(decideFlow,decideCandidateId,decideVerdict);
+      await recordJournalResult(decideFlow,decideCandidateId,decideOpenName,'decide','success',undefined,{verdict:decideVerdict});
+    } catch (error) {
+      await recordJournalResult(decideFlow,decideCandidateId,decideOpenName,'decide','failed',error instanceof Error?error.message:String(error));
+      throw error;
+    }
+    return json?JSON.stringify({ok:true,candidateId:decideCandidateId,verdict:decideVerdict}):`已记录评估结论：${decideCandidateId} ${decideVerdict}`;
   }
   configureHeadlessForCommand(cmd);
   if (cmd === 'switch-job') return runSwitchJob(parseSwitchJobArgs(tail), json);
@@ -837,7 +865,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       if (!previewCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下 preview 必须提供 --candidate-id；深度搜索不支持锁，请勿对深度搜索设置 BOSS_FLOW_STATE。');
       await verifyFlowCandidate(previewFlow, previewCandidateId, candidateTarget);
     }
-    const previewResult = await implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) });
+    const previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }));
     if (previewFlow) await acquireFlowOpen(previewFlow, previewCandidateId!, candidateTarget);
     return previewResult;
   }
@@ -853,8 +881,9 @@ export async function executeCommand(argv: string[]): Promise<string> {
     }
     if (Object.keys(opts).length) die('--expect-url 仅用于 back --previous');
     if(flags.has('check-in_online_resume')) {if(flags.has('if-open'))die('检查不能与返回动作混用');return runCheck({state:'online-resume-open'});}
-    const backResult = await runBack(flags.has('if-open'), json);
     const backFlow = flowStatePath();
+    const backOpen = backFlow ? await readFlowOpen(backFlow) : null;
+    const backResult = await withFlowJournal(backFlow, { candidateId: backOpen?.candidateId ?? '', name: backOpen?.name ?? '', action: 'back' }, () => runBack(flags.has('if-open'), json));
     if (backFlow) await releaseFlowOpen(backFlow);
     return backResult;
   }
@@ -900,7 +929,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       await verifyFlowCandidate(greetFlow, greetCandidateId, target);
       await verifyFlowDecided(greetFlow, greetCandidateId, target);
     }
-    const greetResult = await implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) });
+    const greetResult = await withFlowJournal(actualContact ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: 'greet' }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
     if (actualContact && greetFlow) await releaseFlowOpen(greetFlow);
     return greetResult;
   }
