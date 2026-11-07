@@ -55,6 +55,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "npm run build && node dist/cli/index.js",
+    "test:harness": "node scripts/test-harness.mjs",
     "test:check-dom": "node --test scripts/test-check-dom.mjs",
     "test:readonly-check": "node --experimental-test-module-mocks --test scripts/test-readonly-check.mjs",
     "test:json": "node --experimental-test-module-mocks --test scripts/test-cli-json.mjs",
