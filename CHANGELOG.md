@@ -2,6 +2,12 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 评估先于触达（decide 门）
+
+- 逐人闭环锁增加决策记录：新增 `boss decide --candidate-id X --verdict fit|not-fit|unknown`，仅能针对当前打开的候选人记录评估结论。
+- 实际 `greet` 触达前强制 `decided[X].verdict==='fit'`，否则拒绝；unknown 报告但不阻断，back 后继续下一位。
+- 流程状态文件扩展 `decided` 字段；新增离线测试（test:flow-lock 5 例）。
+
 ## 2026-11-08 · feat: 简历解析提速（mode=screen + 确定性字段 + 首滚延迟缩短）
 
 - `resume-analysis-session.mjs` 新增 `--spec` 评分模式（mode=screen）：结构化 verdict + 证据行号，脚本展开校验；新增确定性字段提取（邮箱/手机/城市/年限，唯一命中）返回 `suggested` 提示；unknown 报告但不停止。

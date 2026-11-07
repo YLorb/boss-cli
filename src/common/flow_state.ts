@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 
 export type FlowOpen = { candidateId: string; name: string; openedAt: string };
-export type FlowState = { version: 1; open: FlowOpen | null };
+export type FlowDecision = { verdict: 'fit' | 'not-fit' | 'unknown'; at: string };
+export type FlowState = { version: 1; open: FlowOpen | null; decided: Record<string, FlowDecision> };
 
 export class FlowLockError extends Error {
   constructor(message: string) {
@@ -28,11 +29,22 @@ function validateFlowState(value: unknown): asserts value is FlowState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new FlowLockError('流程状态文件必须是对象。');
   const state = value as Partial<FlowState>;
   if (state.version !== 1) throw new FlowLockError('流程状态 version 必须为 1。');
-  if (state.open === undefined || state.open === null) return;
-  const o = state.open as Partial<FlowOpen>;
-  if (typeof o !== 'object' || typeof o.candidateId !== 'string' || !o.candidateId.trim() ||
-      typeof o.name !== 'string' || !o.name.trim() || typeof o.openedAt !== 'string') {
-    throw new FlowLockError('流程状态 open 字段无效：需要 candidateId、name、openedAt。');
+  if (state.open !== undefined && state.open !== null) {
+    const o = state.open as Partial<FlowOpen>;
+    if (typeof o !== 'object' || typeof o.candidateId !== 'string' || !o.candidateId.trim() ||
+        typeof o.name !== 'string' || !o.name.trim() || typeof o.openedAt !== 'string') {
+      throw new FlowLockError('流程状态 open 字段无效：需要 candidateId、name、openedAt。');
+    }
+  }
+  if (state.decided !== undefined && state.decided !== null) {
+    const decided = state.decided as Record<string, Partial<FlowDecision>>;
+    if (typeof decided !== 'object' || Array.isArray(decided)) throw new FlowLockError('流程状态 decided 字段无效。');
+    for (const [id, d] of Object.entries(decided)) {
+      if (!id.trim() || !d || typeof d !== 'object' ||
+          !['fit', 'not-fit', 'unknown'].includes(d.verdict ?? '') || typeof d.at !== 'string') {
+        throw new FlowLockError(`流程状态 decided 记录无效：${id}`);
+      }
+    }
   }
 }
 
@@ -41,9 +53,10 @@ async function readFlowState(path: string): Promise<FlowState> {
     const raw = await readFile(path, 'utf8');
     const value: unknown = JSON.parse(raw.replace(/^\uFEFF/, ''));
     validateFlowState(value);
-    return value as FlowState;
+    const s = value as { open?: FlowOpen | null; decided?: Record<string, FlowDecision> };
+    return { version: 1, open: s.open ?? null, decided: s.decided ?? {} };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, open: null };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, open: null, decided: {} };
     if (error instanceof FlowLockError) throw error;
     throw new FlowLockError(`流程状态文件损坏：${path}；${error instanceof Error ? error.message : String(error)}`);
   }
@@ -72,12 +85,31 @@ export async function acquireFlowOpen(path: string, candidateId: string, name: s
   if (state.open && state.open.candidateId !== candidateId) {
     throw new FlowLockError(`候选人 ${state.open.name}（${state.open.candidateId}）已打开未决策，不能记录为 ${name}（${candidateId}）。`);
   }
-  await writeFlowState(path, { version: 1, open: { candidateId, name, openedAt: new Date().toISOString() } });
+  await writeFlowState(path, { version: 1, open: { candidateId, name, openedAt: new Date().toISOString() }, decided: state.decided });
 }
 
 /** greet/back 成功后解锁。 */
 export async function releaseFlowOpen(path: string): Promise<void> {
   const state = await readFlowState(path);
   if (!state.open) return;
-  await writeFlowState(path, { version: 1, open: null });
+  await writeFlowState(path, { version: 1, open: null, decided: state.decided });
+}
+
+/** 记录当前打开候选人的评估结论（评估先于触达的决策记录）。 */
+export async function recordFlowDecision(path: string, candidateId: string, verdict: FlowDecision['verdict']): Promise<void> {
+  const state = await readFlowState(path);
+  if (!state.open || state.open.candidateId !== candidateId) {
+    throw new FlowLockError(`decide 只能针对当前已打开的候选人：${state.open ? `${state.open.name}（${state.open.candidateId}）` : '当前无已打开候选人'}；目标 ${candidateId}。`);
+  }
+  await writeFlowState(path, { version: 1, open: state.open, decided: { ...state.decided, [candidateId]: { verdict, at: new Date().toISOString() } } });
+}
+
+/** 触达前核验：该候选人必须已评估为 fit，否则拒绝（评估先于触达）。 */
+export async function verifyFlowDecided(path: string, candidateId: string, name: string): Promise<void> {
+  const state = await readFlowState(path);
+  const d = state.decided[candidateId];
+  if (!d || d.verdict !== 'fit') {
+    const reason = !d ? '尚未评估' : d.verdict === 'not-fit' ? '已评估为不合适' : '评估结果待确认';
+    throw new FlowLockError(`候选人 ${name}（${candidateId}）${reason}，不能联系；${!d ? '请先评估并用 decide 记录结论' : '请 back 后继续下一位'}。`);
+  }
 }

@@ -22,26 +22,33 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 ## 状态文件
 
 ```json
-{ "version": 1, "open": { "candidateId": "…", "name": "…", "openedAt": "…" } | null }
+{ "version": 1, "open": { "candidateId": "…", "name": "…", "openedAt": "…" } | null, "decided": { "<candidateId>": { "verdict": "fit|not-fit|unknown", "at": "…" } } }
 ```
 
-`open` 表示「当前已打开、尚未决策」的候选人；缺失文件视为 `open:null`。
+`open` 表示「当前已打开、尚未决策」的候选人；`decided` 记录已评估候选人的结论；缺失文件视为 `open:null, decided:{}`。
 
 ## 规则（deny 时 CLI 直接拒绝，不碰浏览器）
 
 | 命令 | 上锁/解锁 | 拒绝条件 |
 | --- | --- | --- |
 | `preview [--open-only]` | 成功打开后上锁 `open=X` | 已有 `open=Y≠X` 未决策 → 拒绝：「候选人 Y 已打开未决策：不合适先 back，合适先 greet」 |
-| `greet`（实际触达；不含 `--check`/`--select-job`/`--confirm-contact`/`--continue-chat`） | 成功触达后解锁 | 已有 `open=Y≠X` → 拒绝 |
+| `decide --candidate-id X --verdict <fit\|not-fit\|unknown>` | 记录当前 `open=X` 的评估结论 | 无 `open` 或 `open≠X` → 拒绝 |
+| `greet`（实际触达；不含 `--check`/`--select-job`/`--confirm-contact`/`--continue-chat`） | 成功触达后解锁 | 已有 `open=Y≠X` → 拒绝；`decided[X].verdict≠fit` → 拒绝（评估先于触达） |
 | `back [--if-open]` | 成功关闭简历后解锁 | — |
 
 - `preview` 失败（未实际打开）不落锁，Worker 可重试或按 SOP 继续；
 - `greet --check`、`--select-job`、`--confirm-contact`、`--continue-chat` 是只读检查或触达后续步骤，不参与锁；
 - `back --previous`、`back --check-in_online_resume` 是历史返回/只读检查，不解锁。
 
+## 评估先于触达（decide）
+
+- 评估完当前候选人后，Agent 执行 `decide --candidate-id X --verdict fit|not-fit|unknown` 记录结论；decide 只能针对当前 `open=X`。
+- 实际 `greet X` 前，CLI 强制 `decided[X].verdict==='fit'`，否则拒绝：未评估 →「尚未评估，请先 decide」；not-fit →「已评估为不合适，请 back」；unknown →「评估结果待确认，请 back 后继续下一位」。
+- `unknown` 只报告、不阻断本轮：back 后继续下一位，不视为淘汰。
+
 ## 边界
 
 - 仅作用于携带 `--candidate-id` 的 search/recommend 流程；深度搜索无 `--candidate-id`，不支持本锁，请勿对深度搜索设置该环境变量。
-- 锁强制的是「逐人闭环」顺序，不判断「该不该联系」（fitness 判断仍是人/Worker）。「评估先于触达」是后续第二道门，见 TODO。
+- 锁强制「逐人闭环」顺序与「评估先于触达」（greet 前必须已 decide fit）；但 fit/not-fit/unknown 的判断仍由人/Worker 做出，代码只校验记录存在与取值，不判断简历是否真的合适。
 - 状态文件损坏 → 拒绝并报错（fail closed），不自动修复。
 - 这是编排级护栏，不是系统级权限隔离。
