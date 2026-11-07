@@ -48,7 +48,7 @@ import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirm
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
 import { join } from 'node:path';
-import { acquireFlowOpen, flowStatePath, flowStatus, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, verifyFlowGreetNotReplayed, type JournalAction } from '../common/flow_state.js';
+import { acquireFlowOpen, clearFlowPause, consecutiveActionFailures, flowStatePath, flowStatus, flowWatch, pauseFlow, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, verifyFlowNotPaused, verifyFlowNotReplayed, type JournalAction } from '../common/flow_state.js';
 import {
   printPackageUpdateNoticeIfDue,
   printVersionInfo,
@@ -473,6 +473,18 @@ function startProcessingSpinner(): () => void {
   };
 }
 
+/** 动作结果分类：副作用结果未确认的错误记为 unknown，其余 failed。 */
+function classifyJournalResult(error: unknown): 'failed' | 'unknown' {
+  const name = error instanceof Error ? error.name : '';
+  return name === 'EmbeddedSendUnconfirmedError' || name === 'AttachmentTimeoutError' ? 'unknown' : 'failed';
+}
+
+/** 触达受阻（付费/风控等）视为必须暂停的硬失败。 */
+function isHardFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /付费|VIP|购买|权益|限流|风控|验证码|访问频繁/.test(msg);
+}
+
 /** 动作前后机械落盘意图/结果到流程日志；flow 为空（未开锁）时直接执行，不改日志。 */
 async function withFlowJournal<T>(
   flow: string | null,
@@ -486,7 +498,7 @@ async function withFlowJournal<T>(
     await recordJournalResult(flow, target.candidateId, target.name, target.action, 'success');
     return value;
   } catch (error) {
-    await recordJournalResult(flow, target.candidateId, target.name, target.action, 'failed', error instanceof Error ? error.message : String(error));
+    await recordJournalResult(flow, target.candidateId, target.name, target.action, classifyJournalResult(error), error instanceof Error ? error.message : String(error));
     throw error;
   }
 }
@@ -504,7 +516,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-status', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -522,8 +534,14 @@ export async function executeCommand(argv: string[]): Promise<string> {
       else paths.push(tail[i]);
     }
     if (paths.length !== 1) die('用法: boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]');
-    const result = await runResumeOcr(paths[0], timeoutMs, layout);
-    return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
+    try {
+      const result = await runResumeOcr(paths[0], timeoutMs, layout);
+      return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
+    } catch (error) {
+      const ocrFlow = flowStatePath();
+      if (ocrFlow) await pauseFlow(ocrFlow, 'OCR服务错误').catch(() => {});
+      throw error;
+    }
   }
   if(cmd==='status') {
     if(tail.length) die('status 不接受参数');
@@ -549,6 +567,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if(!['fit','not-fit','unknown'].includes(opts.verdict))die('❌ decide --verdict 必须是 fit/not-fit/unknown');
     const decideFlow=flowStatePath();
     if(!decideFlow)die('❌ decide 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    await verifyFlowNotPaused(decideFlow);
     const decideCandidateId=opts['candidate-id'].trim();
     const decideVerdict=opts.verdict as 'fit'|'not-fit'|'unknown';
     const decideOpenName=(await readFlowOpen(decideFlow))?.name ?? '';
@@ -567,7 +586,24 @@ export async function executeCommand(argv: string[]): Promise<string> {
     const fsFlow=flowStatePath();
     if(!fsFlow)die('❌ flow-status 需要在锁模式（BOSS_FLOW_STATE）下使用');
     const report=await flowStatus(fsFlow);
-    return json?JSON.stringify(report):`已打开：${report.open?`${report.open.name}（${report.open.state}${report.open.next?`→${report.open.next}`:''}）`:'无'}\n需核验：${report.candidates.filter(c=>c.state==='needs-verify').map(c=>c.name).join('、')||'无'}\n已完成：${report.candidates.filter(c=>c.state==='done').length} 人`;
+    const watch=await flowWatch(fsFlow);
+    const summary={...report,paused:watch.paused,lastProgressAt:watch.lastProgressAt,idleMs:watch.idleMs,watchState:watch.state};
+    return json?JSON.stringify(summary):`已打开：${report.open?`${report.open.name}（${report.open.state}${report.open.next?`→${report.open.next}`:''}）`:'无'}\n需核验：${report.candidates.filter(c=>c.state==='needs-verify').map(c=>c.name).join('、')||'无'}\n已完成：${report.candidates.filter(c=>c.state==='done').length} 人\n停滞：${watch.state}${watch.paused?`（${watch.paused.reason}）`:''}`;
+  }
+  if(cmd==='flow-pause') {
+    const {rest,opts,flags}=parseOpts(tail);
+    if(rest.length||flags.size||!opts.reason?.trim()||Object.keys(opts).some(k=>k!=='reason'))die('❌ 用法: flow-pause --reason <原因> [--json]');
+    const fpFlow=flowStatePath();
+    if(!fpFlow)die('❌ flow-pause 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    await pauseFlow(fpFlow,opts.reason.trim());
+    return json?JSON.stringify({ok:true,paused:true,reason:opts.reason.trim()}):`已暂停：${opts.reason.trim()}`;
+  }
+  if(cmd==='flow-resume') {
+    if(tail.length)die('flow-resume 不接受参数');
+    const frFlow=flowStatePath();
+    if(!frFlow)die('❌ flow-resume 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    await clearFlowPause(frFlow);
+    return json?JSON.stringify({ok:true,paused:false}):'已恢复';
   }
   configureHeadlessForCommand(cmd);
   if (cmd === 'switch-job') return runSwitchJob(parseSwitchJobArgs(tail), json);
@@ -873,9 +909,18 @@ export async function executeCommand(argv: string[]): Promise<string> {
     const previewFlow = flowStatePath();
     if (previewFlow) {
       if (!previewCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下 preview 必须提供 --candidate-id；深度搜索不支持锁，请勿对深度搜索设置 BOSS_FLOW_STATE。');
+      await verifyFlowNotPaused(previewFlow);
       await verifyFlowCandidate(previewFlow, previewCandidateId, candidateTarget);
     }
-    const previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }));
+    let previewResult: string;
+    try {
+      previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }));
+    } catch (error) {
+      if (previewFlow && (await consecutiveActionFailures(previewFlow, 'preview')) >= 3) {
+        await pauseFlow(previewFlow, '在线简历连续打开失败');
+      }
+      throw error;
+    }
     if (previewFlow) await acquireFlowOpen(previewFlow, previewCandidateId!, candidateTarget, !flags.has('open-only'));
     return previewResult;
   }
@@ -892,6 +937,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (Object.keys(opts).length) die('--expect-url 仅用于 back --previous');
     if(flags.has('check-in_online_resume')) {if(flags.has('if-open'))die('检查不能与返回动作混用');return runCheck({state:'online-resume-open'});}
     const backFlow = flowStatePath();
+    if (backFlow) await verifyFlowNotPaused(backFlow);
     const backOpen = backFlow ? await readFlowOpen(backFlow) : null;
     const backResult = await withFlowJournal(backFlow, { candidateId: backOpen?.candidateId ?? '', name: backOpen?.name ?? '', action: 'back' }, () => runBack(flags.has('if-open'), json));
     if (backFlow) await releaseFlowOpen(backFlow);
@@ -937,13 +983,22 @@ export async function executeCommand(argv: string[]): Promise<string> {
     const greetFlow = flowStatePath();
     if (contactForm && greetFlow) {
       if (!greetCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下联系动作（greet/select-job/confirm-contact）必须提供 --candidate-id。');
+      await verifyFlowNotPaused(greetFlow);
       await verifyFlowCandidate(greetFlow, greetCandidateId, target);
       await verifyFlowDecided(greetFlow, greetCandidateId, target);
     }
     if (actualContact && greetFlow) {
-      await verifyFlowGreetNotReplayed(greetFlow, greetCandidateId, target);
+      await verifyFlowNotReplayed(greetFlow, greetCandidateId, target, 'greet');
     }
-    const greetResult = await withFlowJournal(actualContact ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: 'greet' }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
+    let greetResult: string;
+    try {
+      greetResult = await withFlowJournal(actualContact ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: 'greet' }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
+    } catch (error) {
+      if (actualContact && greetFlow && isHardFailure(error)) {
+        await pauseFlow(greetFlow, '触达受阻（付费/风控）');
+      }
+      throw error;
+    }
     if (actualContact && greetFlow) await releaseFlowOpen(greetFlow);
     return greetResult;
   }

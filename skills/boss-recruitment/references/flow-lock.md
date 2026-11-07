@@ -68,7 +68,14 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 - `continue`（可继续）：已打开未评估 → next=decide；decided fit → next=greet；decided not-fit/unknown → next=back。
 - `needs-verify`（需核验）：greet 结果 failed/unknown，或仅有 greet intent 无 result（进程中断）→ next=verify-greet，禁止自动重放。优先级高于 back：即使之后 back success，仍保留需核验。
 
-`greet` 触达前 CLI 强制「同一候选人本轮只允许一次 greet」：已有 greet 意图或结果即拒绝（结果未知不得重放）。「必须暂停」是 round 级状态，尚未推导，留待停滞监测一起做。
+`greet` 触达前 CLI 强制「同一候选人本轮只允许一次 greet」：已有 greet 意图或结果即拒绝（结果未知不得重放）。
+
+## 必须暂停与停滞监测
+
+- `boss flow-pause --reason <原因>` 记录 round 级暂停；`boss flow-resume` 人工确认后恢复。
+- 自动暂停：OCR 服务失败、在线简历连续 3 次打开失败、greet 付费/风控受阻。
+- 已暂停时，preview/greet/back/decide 全部拒绝（报「必须暂停：原因」）。
+- `flow-status` 额外输出 `paused`、`lastProgressAt`、`idleMs`、`watchState`；`watchState ∈ ok/paused/stalled`，idle 超过阈值（默认 2 分钟，可用 `BOSS_FLOW_STALL_MS` 配）判为 stalled。
 
 ## 边界
 

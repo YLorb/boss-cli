@@ -13,7 +13,12 @@ import {
   recordJournalIntent,
   recordJournalResult,
   deriveFlowContinuation,
-  verifyFlowGreetNotReplayed,
+  verifyFlowNotReplayed,
+  verifyFlowNotPaused,
+  pauseFlow,
+  clearFlowPause,
+  consecutiveActionFailures,
+  flowWatch,
   FlowLockError,
   flowStatePath,
 } from '../dist/common/flow_state.js';
@@ -124,7 +129,7 @@ test('greet replay guard: second greet denied', async () => {
     await acquireFlowOpen(path, 'id-A', '张三');
     await recordJournalIntent(path, 'id-A', '张三', 'greet');
     await recordJournalResult(path, 'id-A', '张三', 'greet', 'success');
-    await assert.rejects(() => verifyFlowGreetNotReplayed(path, 'id-A', '张三'), FlowLockError);
+    await assert.rejects(() => verifyFlowNotReplayed(path, 'id-A', '张三', 'greet'), FlowLockError);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
@@ -163,5 +168,42 @@ test('re-open same candidate clears old decide and is not done', async () => {
     assert.equal(report.open.candidateId, 'id-A');
     assert.equal(report.open.state, 'continue');            // 不是 done
     assert.equal(report.open.next, 'decide');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('pause gates candidate actions until resume', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-pause-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await pauseFlow(path, 'OCR服务错误');
+    await assert.rejects(() => verifyFlowNotPaused(path), FlowLockError);
+    await clearFlowPause(path);
+    await verifyFlowNotPaused(path); // 恢复后不抛
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('consecutiveActionFailures counts trailing failures', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-consec-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await recordJournalIntent(path, 'id-A', '张三', 'preview');
+    await recordJournalResult(path, 'id-A', '张三', 'preview', 'failed');
+    await recordJournalIntent(path, 'id-A', '张三', 'preview');
+    await recordJournalResult(path, 'id-A', '张三', 'preview', 'failed');
+    assert.equal(await consecutiveActionFailures(path, 'preview'), 2);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('flowWatch reports paused and stalled', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-watch-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await pauseFlow(path, 'OCR服务错误');
+    assert.equal((await flowWatch(path)).state, 'paused');
+    await clearFlowPause(path);
+    assert.equal((await flowWatch(path, 1000)).state, 'ok');
+    const old = new Date(Date.now() - 10_000).toISOString();
+    await writeFile(path, JSON.stringify({ version: 1, open: null, decided: {}, journal: [], paused: null, lastProgressAt: old }), 'utf8');
+    assert.equal((await flowWatch(path, 1000)).state, 'stalled');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

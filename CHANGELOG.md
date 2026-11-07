@@ -2,6 +2,13 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 必须暂停与独立停滞监测
+
+- 流程状态新增 `paused` 与 `lastProgressAt`；新增 `flow-pause`/`flow-resume`；已暂停时拒绝一切候选人动作。
+- 自动暂停：OCR 失败、在线简历连续 3 次打开失败、greet 付费/风控受阻。
+- `flow-status` 输出 paused/lastProgressAt/idleMs/watchState；flowWatch 区分 ok/paused/stalled（默认 2 分钟阈值）。
+- withFlowJournal 对 EmbeddedSendUnconfirmedError/AttachmentTimeoutError 记 result=unknown。
+
 ## 2026-11-08 · fix(cli): 重新查看同一人不再混用旧状态
 
 - full preview 重新打开同一候选人时清除其旧 decide（fresh=true），旧 fit 不再被决策门接受；`--open-only` 不清除。
