@@ -76,7 +76,8 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 - `boss flow-pause --reason <原因>` 记录 round 级暂停；`boss flow-resume` 人工确认后恢复。
 - 自动暂停：OCR 服务失败、在线简历连续 3 次打开失败、greet 付费/风控受阻。
 - 已暂停时，preview/greet/back/decide 全部拒绝（报「必须暂停：原因」）。
-- `flow-status` 额外输出 `paused`、`lastProgressAt`、`idleMs`、`watchState`；`watchState ∈ ok/paused/stalled`，idle 超过阈值（默认 2 分钟，可用 `BOSS_FLOW_STALL_MS` 配）判为 stalled。
+- `flow-status` 额外输出 `paused`、`lastProgressAt`、`idleMs`、`watchState`；`watchState ∈ ok/paused/stalled/not-started`（状态文件缺失为 not-started），idle 超过阈值（默认 2 分钟，`BOSS_FLOW_STALL_MS` 可配，已接入）判为 stalled。
+- 调用方必须先检查 `watchState=paused`（全局暂停），不得只按候选人 `next` 执行动作。
 
 ## 边界
 

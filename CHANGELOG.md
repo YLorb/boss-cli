@@ -2,6 +2,11 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · fix(cli): 接续判断补 send/confirm 未决；监测补 not-started 与阈值接入
+
+- `deriveFlowContinuation` 将 greet/send/confirm-contact/select-job 的 failed/unknown/有意图无结果统一判为 needs-verify，修复"send 未知仍报 done""confirm-contact 中断仍建议 greet"。
+- `flowWatch` 增加 `not-started`（状态文件缺失不再误报 ok），`BOSS_FLOW_STALL_MS` 已接入默认阈值读取。
+
 ## 2026-11-08 · feat(cli): send/选岗/确认联系纳入 journal 与重放禁止
 
 - send（--embedded）与 select-job/confirm-contact 纳入 journal（intent/result）；同候选人同动作只允许一次，结果未知不得重放。

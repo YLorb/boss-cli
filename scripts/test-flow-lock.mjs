@@ -207,3 +207,39 @@ test('flowWatch reports paused and stalled', async () => {
     assert.equal((await flowWatch(path, 1000)).state, 'stalled');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('continuation: greet success but send unknown is needs-verify', () => {
+  const state = {
+    version: 1, open: null, decided: {},
+    journal: [
+      { candidateId: 'id-A', name: '张三', action: 'greet', phase: 'result', result: 'success', at: 't' },
+      { candidateId: 'id-A', name: '张三', action: 'send', phase: 'result', result: 'unknown', at: 't' },
+    ],
+  };
+  const report = deriveFlowContinuation(state);
+  const a = report.candidates.find(c => c.candidateId === 'id-A');
+  assert.equal(a.state, 'needs-verify');
+  assert.equal(a.next, 'verify-send');
+});
+
+test('continuation: confirm-contact intent without result is needs-verify', () => {
+  const state = {
+    version: 1, open: null, decided: { 'id-A': { verdict: 'fit', at: 't' } },
+    journal: [
+      { candidateId: 'id-A', name: '张三', action: 'greet', phase: 'result', result: 'success', at: 't' },
+      { candidateId: 'id-A', name: '张三', action: 'confirm-contact', phase: 'intent', at: 't' },
+    ],
+  };
+  const report = deriveFlowContinuation(state);
+  const a = report.candidates.find(c => c.candidateId === 'id-A');
+  assert.equal(a.state, 'needs-verify');
+  assert.equal(a.next, 'verify-confirm-contact');
+});
+
+test('flowWatch reports not-started when file missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-watch-missing-'));
+  const path = join(dir, 'flow.json');
+  try {
+    assert.equal((await flowWatch(path)).state, 'not-started');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

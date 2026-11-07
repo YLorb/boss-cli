@@ -39,7 +39,7 @@ export type ContinuationReport = {
   open: ContinuationCandidate | null;
   candidates: ContinuationCandidate[];
 };
-export type WatchState = 'ok' | 'paused' | 'stalled';
+export type WatchState = 'ok' | 'paused' | 'stalled' | 'not-started';
 export type WatchReport = {
   state: WatchState;
   paused: FlowPause | null;
@@ -48,6 +48,13 @@ export type WatchReport = {
 };
 
 export const DEFAULT_STALL_MS = 2 * 60 * 1000;
+
+/** 从 BOSS_FLOW_STALL_MS 读取停滞阈值，默认 2 分钟。 */
+export function stallThresholdMs(): number {
+  const raw = process.env.BOSS_FLOW_STALL_MS?.trim();
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_STALL_MS;
+}
 
 export class FlowLockError extends Error {
   constructor(message: string) {
@@ -275,20 +282,24 @@ export function deriveFlowContinuation(state: FlowState): ContinuationReport {
     lastResult.get(e.candidateId)!.set(e.action, e);
   }
 
+  const sideEffects: JournalAction[] = ['greet', 'send', 'confirm-contact', 'select-job'];
   const classify = (id: string): ContinuationCandidate => {
     const name = names.get(id) ?? id;
     const r = lastResult.get(id);
-    const greet = r?.get('greet');
-    const back = r?.get('back');
     const decided = state.decided[id];
-    const greetIntent = state.journal.some(e => e.candidateId === id && e.action === 'greet' && e.phase === 'intent');
     const isOpen = state.open?.candidateId === id;
-    if ((greet && (greet.result === 'failed' || greet.result === 'unknown')) || (greetIntent && !greet)) {
-      return { candidateId: id, name, state: 'needs-verify', next: 'verify-greet' };
+    // 任一副作用动作失败/未知/有意图无结果（中断）→ 需核验；优先级最高，且不受 open 影响。
+    for (const action of sideEffects) {
+      const resultEntry = r?.get(action);
+      const intentEntry = state.journal.some(e => e.candidateId === id && e.action === action && e.phase === 'intent');
+      if ((resultEntry && (resultEntry.result === 'failed' || resultEntry.result === 'unknown')) || (intentEntry && !resultEntry)) {
+        return { candidateId: id, name, state: 'needs-verify', next: `verify-${action}` };
+      }
     }
+    // 无未决副作用：已关闭（非当前打开）的候选人才可能 done。
     if (!isOpen) {
-      if (greet?.result === 'success') return { candidateId: id, name, state: 'done' };
-      if (back?.result === 'success') return { candidateId: id, name, state: 'done' };
+      if (r?.get('greet')?.result === 'success') return { candidateId: id, name, state: 'done' };
+      if (r?.get('back')?.result === 'success') return { candidateId: id, name, state: 'done' };
     }
     if (decided?.verdict === 'fit') return { candidateId: id, name, state: 'continue', next: 'greet' };
     if (decided && (decided.verdict === 'not-fit' || decided.verdict === 'unknown')) return { candidateId: id, name, state: 'continue', next: 'back' };
@@ -308,11 +319,12 @@ export async function flowStatus(path: string): Promise<ContinuationReport> {
 }
 
 /** 独立停滞监测：区分 ok / paused / stalled（idle 超过阈值）。 */
-export async function flowWatch(path: string, thresholdMs = DEFAULT_STALL_MS): Promise<WatchReport> {
+export async function flowWatch(path: string, thresholdMs = stallThresholdMs()): Promise<WatchReport> {
   const state = await readFlowState(path);
   const idleMs = state.lastProgressAt ? Date.now() - Date.parse(state.lastProgressAt) : null;
   let st: WatchState;
   if (state.paused) st = 'paused';
+  else if (state.lastProgressAt === null) st = 'not-started';
   else if (idleMs !== null && idleMs > thresholdMs) st = 'stalled';
   else st = 'ok';
   return { state: st, paused: state.paused, lastProgressAt: state.lastProgressAt, idleMs };
