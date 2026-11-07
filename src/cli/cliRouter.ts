@@ -810,7 +810,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
       if(rest.length || !opts.name || !opts['candidate-id'] || !opts.job || !(opts.text||opts.t) ||
         [...flags].some(f=>!['embedded','check'].includes(f)) || Object.keys(opts).some(k=>!['name','candidate-id','job','text','t'].includes(k)))
         die('send --embedded --name <实际姓名> --candidate-id <ID> --job <完整岗位> --text <正文> [--check]');
-      return sendEmbeddedChat({name:opts.name.trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()},opts.text||opts.t,flags.has('check'));
+      const sendFlow = flags.has('check') ? null : flowStatePath();
+      if (sendFlow) {
+        await verifyFlowNotPaused(sendFlow);
+        await verifyFlowNotReplayed(sendFlow, opts['candidate-id'].trim(), opts.name.trim(), 'send');
+      }
+      return withFlowJournal(sendFlow, { candidateId: opts['candidate-id'].trim(), name: opts.name.trim(), action: 'send' }, () => sendEmbeddedChat({name:opts.name.trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()},opts.text||opts.t,flags.has('check')));
     }
     const check = flags.has('check');
     const text = opts.text?.trim() || opts.t?.trim() || '';
@@ -979,6 +984,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
     }
     const contactForm = !flags.has('check') && !flags.has('continue-chat');
     const actualContact = contactForm && !flags.has('confirm-contact') && !opts['select-job'];
+    const greetAction: JournalAction = flags.has('confirm-contact') ? 'confirm-contact' : opts['select-job'] ? 'select-job' : 'greet';
     const greetCandidateId = opts['candidate-id']?.trim();
     const greetFlow = flowStatePath();
     if (contactForm && greetFlow) {
@@ -986,13 +992,11 @@ export async function executeCommand(argv: string[]): Promise<string> {
       await verifyFlowNotPaused(greetFlow);
       await verifyFlowCandidate(greetFlow, greetCandidateId, target);
       await verifyFlowDecided(greetFlow, greetCandidateId, target);
-    }
-    if (actualContact && greetFlow) {
-      await verifyFlowNotReplayed(greetFlow, greetCandidateId, target, 'greet');
+      await verifyFlowNotReplayed(greetFlow, greetCandidateId, target, greetAction);
     }
     let greetResult: string;
     try {
-      greetResult = await withFlowJournal(actualContact ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: 'greet' }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
+      greetResult = await withFlowJournal(contactForm ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: greetAction }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
     } catch (error) {
       if (actualContact && greetFlow && isHardFailure(error)) {
         await pauseFlow(greetFlow, '触达受阻（付费/风控）');

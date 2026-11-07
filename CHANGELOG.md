@@ -2,6 +2,10 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): send/选岗/确认联系纳入 journal 与重放禁止
+
+- send（--embedded）与 select-job/confirm-contact 纳入 journal（intent/result）；同候选人同动作只允许一次，结果未知不得重放。
+
 ## 2026-11-08 · feat(cli): 必须暂停与独立停滞监测
 
 - 流程状态新增 `paused` 与 `lastProgressAt`；新增 `flow-pause`/`flow-resume`；已暂停时拒绝一切候选人动作。
