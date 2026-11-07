@@ -490,12 +490,13 @@ async function withFlowJournal<T>(
   flow: string | null,
   target: { candidateId: string; name: string; action: JournalAction },
   fn: () => Promise<T>,
+  extractEvidence?: (value: T) => Record<string, string> | undefined,
 ): Promise<T> {
   if (!flow) return fn();
   await recordJournalIntent(flow, target.candidateId, target.name, target.action);
   try {
     const value = await fn();
-    await recordJournalResult(flow, target.candidateId, target.name, target.action, 'success');
+    await recordJournalResult(flow, target.candidateId, target.name, target.action, 'success', undefined, extractEvidence ? extractEvidence(value) : undefined);
     return value;
   } catch (error) {
     await recordJournalResult(flow, target.candidateId, target.name, target.action, classifyJournalResult(error), error instanceof Error ? error.message : String(error));
@@ -833,7 +834,9 @@ export async function executeCommand(argv: string[]): Promise<string> {
         Array.from(flags).some((flag) => flag !== 'request-resume' && flag !== 'check')) {
       die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]');
     }
-    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check });
+    const normalSendFlow = check ? null : flowStatePath();
+    if (normalSendFlow) await verifyFlowNotPaused(normalSendFlow);
+    return withFlowJournal(normalSendFlow, { candidateId: dataId || name || '', name, action: 'send' }, () => implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check }));
   }
 
   if (cmd === 'positions') {
@@ -919,7 +922,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
     }
     let previewResult: string;
     try {
-      previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }));
+      previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }), (result) => {
+        if (!json) return undefined;
+        try {
+          const obj = JSON.parse(result);
+          return obj && typeof obj.path === 'string' ? { screenshot: obj.path } : undefined;
+        } catch { return undefined; }
+      });
     } catch (error) {
       if (previewFlow && (await consecutiveActionFailures(previewFlow, 'preview')) >= 3) {
         await pauseFlow(previewFlow, '在线简历连续打开失败');
@@ -1003,7 +1012,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       }
       throw error;
     }
-    if (actualContact && greetFlow) await releaseFlowOpen(greetFlow);
+    if ((actualContact || flags.has('confirm-contact')) && greetFlow) await releaseFlowOpen(greetFlow);
     return greetResult;
   }
 

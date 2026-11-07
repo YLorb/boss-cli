@@ -299,11 +299,13 @@ export function deriveFlowContinuation(state: FlowState): ContinuationReport {
     // 无未决副作用：已关闭（非当前打开）的候选人才可能 done。
     if (!isOpen) {
       if (r?.get('greet')?.result === 'success') return { candidateId: id, name, state: 'done' };
+      if (r?.get('confirm-contact')?.result === 'success') return { candidateId: id, name, state: 'done' };
       if (r?.get('back')?.result === 'success') return { candidateId: id, name, state: 'done' };
     }
     if (decided?.verdict === 'fit') return { candidateId: id, name, state: 'continue', next: 'greet' };
     if (decided && (decided.verdict === 'not-fit' || decided.verdict === 'unknown')) return { candidateId: id, name, state: 'continue', next: 'back' };
-    return { candidateId: id, name, state: 'continue', next: 'decide' };
+    if (isOpen) return { candidateId: id, name, state: 'continue', next: 'decide' };
+    return { candidateId: id, name, state: 'continue', next: 'preview' };
   };
 
   const candidates = [...names.keys()].map(classify);

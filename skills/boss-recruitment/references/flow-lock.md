@@ -57,6 +57,7 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 
 - 动作（preview/greet/back/decide/send/confirm-contact/select-job）开始前 CLI 写 `phase=intent`，结束后写 `phase=result`，`result ∈ success/failed/unknown`；`failed` 带 error，`decide` 的 result 带 `evidence.verdict`。
 - 同一候选人同一动作（greet/send/confirm-contact/select-job）本轮只允许一次：已有意图或结果即拒绝（结果未知不得重放）。
+- 普通 send（--data-id）同样受全局暂停检查与 journal 记录；preview 的 result 机械附带 `evidence.screenshot`（截图路径）。
 - 详细证据（截图路径、联系状态）仍在命令回执与 Agent 回执中，日志以 `(candidateId, action, at)` 关联。
 - 日志只在锁模式（`BOSS_FLOW_STATE`）下写入；未开锁不落日志。
 - 重新打开同一候选人（full preview）会清除其旧 decide，本次查看与上次处理区分开；`--open-only` 不视为重新查看，不清除 decide。

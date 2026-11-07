@@ -243,3 +243,29 @@ test('flowWatch reports not-started when file missing', async () => {
     assert.equal((await flowWatch(path)).state, 'not-started');
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('continuation: confirm-contact success is done', () => {
+  const state = {
+    version: 1, open: null, decided: {},
+    journal: [
+      { candidateId: 'id-A', name: '张三', action: 'confirm-contact', phase: 'result', result: 'success', at: 't' },
+    ],
+  };
+  const report = deriveFlowContinuation(state);
+  const a = report.candidates.find(c => c.candidateId === 'id-A');
+  assert.equal(a.state, 'done');
+});
+
+test('continuation: preview failed without open suggests preview', () => {
+  const state = {
+    version: 1, open: null, decided: {},
+    journal: [
+      { candidateId: 'id-A', name: '张三', action: 'preview', phase: 'intent', at: 't' },
+      { candidateId: 'id-A', name: '张三', action: 'preview', phase: 'result', result: 'failed', at: 't' },
+    ],
+  };
+  const report = deriveFlowContinuation(state);
+  const a = report.candidates.find(c => c.candidateId === 'id-A');
+  assert.equal(a.state, 'continue');
+  assert.equal(a.next, 'preview');
+});
