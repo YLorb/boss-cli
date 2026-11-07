@@ -2,6 +2,10 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · fix(cli): 接续判断修正 greet 中断/未知的需核验
+
+- 修正 `deriveFlowContinuation`：greet 仅有 intent 无 result（进程中断）或 greet 结果 failed/unknown 均判为 needs-verify，且优先级高于 back，避免"建议触达但重放门拒绝"的冲突，以及"greet 未知后被 back 覆盖成 done"的漏判。
+
 ## 2026-11-08 · feat(cli): 确定的接续判断（flow-status + greet 重放禁止）
 
 - 新增 `boss flow-status --json`：从 journal 确定性推导每个候选人的 done/continue/needs-verify 与下一步动作。

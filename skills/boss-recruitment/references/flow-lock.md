@@ -65,7 +65,7 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 
 - `done`（已完成）：greet 或 back 已 success。
 - `continue`（可继续）：已打开未评估 → next=decide；decided fit → next=greet；decided not-fit/unknown → next=back。
-- `needs-verify`（需核验）：greet 结果 failed/unknown → next=verify-greet，禁止自动重放。
+- `needs-verify`（需核验）：greet 结果 failed/unknown，或仅有 greet intent 无 result（进程中断）→ next=verify-greet，禁止自动重放。优先级高于 back：即使之后 back success，仍保留需核验。
 
 `greet` 触达前 CLI 强制「同一候选人本轮只允许一次 greet」：已有 greet 意图或结果即拒绝（结果未知不得重放）。「必须暂停」是 round 级状态，尚未推导，留待停滞监测一起做。
 

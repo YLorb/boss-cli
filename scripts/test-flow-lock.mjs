@@ -127,3 +127,24 @@ test('greet replay guard: second greet denied', async () => {
     await assert.rejects(() => verifyFlowGreetNotReplayed(path, 'id-A', '张三'), FlowLockError);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('continuation: greet intent without result and greet-unknown-then-back are needs-verify', () => {
+  const state = {
+    version: 1,
+    open: null,
+    decided: { 'id-A': { verdict: 'fit', at: 't' }, 'id-B': { verdict: 'fit', at: 't' } },
+    journal: [
+      { candidateId: 'id-A', name: '张三', action: 'greet', phase: 'intent', at: 't' },
+      { candidateId: 'id-B', name: '李四', action: 'greet', phase: 'intent', at: 't' },
+      { candidateId: 'id-B', name: '李四', action: 'greet', phase: 'result', result: 'unknown', at: 't' },
+      { candidateId: 'id-B', name: '李四', action: 'back', phase: 'result', result: 'success', at: 't' },
+    ],
+  };
+  const report = deriveFlowContinuation(state);
+  const a = report.candidates.find(c => c.candidateId === 'id-A');
+  const b = report.candidates.find(c => c.candidateId === 'id-B');
+  assert.equal(a.state, 'needs-verify'); // intent 无 result（中断）
+  assert.equal(a.next, 'verify-greet');
+  assert.equal(b.state, 'needs-verify'); // unknown 后 back success 仍需核验
+  assert.equal(b.next, 'verify-greet');
+});

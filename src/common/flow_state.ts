@@ -205,9 +205,13 @@ export function deriveFlowContinuation(state: FlowState): ContinuationReport {
     const greet = r?.get('greet');
     const back = r?.get('back');
     const decided = state.decided[id];
+    const greetIntent = state.journal.some(e => e.candidateId === id && e.action === 'greet' && e.phase === 'intent');
     if (greet?.result === 'success') return { candidateId: id, name, state: 'done' };
+    // greet 结果 failed/unknown，或仅有 intent 无 result（中断）→ 需核验；优先级高于 back。
+    if ((greet && (greet.result === 'failed' || greet.result === 'unknown')) || (greetIntent && !greet)) {
+      return { candidateId: id, name, state: 'needs-verify', next: 'verify-greet' };
+    }
     if (back?.result === 'success') return { candidateId: id, name, state: 'done' };
-    if (greet && (greet.result === 'failed' || greet.result === 'unknown')) return { candidateId: id, name, state: 'needs-verify', next: 'verify-greet' };
     if (decided?.verdict === 'fit') return { candidateId: id, name, state: 'continue', next: 'greet' };
     if (decided && (decided.verdict === 'not-fit' || decided.verdict === 'unknown')) return { candidateId: id, name, state: 'continue', next: 'back' };
     return { candidateId: id, name, state: 'continue', next: 'decide' };
