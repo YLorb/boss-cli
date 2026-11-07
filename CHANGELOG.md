@@ -2,6 +2,19 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 搜索/推荐逐人闭环锁（BOSS_FLOW_STATE）
+
+- 新增逐人闭环锁：设置 `BOSS_FLOW_STATE=<状态文件绝对路径>` 后，`preview` 成功上锁、`greet`/`back` 成功解锁，未对当前候选人决策前拒绝打开下一位，防止「批量看完才评估导致列表刷新后无法联系」。
+- 新增 `src/sop/flow_state.ts` 与 `scripts/test-flow-lock.mjs`（`test:flow-lock`）；锁仅作用于携带 `--candidate-id` 的 search/recommend 流程，未设置环境变量时行为不变。
+- 新增 `skills/boss-recruitment/references/flow-lock.md`。
+
+## 2026-11-08 · docs(skill): 岗位评估规范改为按需读取的 JSON 文件
+
+- 新增岗位规范文件约定：JD、必备条件、否决项、加分项、权重、阈值及操作边界写入 `~/.boss-cli/jobs/<岗位>.json`，评估时按需读取，不驻留上下文；交接只传文件绝对路径。
+- 新增 `skills/boss-recruitment/references/job-spec.md`；同步更新 SKILL.md 与 AGENTS.md 的上下文交接约束。
+- 兼容：`~/.boss-cli/jd/`（`boss jd` 抓取的 .md 缓存）保持不变，与评估规范 JSON 目录并存。
+- 无用户可见 CLI 功能变化。
+
 ## 2026-10-10 · fix(cli): close attachment previews between resume operations
 
 - 下载原附件并校验文件后收起预览弹层；下次按显示名称和 `data-id` 定位会话前，也会先收起仍打开的附件预览，避免弹层挡住列表。

@@ -48,6 +48,7 @@ import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirm
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
 import { join } from 'node:path';
+import { acquireFlowOpen, flowStatePath, releaseFlowOpen, verifyFlowCandidate } from '../common/flow_state.js';
 import {
   printPackageUpdateNoticeIfDue,
   printVersionInfo,
@@ -817,7 +818,15 @@ export async function executeCommand(argv: string[]): Promise<string> {
       die('❌ 用法: preview <姓名>');
     }
     if(flags.has('reopen-on-frame-error')&&!opts['candidate-id']?.trim())die('--reopen-on-frame-error 要求 --candidate-id');
-    return implPreview({ candidateTarget, json, ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) });
+    const previewCandidateId = opts['candidate-id']?.trim();
+    const previewFlow = flowStatePath();
+    if (previewFlow) {
+      if (!previewCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下 preview 必须提供 --candidate-id；深度搜索不支持锁，请勿对深度搜索设置 BOSS_FLOW_STATE。');
+      await verifyFlowCandidate(previewFlow, previewCandidateId, candidateTarget);
+    }
+    const previewResult = await implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) });
+    if (previewFlow) await acquireFlowOpen(previewFlow, previewCandidateId!, candidateTarget);
+    return previewResult;
   }
 
   if (cmd === 'back') {
@@ -831,7 +840,10 @@ export async function executeCommand(argv: string[]): Promise<string> {
     }
     if (Object.keys(opts).length) die('--expect-url 仅用于 back --previous');
     if(flags.has('check-in_online_resume')) {if(flags.has('if-open'))die('检查不能与返回动作混用');return runCheck({state:'online-resume-open'});}
-    return runBack(flags.has('if-open'), json);
+    const backResult = await runBack(flags.has('if-open'), json);
+    const backFlow = flowStatePath();
+    if (backFlow) await releaseFlowOpen(backFlow);
+    return backResult;
   }
 
   if (cmd === 'recommend') {
@@ -867,7 +879,16 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!target) {
       die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
-    return implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) });
+    const actualContact = !flags.has('check') && !flags.has('confirm-contact') && !flags.has('continue-chat') && !opts['select-job'];
+    const greetCandidateId = opts['candidate-id']?.trim();
+    const greetFlow = flowStatePath();
+    if (actualContact && greetFlow) {
+      if (!greetCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下实际 greet 必须提供 --candidate-id。');
+      await verifyFlowCandidate(greetFlow, greetCandidateId, target);
+    }
+    const greetResult = await implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) });
+    if (actualContact && greetFlow) await releaseFlowOpen(greetFlow);
+    return greetResult;
   }
 
   die(`❌ 未知命令 “${argv[0]}”。输入 help 查看用法。`);

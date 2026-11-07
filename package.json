@@ -1,6 +1,6 @@
 {
   "name": "@joohw/boss-cli",
-  "version": "0.6.14-dev.0",
+  "version": "0.6.15-dev.0",
   "description": "Boss直聘自动化 CLI：批量发消息、自动打招呼、候选人管理、深度搜索。基于 Puppeteer/CDP 驱动本机 Chrome，支持 AI Agent 编排",
   "keywords": [
     "boss",
@@ -74,7 +74,8 @@
     "test:resume-analysis": "node --test scripts/test-resume-analysis-session.mjs",
     "test:resume-ocr": "node --test scripts/test-resume-ocr.mjs",
     "test:recommend-chat": "node --experimental-test-module-mocks --test scripts/test-recommend-chat.mjs",
-    "test:favorite": "node --experimental-test-module-mocks --test scripts/test-favorite.mjs"
+    "test:favorite": "node --experimental-test-module-mocks --test scripts/test-favorite.mjs",
+    "test:flow-lock": "node --test scripts/test-flow-lock.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
