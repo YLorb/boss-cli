@@ -245,13 +245,26 @@ export async function verifyFlowNotPaused(path: string): Promise<void> {
   }
 }
 
-/** 同一候选人同一动作只允许发起一次（结果未知不得重放）。 */
+/** 防重放：send 检查上次结果未决；联系类动作同动作只一次，且 confirm-contact 成功后禁止再次 greet。 */
 export async function verifyFlowNotReplayed(path: string, candidateId: string, name: string, action: JournalAction): Promise<void> {
   const state = await readFlowState(path);
+  if (action === 'send') {
+    const last = [...state.journal].reverse().find(e => e.candidateId === candidateId && e.action === 'send' && e.phase === 'result');
+    if (last && (last.result === 'unknown' || last.result === 'failed')) {
+      throw new FlowLockError(`候选人 ${name}（${candidateId}）上次 send 结果=${last.result}，禁止重发；请核验是否已发送。`);
+    }
+    return;
+  }
   const prior = state.journal.find(e => e.candidateId === candidateId && e.action === action);
   if (prior) {
     const detail = prior.phase === 'intent' ? '意图已记录' : `结果=${prior.result}`;
     throw new FlowLockError(`候选人 ${name}（${candidateId}）本轮已发起过 ${action}（${detail}），禁止重复；结果未知不得重放，请核验后再决定。`);
+  }
+  if (action === 'greet') {
+    const confirmed = state.journal.some(e => e.candidateId === candidateId && e.action === 'confirm-contact' && e.phase === 'result' && e.result === 'success');
+    if (confirmed) {
+      throw new FlowLockError(`候选人 ${name}（${candidateId}）已确认联系（confirm-contact success），禁止再次 greet。`);
+    }
   }
 }
 

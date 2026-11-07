@@ -269,3 +269,23 @@ test('continuation: preview failed without open suggests preview', () => {
   assert.equal(a.state, 'continue');
   assert.equal(a.next, 'preview');
 });
+
+test('replay: send unknown blocks re-send', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-send-replay-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await recordJournalIntent(path, 'id-A', '张三', 'send');
+    await recordJournalResult(path, 'id-A', '张三', 'send', 'unknown');
+    await assert.rejects(() => verifyFlowNotReplayed(path, 'id-A', '张三', 'send'), FlowLockError);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('replay: confirm-contact success blocks re-greet', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-confirm-replay-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await recordJournalIntent(path, 'id-A', '张三', 'confirm-contact');
+    await recordJournalResult(path, 'id-A', '张三', 'confirm-contact', 'success');
+    await assert.rejects(() => verifyFlowNotReplayed(path, 'id-A', '张三', 'greet'), FlowLockError);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

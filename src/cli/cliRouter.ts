@@ -835,7 +835,10 @@ export async function executeCommand(argv: string[]): Promise<string> {
       die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]');
     }
     const normalSendFlow = check ? null : flowStatePath();
-    if (normalSendFlow) await verifyFlowNotPaused(normalSendFlow);
+    if (normalSendFlow) {
+      await verifyFlowNotPaused(normalSendFlow);
+      await verifyFlowNotReplayed(normalSendFlow, dataId || name || '', name, 'send');
+    }
     return withFlowJournal(normalSendFlow, { candidateId: dataId || name || '', name, action: 'send' }, () => implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check }));
   }
 

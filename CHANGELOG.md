@@ -2,6 +2,10 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · fix(cli): 补 send 未决重发门与联系分支统一防重放
+
+- send 防重放改为"上次结果 unknown/failed 禁止重发"；confirm-contact 成功后禁止再次 greet（按业务效果统一防重放）；普通 send 补重放检查。
+
 ## 2026-11-08 · fix(cli): 普通 send 接护栏、confirm-contact 收口、preview 失败接续、证据机械关联
 
 - 普通 send（--data-id）接入全局暂停检查与 journal（key=data-id）；confirm-contact 成功释放 open 并判 done；preview 失败（未建 open）建议 preview 而非 decide；preview result 机械附带 evidence.screenshot。
