@@ -25,6 +25,17 @@ export type FlowState = {
   decided: Record<string, FlowDecision>;
   journal: JournalEntry[];
 };
+export type ContinuationState = 'done' | 'continue' | 'needs-verify';
+export type ContinuationCandidate = {
+  candidateId: string;
+  name: string;
+  state: ContinuationState;
+  next?: string;
+};
+export type ContinuationReport = {
+  open: ContinuationCandidate | null;
+  candidates: ContinuationCandidate[];
+};
 
 export class FlowLockError extends Error {
   constructor(message: string) {
@@ -172,4 +183,54 @@ export async function recordJournalResult(
   if (error) entry.error = error;
   if (evidence) entry.evidence = evidence;
   await writeFlowState(path, { version: 1, open: state.open, decided: state.decided, journal: [...state.journal, entry] });
+}
+
+/** 从流程状态确定性推导每个候选人的接续状态（done/continue/needs-verify）。 */
+export function deriveFlowContinuation(state: FlowState): ContinuationReport {
+  const names = new Map<string, string>();
+  for (const e of state.journal) if (e.name) names.set(e.candidateId, e.name);
+  if (state.open) names.set(state.open.candidateId, state.open.name);
+  for (const id of Object.keys(state.decided)) if (!names.has(id)) names.set(id, id);
+
+  const lastResult = new Map<string, Map<JournalAction, JournalEntry>>();
+  for (const e of state.journal) {
+    if (e.phase !== 'result') continue;
+    if (!lastResult.has(e.candidateId)) lastResult.set(e.candidateId, new Map());
+    lastResult.get(e.candidateId)!.set(e.action, e);
+  }
+
+  const classify = (id: string): ContinuationCandidate => {
+    const name = names.get(id) ?? id;
+    const r = lastResult.get(id);
+    const greet = r?.get('greet');
+    const back = r?.get('back');
+    const decided = state.decided[id];
+    if (greet?.result === 'success') return { candidateId: id, name, state: 'done' };
+    if (back?.result === 'success') return { candidateId: id, name, state: 'done' };
+    if (greet && (greet.result === 'failed' || greet.result === 'unknown')) return { candidateId: id, name, state: 'needs-verify', next: 'verify-greet' };
+    if (decided?.verdict === 'fit') return { candidateId: id, name, state: 'continue', next: 'greet' };
+    if (decided && (decided.verdict === 'not-fit' || decided.verdict === 'unknown')) return { candidateId: id, name, state: 'continue', next: 'back' };
+    return { candidateId: id, name, state: 'continue', next: 'decide' };
+  };
+
+  const candidates = [...names.keys()].map(classify);
+  const openId = state.open?.candidateId;
+  const open = openId ? candidates.find(c => c.candidateId === openId) ?? null : null;
+  return { open, candidates };
+}
+
+/** 读取并推导接续状态。 */
+export async function flowStatus(path: string): Promise<ContinuationReport> {
+  const state = await readFlowState(path);
+  return deriveFlowContinuation(state);
+}
+
+/** greet 触达前核验：同一候选人本轮只允许发起一次 greet，结果未知不得重放。 */
+export async function verifyFlowGreetNotReplayed(path: string, candidateId: string, name: string): Promise<void> {
+  const state = await readFlowState(path);
+  const prior = state.journal.find(e => e.candidateId === candidateId && e.action === 'greet');
+  if (prior) {
+    const detail = prior.phase === 'intent' ? '意图已记录' : `结果=${prior.result}`;
+    throw new FlowLockError(`候选人 ${name}（${candidateId}）本轮已发起过 greet（${detail}），禁止重复；结果未知不得重放，请核验后再决定。`);
+  }
 }

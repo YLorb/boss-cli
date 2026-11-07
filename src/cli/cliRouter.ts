@@ -48,7 +48,7 @@ import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirm
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME } from '../config.js';
 import { join } from 'node:path';
-import { acquireFlowOpen, flowStatePath, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, type JournalAction } from '../common/flow_state.js';
+import { acquireFlowOpen, flowStatePath, flowStatus, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, verifyFlowGreetNotReplayed, type JournalAction } from '../common/flow_state.js';
 import {
   printPackageUpdateNoticeIfDue,
   printVersionInfo,
@@ -253,6 +253,9 @@ function printHelp(): void {
 
   boss decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]
       锁模式（BOSS_FLOW_STATE）下记录当前打开候选人的评估结论；实际 greet 前必须已 decide fit，否则拒绝
+
+  boss flow-status [--json]
+      锁模式（BOSS_FLOW_STATE）下输出接续状态：已打开候选人的下一步、需核验（结果未知）与已完成清单
 
   boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
       --ensure-job 优先精确匹配岗位名和城市，忽略薪资；精确零匹配时用原参数做一次关键词匹配。不带该选项直接按关键词匹配。多项匹配即停止
@@ -501,7 +504,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-status', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -558,6 +561,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
       throw error;
     }
     return json?JSON.stringify({ok:true,candidateId:decideCandidateId,verdict:decideVerdict}):`已记录评估结论：${decideCandidateId} ${decideVerdict}`;
+  }
+  if(cmd==='flow-status') {
+    if(tail.length) die('flow-status 不接受参数');
+    const fsFlow=flowStatePath();
+    if(!fsFlow)die('❌ flow-status 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    const report=await flowStatus(fsFlow);
+    return json?JSON.stringify(report):`已打开：${report.open?`${report.open.name}（${report.open.state}${report.open.next?`→${report.open.next}`:''}）`:'无'}\n需核验：${report.candidates.filter(c=>c.state==='needs-verify').map(c=>c.name).join('、')||'无'}\n已完成：${report.candidates.filter(c=>c.state==='done').length} 人`;
   }
   configureHeadlessForCommand(cmd);
   if (cmd === 'switch-job') return runSwitchJob(parseSwitchJobArgs(tail), json);
@@ -928,6 +938,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
       if (!greetCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下实际 greet 必须提供 --candidate-id。');
       await verifyFlowCandidate(greetFlow, greetCandidateId, target);
       await verifyFlowDecided(greetFlow, greetCandidateId, target);
+      await verifyFlowGreetNotReplayed(greetFlow, greetCandidateId, target);
     }
     const greetResult = await withFlowJournal(actualContact ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: 'greet' }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
     if (actualContact && greetFlow) await releaseFlowOpen(greetFlow);

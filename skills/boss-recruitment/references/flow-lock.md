@@ -59,6 +59,16 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 - 详细证据（截图路径、联系状态）仍在命令回执与 Agent 回执中，日志以 `(candidateId, action, at)` 关联。
 - 日志只在锁模式（`BOSS_FLOW_STATE`）下写入；未开锁不落日志。
 
+## 接续判断（flow-status）
+
+`boss flow-status --json` 从流程状态确定性推导每个候选人的接续状态：
+
+- `done`（已完成）：greet 或 back 已 success。
+- `continue`（可继续）：已打开未评估 → next=decide；decided fit → next=greet；decided not-fit/unknown → next=back。
+- `needs-verify`（需核验）：greet 结果 failed/unknown → next=verify-greet，禁止自动重放。
+
+`greet` 触达前 CLI 强制「同一候选人本轮只允许一次 greet」：已有 greet 意图或结果即拒绝（结果未知不得重放）。「必须暂停」是 round 级状态，尚未推导，留待停滞监测一起做。
+
 ## 边界
 
 - 仅作用于携带 `--candidate-id` 的 search/recommend 流程；深度搜索无 `--candidate-id`，不支持本锁，请勿对深度搜索设置该环境变量。

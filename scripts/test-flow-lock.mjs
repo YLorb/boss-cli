@@ -12,6 +12,8 @@ import {
   verifyFlowDecided,
   recordJournalIntent,
   recordJournalResult,
+  deriveFlowContinuation,
+  verifyFlowGreetNotReplayed,
   FlowLockError,
   flowStatePath,
 } from '../dist/common/flow_state.js';
@@ -90,5 +92,38 @@ test('journal records intent then result with evidence', async () => {
     assert.equal(state.journal[1].phase, 'result');
     assert.equal(state.journal[1].result, 'success');
     assert.deepEqual(state.journal[2].evidence, { verdict: 'fit' });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('deriveFlowContinuation: done/continue/needs-verify', () => {
+  const state = {
+    version: 1,
+    open: { candidateId: 'id-A', name: '张三', openedAt: 't' },
+    decided: { 'id-A': { verdict: 'fit', at: 't' } },
+    journal: [
+      { candidateId: 'id-B', name: '李四', action: 'greet', phase: 'result', result: 'success', at: 't' },
+      { candidateId: 'id-C', name: '王五', action: 'greet', phase: 'result', result: 'unknown', at: 't' },
+      { candidateId: 'id-A', name: '张三', action: 'preview', phase: 'result', result: 'success', at: 't' },
+    ],
+  };
+  const report = deriveFlowContinuation(state);
+  const a = report.candidates.find(c => c.candidateId === 'id-A');
+  const b = report.candidates.find(c => c.candidateId === 'id-B');
+  const c = report.candidates.find(c => c.candidateId === 'id-C');
+  assert.equal(a.state, 'continue');
+  assert.equal(a.next, 'greet');
+  assert.equal(b.state, 'done');
+  assert.equal(c.state, 'needs-verify');
+  assert.equal(report.open.candidateId, 'id-A');
+});
+
+test('greet replay guard: second greet denied', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'flow-replay-'));
+  const path = join(dir, 'flow.json');
+  try {
+    await acquireFlowOpen(path, 'id-A', '张三');
+    await recordJournalIntent(path, 'id-A', '张三', 'greet');
+    await recordJournalResult(path, 'id-A', '张三', 'greet', 'success');
+    await assert.rejects(() => verifyFlowGreetNotReplayed(path, 'id-A', '张三'), FlowLockError);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
