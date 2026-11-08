@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test, mock } from 'node:test';
 
 let url='https://www.zhipin.com/web/chat/recommend', focused=0;
-const page={isClosed:()=>false,url:()=>url,evaluate:async()=> 'visible',bringToFront:async()=>{focused++;}};
+const page={isClosed:()=>false,url:()=>url,viewport:()=>({width:1920,height:1080}),evaluate:async()=> 'visible',bringToFront:async()=>{focused++;}};
+mock.module('../dist/browser/cdp_browser.js',{namedExports:{defaultViewportFromEnv:()=>({width:1920,height:1080})}});
 mock.module('../dist/browser/browser_session.js',{namedExports:{
   ensureBrowserSession:async()=>{},getBrowserRef:()=>({}),getPageRef:()=>page,setSessionPage:()=>{},
 }});

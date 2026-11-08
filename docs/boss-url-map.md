@@ -8,6 +8,8 @@
 
 推荐页起始检查在主页面只读等待当前挂载的推荐 iframe 显示岗位和列表，最长 18 秒。此时内嵌页面可正常替换。开始操作下拉框后，若目标选项点击前 iframe 失效则停止。目标选项最多点击一次，点击后从主页面只读确认当前 iframe 显示目标岗位和列表。等待超时或切岗期间顶层导航时停止。页面守卫在同一文档只安装一次，新文档独立初始化。
 
+2026-11-09 离线核验：切岗监听器仅以 `changed === page.mainFrame()` 判定顶层导航；进入岗位点击确认阶段后，允许原推荐 iframe 的 framenavigated/framedetached，并允许该次点击响应因上下文销毁而丢失。随后只读确认新 iframe 的目标岗位，不再次点击。回归覆盖点击前 iframe 失效、点击后替换、确认期间顶层导航、目标岗位不符和超时；不能将任意 framenavigated 都视为顶层导航，也不能忽略真实顶层导航。
+
 沟通页 `chat` 和 `chat-search` 可用与目标关联的 `--data-id` 或 `--info` 区分完全同名者，两者同时提供时必须都匹配。
 
 沟通页 `/web/chat/index` 支持 `boss chat-search --clear --expect-keyword "当前完整昵称" --json`。先保存旧结果并核对目标信息，清空时只点击一次已核验的搜索框 ×。返回 `status=cleared` 后可另起一次 `chat-search "完整昵称" --info "已知原文" --json`。全名和 info 唯一匹配才打开，群聊歧义仍暂停。
