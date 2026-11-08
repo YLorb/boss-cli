@@ -2,6 +2,12 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 统一任务配置（task config）
+
+- 新增 `src/cli/task_config.ts`：任务结构（job/scope/permit/stop）+ `checkTaskConfig` 校验入口。
+- `BOSS_TASK_CONFIG` + `boss task-check --json`；交叉校验 permit 的 job/entry 一致性；停止条件 observeLimit/contactLimit/deadline/maxConsecutiveFailures（均可选）。
+- 新增 `references/task-config.md`；test:task-config 5 例。
+
 ## 2026-11-08 · fix(cli): permit action 解析对齐 CLI、附件命令拒绝退出码 2
 
 - action 子动作改用与 CLI 一致的解析（rest[0] ?? opts.type ?? opts.action + 别名映射），选项值不再被误认为子动作，`--type=resume` 正确放行。

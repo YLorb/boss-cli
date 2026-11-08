@@ -14,7 +14,7 @@ export type PermitDoc = {
 
 /** 只读安全/诊断命令，永不吞掉副作用动作，无需在 permit 中声明。 */
 export const ALWAYS_ALLOWED = new Set([
-  'status', 'check', 'search-sidebar', '--check-login', 'flow-status', 'spec-list',
+  'status', 'check', 'search-sidebar', '--check-login', 'flow-status', 'spec-list', 'task-check',
   'help', 'version', 'version-check',
 ]);
 
@@ -54,7 +54,7 @@ function validatePermit(value: unknown): asserts value is PermitDoc {
   }
 }
 
-async function loadPermit(path: string): Promise<PermitDoc> {
+export async function loadPermit(path: string): Promise<PermitDoc> {
   let raw: string;
   try {
     raw = await readFile(path, 'utf8');

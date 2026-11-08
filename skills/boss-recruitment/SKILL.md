@@ -56,6 +56,7 @@ metadata:
 | 状态转换前、check/status、发送预检 | [只读检查规范](references/check-status.md)，必读；旧版check曾执行动作，不可混用 |
 | 真实页面操作或工具缺口 | [工具使用边界](references/tool-boundary.md)，必读 |
 | 本轮动作白名单审批（deny-by-default） | [命令白名单审批](references/run-permit.md)，启用按流配置 |
+| 本轮任务结构、范围与停止条件 | [统一任务配置](references/task-config.md)，启动前 task-check 校验 |
 | 首次安装、下载、环境或版本问题 | [安装与兼容性](references/install.md) |
 | Node.js、Chrome、PATH、CDP和目录配置 | [环境配置](references/environment.md)；不要求安装Git |
 | 确定工作目录、保存位置或启动collect | [路径与账本路径核验](references/paths.md)，正式运行前必读 |

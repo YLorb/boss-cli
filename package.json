@@ -77,7 +77,8 @@
     "test:recommend-chat": "node --experimental-test-module-mocks --test scripts/test-recommend-chat.mjs",
     "test:favorite": "node --experimental-test-module-mocks --test scripts/test-favorite.mjs",
     "test:flow-lock": "node --test scripts/test-flow-lock.mjs",
-    "test:permit": "node --test scripts/test-permit.mjs"
+    "test:permit": "node --test scripts/test-permit.mjs",
+    "test:task-config": "node --test scripts/test-task-config.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
