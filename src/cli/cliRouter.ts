@@ -33,7 +33,6 @@ import {
   implSetBaiduCredentials,
   implBossSearch,
   implSendMessage,
-  type ChatPageAction,
 } from '../toolset/index.js';
 import { printBossInteractiveBanner } from './banner.js';
 import { jsonError, splitJsonFlag } from './output.js';
@@ -47,7 +46,7 @@ import { dismissContactNotice } from '../toolset/contact-notice.js';
 import { favoriteResume } from '../toolset/favorite.js';
 import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
-import { assertPermittedCommand, PermitDeniedError } from './permit.js';
+import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
@@ -778,27 +777,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'action') {
-    const { rest, opts } = parseOpts(tail);
-    const raw = (rest[0] ?? opts.type ?? opts.action ?? '').trim().toLowerCase();
-    const actionMap: Record<string, ChatPageAction> = {
-      resume: 'resume',
-      'not-fit': 'not-fit',
-      remark: 'remark',
-      'agree-resume': 'agree-resume',
-      'request-attachment-resume': 'request-attachment-resume',
-      'ask-attachment-resume': 'request-attachment-resume',
-      'ask-resume': 'request-attachment-resume',
-      history: 'history',
-      'chat-history': 'history',
-      wechat: 'exchange-wechat',
-      'exchange-wechat': 'exchange-wechat',
-    };
-    const action = actionMap[raw];
+    const action = resolveAction(argv);
     if (!action) {
       die(
         '❌ 用法: action <resume|not-fit|remark|agree-resume|request-attachment-resume|history|wechat> [--remark <备注>]',
       );
     }
+    const { opts } = parseOpts(tail);
     const remark = (opts.remark ?? '').trim();
     if (action === 'remark' && !remark) {
       die('❌ 当操作为 remark 时，必须提供 --remark <备注内容>。');
@@ -1060,7 +1045,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   } catch (e) {
     if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
     else console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = e instanceof PermitDeniedError ? 2 : 1;
+    process.exitCode = isPermitDenied(e) ? 2 : 1;
   }
 }
 

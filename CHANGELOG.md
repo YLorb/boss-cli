@@ -2,6 +2,11 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · fix(cli): permit action 解析对齐 CLI、附件命令拒绝退出码 2
+
+- action 子动作改用与 CLI 一致的解析（rest[0] ?? opts.type ?? opts.action + 别名映射），选项值不再被误认为子动作，`--type=resume` 正确放行。
+- 附件命令经 worker IPC 后按 `name` 判断 PermitDeniedError，拒绝退出码稳定为 2；test:permit 增至 9 例。
+
 ## 2026-11-08 · feat(cli): 命令白名单审批（permit）+ 版本 0.6.17-dev.0 / Skill 1.0.26
 
 - 新增 `src/cli/permit.ts`：单一审批入口 `assertPermittedCommand`，挂在 `executeCommand` 开头；`BOSS_RUN_PERMIT` 开关，deny-by-default。

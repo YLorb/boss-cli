@@ -2,6 +2,7 @@
 // 仅在 BOSS_RUN_PERMIT 设置时启用；未设置则行为不变。
 // 这是编排级收紧，不是系统级权限隔离。
 import { readFile } from 'node:fs/promises';
+import type { ChatPageAction } from '../toolset/action.js';
 
 export type PermitDoc = {
   schemaVersion: 1;
@@ -73,13 +74,67 @@ async function loadPermit(path: string): Promise<PermitDoc> {
   }
 }
 
-/** action 的子动作是第一个不含 '-' 前缀的位置参数（如 `action resume` 的 resume）。 */
-function actionVariant(argv: string[]): string {
-  for (let i = 1; i < argv.length; i++) {
-    const a = argv[i];
-    if (a && !a.startsWith('-')) return a;
+export function isPermitDenied(error: unknown): boolean {
+  return error instanceof Error && error.name === 'PermitDeniedError';
+}
+
+const ACTION_MAP: Record<string, ChatPageAction> = {
+  resume: 'resume',
+  'not-fit': 'not-fit',
+  remark: 'remark',
+  'agree-resume': 'agree-resume',
+  'request-attachment-resume': 'request-attachment-resume',
+  'ask-attachment-resume': 'request-attachment-resume',
+  'ask-resume': 'request-attachment-resume',
+  history: 'history',
+  'chat-history': 'history',
+  wechat: 'exchange-wechat',
+  'exchange-wechat': 'exchange-wechat',
+};
+
+/**
+ * 与 CLI 的 action 分支一致地解析实际子动作：rest[0] ?? opts.type ?? opts.action，
+ * 经别名映射规范化。无法解析返回 null（由调用方决定拒绝或报错）。
+ * argv 为完整参数（含命令名 'action'），与 cliRouter 中 action 分支的解析保持同一实现。
+ */
+export function resolveAction(argv: string[]): ChatPageAction | null {
+  const tail = argv.slice(1);
+  const rest: string[] = [];
+  const opts: Record<string, string> = {};
+  for (let i = 0; i < tail.length; i++) {
+    const a = tail[i];
+    if (a === '--') {
+      rest.push(...tail.slice(i + 1));
+      break;
+    }
+    if (a.startsWith('--')) {
+      const eq = a.indexOf('=');
+      if (eq !== -1) {
+        opts[a.slice(2, eq)] = a.slice(eq + 1);
+        continue;
+      }
+      const key = a.slice(2);
+      const next = tail[i + 1];
+      if (next !== undefined && !next.startsWith('-')) {
+        opts[key] = next;
+        i += 1;
+      }
+      continue;
+    }
+    if (a.startsWith('-') && a.length > 1) {
+      const short = a.slice(1);
+      const next = tail[i + 1];
+      if (short === 't' && next !== undefined && !next.startsWith('-')) {
+        opts.t = next;
+        i += 1;
+        continue;
+      }
+      if (!/^\d/.test(short)) continue;
+    }
+    rest.push(a);
   }
-  return '';
+  const raw = (rest[0] ?? opts.type ?? opts.action ?? '').trim().toLowerCase();
+  return ACTION_MAP[raw] ?? null;
 }
 
 /** 唯一审批入口：动作执行前调用。失真即拒绝（fail-closed），不静默放行。 */
@@ -93,9 +148,12 @@ export async function assertPermittedCommand(normalizedCmd: string, argv: string
     throw new PermitDeniedError(`命令未授权：${normalizedCmd}；请在 permit.allowed 中声明本轮允许的动作。`);
   }
   if (variants.length === 0) return; // 命令名级放行
-  const variant = actionVariant(argv);
-  if (variants.includes(variant)) {
-    return;
+  if (normalizedCmd === 'action') {
+    const action = resolveAction(argv);
+    if (action !== null && variants.includes(action)) {
+      return;
+    }
+    throw new PermitDeniedError(`action 的子动作未授权：${action ?? '(无法解析)'}；本轮允许：${variants.join(', ')}。`);
   }
-  throw new PermitDeniedError(`命令 ${normalizedCmd} 的变体未授权：${variant || '(无)'}；本轮允许：${variants.join(', ')}。`);
+  throw new PermitDeniedError(`命令 ${normalizedCmd} 使用了变体白名单，但当前仅 action 支持子动作粒度；请改用空数组放行命令名。`);
 }

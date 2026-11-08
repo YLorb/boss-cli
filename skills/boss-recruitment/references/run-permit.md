@@ -43,7 +43,7 @@ BOSS_RUN_PERMIT=<permit 文件绝对路径>
 ```
 
 - `allowed` 为「命令名 → 变体数组」映射；`[]` 表示命令名级放行（任意合法参数），非空数组表示变体白名单（v1 仅对 `action` 生效）。
-- `action` 的子动作是第一个非 `-` 开头的位置参数。SOP 红线（`not-fit`、`wechat` 等）默认不进任何 permit，须使用者显式加入。
+- `action` 的子动作与 CLI 正式解析一致：`rest[0] ?? opts.type ?? opts.action` 经别名映射规范化（`ask-resume`→`request-attachment-resume`、`wechat`→`exchange-wechat` 等）。选项值不会被误认为子动作（如 `action --remark resume not-fit` 的实际动作是 not-fit）。SOP 红线（`not-fit`、`wechat` 等）默认不进任何 permit，须使用者显式加入。
 - `roundId/job/entry` 为审计用途，本轮不参与校验。
 
 ## 永不拦截（ALWAYS_ALLOWED）

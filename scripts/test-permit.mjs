@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
 import {
   assertPermittedCommand,
   permitFilePath,
   PermitDeniedError,
+  resolveAction,
   ALWAYS_ALLOWED,
 } from '../dist/cli/permit.js';
 
@@ -65,4 +67,43 @@ test('permit: missing/broken permit file fails closed', async t => {
   await writeFile(file, '{ not json');
   process.env.BOSS_RUN_PERMIT = file;
   await assert.rejects(() => assertPermittedCommand('send', ['send']), /无效/);
+});
+
+test('permit: action option value is not mistaken for sub-action', async t => {
+  await withPermit(t, { schemaVersion: 1, allowed: { action: ['resume'] } });
+  // `--remark resume` 把 resume 当选项值，实际动作是 not-fit，必须拒绝
+  await assert.rejects(() => assertPermittedCommand('action', ['action', '--remark', 'resume', 'not-fit']), PermitDeniedError);
+  // 实际动作是 resume 时放行
+  await assertPermittedCommand('action', ['action', 'resume']);
+});
+
+test('permit: action --type=resume is accepted as actual resume', async t => {
+  await withPermit(t, { schemaVersion: 1, allowed: { action: ['resume'] } });
+  await assertPermittedCommand('action', ['action', '--type=resume']);
+  await assertPermittedCommand('action', ['action', '--type', 'resume']);
+  // 别名 ask-resume 规范化为 request-attachment-resume
+  await withPermit(t, { schemaVersion: 1, allowed: { action: ['request-attachment-resume'] } });
+  await assertPermittedCommand('action', ['action', 'ask-resume']);
+});
+
+test('resolveAction: alias and option-value resolution', () => {
+  assert.equal(resolveAction(['action', 'resume']), 'resume');
+  assert.equal(resolveAction(['action', 'not-fit']), 'not-fit');
+  assert.equal(resolveAction(['action', 'ask-resume']), 'request-attachment-resume');
+  assert.equal(resolveAction(['action', '--type=resume']), 'resume');
+  assert.equal(resolveAction(['action', '--remark', 'resume', 'not-fit']), 'not-fit');
+  assert.equal(resolveAction(['action', 'unknown']), null);
+});
+
+test('permit: attachment command denial exits with code 2', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'permit-exit-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = join(dir, 'permit.json');
+  await writeFile(file, JSON.stringify({ schemaVersion: 1, allowed: { send: [] } }));
+  const child = spawn(process.execPath, ['dist/cli/index.js', 'probe-resume', '张三'],
+    { env: { ...process.env, BOSS_RUN_PERMIT: file }, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+  let stderr = '';
+  child.stderr.on('data', d => { stderr += d; });
+  const code = await new Promise(resolve => child.once('close', resolve));
+  assert.equal(code, 2, stderr);
 });
