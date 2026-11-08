@@ -47,6 +47,7 @@ import { dismissContactNotice } from '../toolset/contact-notice.js';
 import { favoriteResume } from '../toolset/favorite.js';
 import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
+import { assertPermittedCommand, PermitDeniedError } from './permit.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
@@ -519,6 +520,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   const cmd = normalizeSubcommand(argv[0]);
+  await assertPermittedCommand(cmd, argv);
   const { args: tail, json } = splitJsonFlag(argv.slice(1));
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
@@ -1058,7 +1060,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   } catch (e) {
     if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
     else console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = 1;
+    process.exitCode = e instanceof PermitDeniedError ? 2 : 1;
   }
 }
 

@@ -2,6 +2,12 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 命令白名单审批（permit）+ 版本 0.6.17-dev.0 / Skill 1.0.26
+
+- 新增 `src/cli/permit.ts`：单一审批入口 `assertPermittedCommand`，挂在 `executeCommand` 开头；`BOSS_RUN_PERMIT` 开关，deny-by-default。
+- `action` 子动作白名单（如 `action:["resume"]`）防连带放行 not-fit/wechat；拒绝退出码 2；文件缺失/损坏 fail-closed。
+- 新增 `references/run-permit.md`；test:permit 5 例；版本 +0.0.1。
+
 ## 2026-11-08 · feat(cli): 多岗位收集编排 + 消歧证据先带 + 搜索岗位态恢复
 
 - 新增 `boss spec-list --json` 枚举 `~/.boss-cli/jobs/` 的岗位规范文件，作为多岗位收集的岗位清单来源。

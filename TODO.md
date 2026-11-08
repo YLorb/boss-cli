@@ -6,8 +6,8 @@
 
 ## 2026-11-08 剩余待办
 
-- [ ] permit 命令白名单（目标 1 的另一半）：按 SOP 逐入口的静态命令/动作白名单。
-- [x] 加速 Agent 解析（目标 2 / 阶段 C）：resume-analysis-session 增加 mode=screen 评分紧凑交接；确定性字段（邮箱/电话/年限/城市）先提取，Agent 只确认/纠正。
+- [x] permit 命令白名单（目标 1 的另一半）：`src/cli/permit.ts` 单点审批 + BOSS_RUN_PERMIT + deny-by-default + action 子动作白名单。
+- [x] 加速 Agent 解析（目标 2 / 阶段 C）。
 - [ ] 文档一致性校验脚本 scripts/check-doc-drift.mjs + test:docs：从 `boss help` 抽命令名与 README/cli-reference 比对，防止再次漂移。
 - [ ] 接续判断补齐：已做 done/continue/needs-verify 三态（flow-status）+ greet/send/confirm-contact 重放禁止 + 必须暂停（paused）；send 正常形态已接入。
 - [ ] 独立停滞监测（watchdog）：已做 paused/not-started/stalled 判定与阈值接入；缺独立进程定时检查与告警。
