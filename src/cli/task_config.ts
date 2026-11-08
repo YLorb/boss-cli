@@ -12,12 +12,17 @@ export type TaskStop = {
   deadline?: string;
   maxConsecutiveFailures?: number;
 };
+export type Phase = {
+  name: string;
+  allowed: Record<string, string[]>;
+};
 export type TaskConfig = {
   schemaVersion: 1;
   job: string;
   scope: TaskScope;
   permit: string;
   stop: TaskStop;
+  phases?: Phase[];
 };
 
 export function taskConfigPath(): string | null {
@@ -57,6 +62,28 @@ function validateTaskConfig(value: unknown): asserts value is TaskConfig {
     throw new Error('任务配置 permit 必须是指向 permit 文件的绝对路径。');
   }
   validateStop(t.stop);
+  if (t.phases !== undefined) validatePhases(t.phases);
+}
+
+function validatePhases(value: unknown): asserts value is Phase[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error('任务配置 phases 必须是非空数组。');
+  const names = new Set<string>();
+  for (const phase of value) {
+    if (!phase || typeof phase !== 'object' || Array.isArray(phase)) throw new Error('phases 的每一项必须是对象。');
+    const p = phase as Partial<Phase>;
+    if (typeof p.name !== 'string' || !p.name.trim()) throw new Error('phases 的 name 必须是非空字符串。');
+    if (names.has(p.name)) throw new Error(`phases 的 name 重复：${p.name}`);
+    names.add(p.name);
+    if (!p.allowed || typeof p.allowed !== 'object' || Array.isArray(p.allowed)) {
+      throw new Error(`phases.${p.name}.allowed 必须是非空对象。`);
+    }
+    for (const [cmd, variants] of Object.entries(p.allowed)) {
+      if (!cmd.trim()) throw new Error(`phases.${p.name}.allowed 的命令名不能为空。`);
+      if (!Array.isArray(variants) || variants.some(v => typeof v !== 'string')) {
+        throw new Error(`phases.${p.name}.allowed.${cmd} 必须是字符串数组。`);
+      }
+    }
+  }
 }
 
 export async function loadTaskConfig(path: string): Promise<TaskConfig> {

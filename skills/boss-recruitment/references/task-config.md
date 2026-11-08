@@ -44,6 +44,7 @@ BOSS_TASK_CONFIG=<任务配置绝对路径>
 | stop.contactLimit | 否 | 本轮允许主动触达（greet/confirm-contact）人数上限 |
 | stop.deadline | 否 | 本轮绝对截止时间（可解析 ISO 字符串） |
 | stop.maxConsecutiveFailures | 否 | 同类动作连续失败达到阈值即自动暂停 |
+| phases | 否 | 阶段序列（见[阶段校验](phase-state.md)）：`[{name, allowed}]`，声明后启用阶段级白名单 |
 
 ## 校验入口
 

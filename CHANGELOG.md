@@ -2,6 +2,12 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 阶段校验（phase）
+
+- task config 新增 `phases`（`[{name, allowed}]`）；`src/cli/phase_state.ts` 阶段级命令白名单。
+- `boss phase-set --phase <名>` / `phase-status`；动作执行前 permit → phase 双重校验，越界 PhaseDeniedError 退出码 2。
+- 阶段控制与只读诊断永不拦截；test:phase-state 6 例。
+
 ## 2026-11-08 · feat(cli): 统一启动（task-init）+ run 状态绑定
 
 - 新增 `src/cli/run_state.ts`：`boss task-init` 生成确定性 runId（job 哈希 + 秒级时间戳），原子写入 `~/.boss-cli/runs/<runId>.json`。

@@ -49,6 +49,7 @@ import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirm
 import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
 import { checkTaskConfig } from './task_config.js';
 import { initRun } from './run_state.js';
+import { assertPermittedPhase, currentPhase, isPhaseDenied, setPhase } from './phase_state.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
@@ -522,11 +523,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
 
   const cmd = normalizeSubcommand(argv[0]);
   await assertPermittedCommand(cmd, argv);
+  await assertPermittedPhase(cmd, argv);
   const { args: tail, json } = splitJsonFlag(argv.slice(1));
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'phase-set', 'phase-status', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -614,6 +616,18 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if(!frFlow)die('❌ flow-resume 需要在锁模式（BOSS_FLOW_STATE）下使用');
     await clearFlowPause(frFlow);
     return json?JSON.stringify({ok:true,paused:false}):'已恢复';
+  }
+  if(cmd==='phase-set') {
+    const {rest,opts,flags}=parseOpts(tail);
+    if(rest.length||flags.size||!opts.phase?.trim()||Object.keys(opts).some(k=>k!=='phase'))die('❌ 用法: phase-set --phase <阶段名> [--json]');
+    const ps=await setPhase(opts.phase.trim());
+    return json?JSON.stringify({ok:true,phase:ps.phase,at:ps.at}):`已进入阶段：${ps.phase}`;
+  }
+  if(cmd==='phase-status') {
+    if(tail.length)die('phase-status 不接受参数');
+    const cur=await currentPhase();
+    if(!cur)die('❌ 阶段状态未初始化；请先 phase-set --phase <阶段名>');
+    return json?JSON.stringify({ok:true,phase:cur}):`当前阶段：${cur}`;
   }
   if(cmd==='spec-list') {
     if(tail.length) die('spec-list 不接受参数');
@@ -1047,7 +1061,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   } catch (e) {
     if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
     else console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = isPermitDenied(e) ? 2 : 1;
+    process.exitCode = (isPermitDenied(e) || isPhaseDenied(e)) ? 2 : 1;
   }
 }
 
