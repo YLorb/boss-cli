@@ -10,7 +10,7 @@
 - [x] 加速 Agent 解析（目标 2 / 阶段 C）。
 - [ ] 文档一致性校验脚本 scripts/check-doc-drift.mjs + test:docs：从 `boss help` 抽命令名与 README/cli-reference 比对，防止再次漂移。
 - [ ] 接续判断补齐：已做 done/continue/needs-verify 三态（flow-status）+ greet/send/confirm-contact 重放禁止 + 必须暂停（paused）；send 正常形态已接入。
-- [ ] 独立停滞监测（watchdog）：已做 paused/not-started/stalled 判定与阈值接入；缺独立进程定时检查与告警。
+- [x] 停滞监测：进程消失由 CLI 全命令超时（附件 15/30s 进程级、页面操作 Puppeteer 超时）+ Agent 发现失效覆盖；业务停滞由 Agent 每轮 flow-status 查 stalled/paused。无需独立 watchdog 进程（Agent 是编排者始终存活，Chrome 挂起必被 CLI 超时暴露）。
 - [ ] 未读收集与多岗位收集端到端真实验收（规范已补齐，未在真实账号跑通）。
 
 ## 2026-10-22
