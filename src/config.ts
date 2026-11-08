@@ -22,6 +22,9 @@ export const APP_HOME = join(homedir(), '.boss-cli');
 /** 存放岗位 JD 的目录（每个岗位一个 .md 文件） */
 export const JD_DIR = join(APP_HOME, 'jd');
 
+/** 存放岗位规范文件（job spec，每个岗位一个 .json）的目录，见 job-spec.md */
+export const JOBS_DIR = join(APP_HOME, 'jobs');
+
 /**
  * 应用缓存与生成数据根目录（浏览器配置等）
  */
@@ -52,6 +55,9 @@ export function ensureAppDataLayout(): void {
   }
   if (!existsSync(JD_DIR)) {
     mkdirSync(JD_DIR, { recursive: true });
+  }
+  if (!existsSync(JOBS_DIR)) {
+    mkdirSync(JOBS_DIR, { recursive: true });
   }
   if (!existsSync(RESUME_SCREENSHOTS_DIR)) {
     mkdirSync(RESUME_SCREENSHOTS_DIR, { recursive: true });

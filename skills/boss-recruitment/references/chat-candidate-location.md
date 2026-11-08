@@ -13,6 +13,8 @@ scope: "chat-candidate-location"
 
 定位默认不操作岗位筛选：直接搜索，以候选人姓名和会话ID核验成功。BOSS搜索后自行重置筛选属于页面行为，不是定位失败；不主动切全部职位，也不恢复岗位。临时--keep-current-job选项已移除。
 
+**消歧证据先带后搜（强制）**：本轮快照、先前回执或账本已掌握该候选人的 `data-id` 或 `info` 原文时，必须先随 `chat` / `chat-search` 一并带上（`--data-id`、`--info`），不得先做空参搜索再等待重名暂停后回头补齐。只有本轮记录中确实没有 `data-id` 也没有 `info`、且同名导致无法唯一定位时，才保留现场等待用户提供，不据此自动挑选、不滚动查找。
+
 公开命令为 `node .\dist\cli\index.js chat-search "完整昵称" --json`。可加 `--data-id "预期会话ID"`、`--job "预期完整岗位"` 核验身份。重名时先保存返回的匹配项，并核对与目标关联的会话 ID 或 info 原文。缺少两者时保留现场，等待用户提供。
 
 取得目标会话 ID 或 info 后，先执行 `chat-search --clear --expect-keyword "刚才搜索的完整昵称" --json`。它只在沟通页核验旧搜索词并点击一次搜索框 ×。收到 `status=cleared` 后，单独执行 `chat-search "完整昵称" --info "已知原文" --json`，也可只用 `--data-id`。两项同时给出时取交集。保留 info 的空格，只用原字段，不能从 label 推断。姓名和 info 完全相符且唯一时才打开；零条、仍有多条或出现群聊歧义均停止。清空失败保存回执并停止。

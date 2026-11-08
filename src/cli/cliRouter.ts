@@ -8,6 +8,8 @@ import { parseSwitchJobArgs, runSwitchJob } from '../toolset/switch-job.js';
  */
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { readdir, readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { detachBrowserSession } from '../browser/index.js';
 import {
   implChatAction,
@@ -46,7 +48,7 @@ import { favoriteResume } from '../toolset/favorite.js';
 import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { runCheckLogin } from '../toolset/check_login.js';
-import { APP_HOME } from '../config.js';
+import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
 import { acquireFlowOpen, clearFlowPause, consecutiveActionFailures, flowStatePath, flowStatus, flowWatch, pauseFlow, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, verifyFlowNotPaused, verifyFlowNotReplayed, type JournalAction } from '../common/flow_state.js';
 import {
@@ -254,6 +256,9 @@ function printHelp(): void {
 
   boss decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]
       锁模式（BOSS_FLOW_STATE）下记录当前打开候选人的评估结论；实际 greet 前必须已 decide fit，否则拒绝
+
+  boss spec-list [--json]
+      枚举 ~/.boss-cli/jobs/ 下的岗位规范文件（job spec），用于多岗位收集固定本轮清单
 
   boss flow-status [--json]
       锁模式（BOSS_FLOW_STATE）下输出接续状态：已打开候选人的下一步、需核验（结果未知）与已完成清单
@@ -518,7 +523,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -606,6 +611,26 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if(!frFlow)die('❌ flow-resume 需要在锁模式（BOSS_FLOW_STATE）下使用');
     await clearFlowPause(frFlow);
     return json?JSON.stringify({ok:true,paused:false}):'已恢复';
+  }
+  if(cmd==='spec-list') {
+    if(tail.length) die('spec-list 不接受参数');
+    const specs = [];
+    if (existsSync(JOBS_DIR)) {
+      const names = await readdir(JOBS_DIR);
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue;
+        const file = join(JOBS_DIR, name);
+        let job = '';
+        try {
+          const raw = await readFile(file, 'utf8');
+          const parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+          job = typeof parsed.job === 'string' ? parsed.job : '';
+        } catch { job = ''; }
+        specs.push({ file, job });
+      }
+      specs.sort((a, b) => a.job.localeCompare(b.job, 'zh'));
+    }
+    return json ? JSON.stringify({ dir: JOBS_DIR, jobs: specs }) : (specs.map(s => `${s.job || '(缺 job 字段)'}\t${s.file}`).join('\n') || '(空)');
   }
   configureHeadlessForCommand(cmd);
   if (cmd === 'switch-job') return runSwitchJob(parseSwitchJobArgs(tail), json);

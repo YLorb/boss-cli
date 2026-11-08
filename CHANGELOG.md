@@ -2,6 +2,13 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 多岗位收集编排 + 消歧证据先带 + 搜索岗位态恢复
+
+- 新增 `boss spec-list --json` 枚举 `~/.boss-cli/jobs/` 的岗位规范文件，作为多岗位收集的岗位清单来源。
+- 新增 `references/multi-job-collection.md`：枚举→固定清单→逐岗收集→分岗记账→收尾恢复；逐岗 `--mode screen|collect-only`。
+- 定位规范改为「消歧证据（data-id/info）先带后搜」，快照即消歧依据，不先空参搜索诱发重名。
+- 搜索 SOP 增加「搜索前记录岗位态、搜索后恢复」；switch-job 增加沟通页切岗收尾恢复。
+
 ## 2026-11-08 · feat(cli): collect 评估门（screen/collect-only 模式）
 
 - `boss collect --mode screen|collect-only`；screen（默认）决策必须带评估证据（PASS↔fit、FAIL↔not-fit，可选 ref），collect-only 仅收集不评估。
