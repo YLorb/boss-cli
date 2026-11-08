@@ -23,6 +23,9 @@ export type TaskConfig = {
   permit: string;
   stop: TaskStop;
   phases?: Phase[];
+  mode?: 'screen' | 'collect-only';
+  jobSpec?: string;
+  messageScript?: string;
 };
 
 export function taskConfigPath(): string | null {
@@ -30,11 +33,23 @@ export function taskConfigPath(): string | null {
   return raw ? raw : null;
 }
 
+/** 拒绝未知字段：防止拼写错误（如 observeLmit）被静默接受。 */
+function rejectUnknownKeys(obj: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  for (const key of Object.keys(obj)) {
+    if (!allowed.includes(key)) throw new Error(`${label} 含未知字段：${key}；允许：${allowed.join(', ')}。`);
+  }
+}
+
+const STOP_KEYS = ['observeLimit', 'contactLimit', 'deadline', 'maxConsecutiveFailures'] as const;
+const TASK_KEYS = ['schemaVersion', 'job', 'scope', 'permit', 'stop', 'phases', 'mode', 'jobSpec', 'messageScript'] as const;
+const PHASE_KEYS = ['name', 'allowed'] as const;
+
 function validateStop(value: unknown): asserts value is TaskStop {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('task.stop 必须是对象。');
   }
   const stop = value as Record<string, unknown>;
+  rejectUnknownKeys(stop, STOP_KEYS, 'task.stop');
   for (const key of ['observeLimit', 'contactLimit', 'maxConsecutiveFailures']) {
     const n = stop[key];
     if (n !== undefined && (!Number.isInteger(n) || (n as number) <= 0)) {
@@ -52,7 +67,8 @@ function validateTaskConfig(value: unknown): asserts value is TaskConfig {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('任务配置必须是对象。');
   }
-  const t = value as Partial<TaskConfig>;
+  const t = value as Record<string, unknown>;
+  rejectUnknownKeys(t, TASK_KEYS, '任务配置');
   if (t.schemaVersion !== 1) throw new Error('任务配置 schemaVersion 必须为 1。');
   if (typeof t.job !== 'string' || !t.job.trim()) throw new Error('任务配置 job 必须是非空字符串。');
   if (t.scope !== 'collect' && t.scope !== 'recommend' && t.scope !== 'search' && t.scope !== 'view-only') {
@@ -60,6 +76,15 @@ function validateTaskConfig(value: unknown): asserts value is TaskConfig {
   }
   if (typeof t.permit !== 'string' || !t.permit.trim() || !isAbsolute(t.permit)) {
     throw new Error('任务配置 permit 必须是指向 permit 文件的绝对路径。');
+  }
+  if (t.mode !== undefined && t.mode !== 'screen' && t.mode !== 'collect-only') {
+    throw new Error('任务配置 mode 必须是 screen 或 collect-only。');
+  }
+  if (t.jobSpec !== undefined && (typeof t.jobSpec !== 'string' || !t.jobSpec.trim())) {
+    throw new Error('任务配置 jobSpec 必须是非空字符串（岗位规范文件路径）。');
+  }
+  if (t.messageScript !== undefined && typeof t.messageScript !== 'string') {
+    throw new Error('任务配置 messageScript 必须是字符串。');
   }
   validateStop(t.stop);
   if (t.phases !== undefined) validatePhases(t.phases);
@@ -70,7 +95,8 @@ function validatePhases(value: unknown): asserts value is Phase[] {
   const names = new Set<string>();
   for (const phase of value) {
     if (!phase || typeof phase !== 'object' || Array.isArray(phase)) throw new Error('phases 的每一项必须是对象。');
-    const p = phase as Partial<Phase>;
+    const p = phase as Record<string, unknown>;
+    rejectUnknownKeys(p, PHASE_KEYS, 'phase');
     if (typeof p.name !== 'string' || !p.name.trim()) throw new Error('phases 的 name 必须是非空字符串。');
     if (names.has(p.name)) throw new Error(`phases 的 name 重复：${p.name}`);
     names.add(p.name);

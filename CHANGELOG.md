@@ -2,6 +2,14 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · fix(cli): 统一启动/配置缺陷修复（run 消费、账本绑定、版本核验、严格字段、原子写）
+
+- run 记录被消费：`activateRunBindings` 在命令入口加载 current 指针，自动启用 permit/flow-state/账本目录。
+- task-init 核验实际 Skill 版本（checkSkillCompatibility），记录 actual 而非常量；版本不匹配拒绝初始化。
+- collect 账本目录与 run.ledgerDir 一致性检查，不一致拒绝。
+- task config 拒绝未知字段（防拼写错误静默接受），新增 mode/jobSpec/messageScript 字段。
+- run 文件改为 link 独占 + 临时文件原子落盘（不再留半截 JSON）；RUNS_DIR 支持 BOSS_RUNS_DIR 隔离。
+
 ## 2026-11-08 · feat(cli): 阶段校验（phase）
 
 - task config 新增 `phases`（`[{name, allowed}]`）；`src/cli/phase_state.ts` 阶段级命令白名单。

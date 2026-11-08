@@ -62,12 +62,31 @@ test('loadTaskConfig: invalid schema/stop fields fail closed', async t => {
     { ...base, stop: { observeLimit: 0 } },
     { ...base, stop: { deadline: 'not-a-date' } },
     { ...base, permit: 'relative/permit.json' },
+    // 未知字段拒绝（拼写错误不被静默接受）
+    { ...base, stop: { observeLmit: 20 } },
+    { ...base, mode: 'unknown' },
+    { ...base, unknownField: true },
   ];
   for (const doc of bad) {
     const file = join(dir, `bad-${Math.random().toString(36).slice(2)}.json`);
     await writeFile(file, JSON.stringify(doc));
     await assert.rejects(() => loadTaskConfig(file));
   }
+});
+
+test('loadTaskConfig: accepts mode/jobSpec/messageScript fields', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'task-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const permit = await writePermit(dir);
+  const file = join(dir, 'task.json');
+  await writeFile(file, JSON.stringify({
+    schemaVersion: 1, job: '岗位 A', scope: 'collect', permit, stop: {},
+    mode: 'collect-only', jobSpec: 'C:\\jobs\\岗位A.json', messageScript: '对外话术',
+  }));
+  const task = await loadTaskConfig(file);
+  assert.equal(task.mode, 'collect-only');
+  assert.equal(task.jobSpec, 'C:\\jobs\\岗位A.json');
+  assert.equal(task.messageScript, '对外话术');
 });
 
 test('taskConfigPath: returns null when env unset', () => {

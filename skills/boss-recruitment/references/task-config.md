@@ -45,6 +45,11 @@ BOSS_TASK_CONFIG=<任务配置绝对路径>
 | stop.deadline | 否 | 本轮绝对截止时间（可解析 ISO 字符串） |
 | stop.maxConsecutiveFailures | 否 | 同类动作连续失败达到阈值即自动暂停 |
 | phases | 否 | 阶段序列（见[阶段校验](phase-state.md)）：`[{name, allowed}]`，声明后启用阶段级白名单 |
+| mode | 否 | 收集模式：`screen`（默认，评估+收集）/ `collect-only`（仅收集） |
+| jobSpec | 否 | 岗位规范文件绝对路径（评估规则引用） |
+| messageScript | 否 | 对外可发送的话术 |
+
+未知字段（含拼写错误）一律拒绝，不静默接受。
 
 ## 校验入口
 
@@ -62,9 +67,10 @@ boss task-check [--json]
 boss task-init [--json]
 ```
 
-- 校验 task config 与 permit（同上），然后生成确定性 runId（job 哈希前缀 + 秒级时间戳）。
-- 原子写入 `~/.boss-cli/runs/<runId>.json`，绑定：permit 路径、flow-state 路径（若设 BOSS_FLOW_STATE）、账本目录（`~/.boss-cli/ledgers`）、CLI/Skill 版本、stop 条件。
-- 同岗位同秒重复启动由文件 `wx` 独占检测拒绝，不覆盖已有实例。
+- 校验 task config 与 permit（同上），核验实际 Skill 版本（版本不匹配拒绝初始化），然后生成确定性 runId（job 哈希前缀 + 秒级时间戳）。
+- 原子写入 `~/.boss-cli/runs/<runId>.json`（link 独占 + 临时文件），绑定：permit 路径、flow-state 路径（未设 `BOSS_FLOW_STATE` 时自动生成确定性默认路径）、账本目录（`~/.boss-cli/ledgers` 或 `BOSS_LEDGER_DIR`）、**实际加载的** CLI/Skill 版本、stop 条件。
+- 写入 `~/.boss-cli/runs/current.json` 指针；后续每条命令通过 `activateRunBindings` 加载指针，自动把 permit/flow-state/账本目录填入进程环境变量（仅在未显式设置时），实现"启动一次、全程自动启用护栏"。
+- 同岗位同秒重复启动由文件独占检测拒绝，不覆盖已有实例。
 - 返回 `{ok:true, runId, createdAt, job, scope, permit, flowState, ledgerDir, cliVersion, skillVersion, compatibilityId, stop}`。
 
 ## 与其它配置的关系

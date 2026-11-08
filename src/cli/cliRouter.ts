@@ -48,7 +48,7 @@ import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
 import { checkTaskConfig } from './task_config.js';
-import { initRun } from './run_state.js';
+import { initRun, activateRunBindings } from './run_state.js';
 import { assertPermittedPhase, currentPhase, isPhaseDenied, setPhase } from './phase_state.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME, JOBS_DIR } from '../config.js';
@@ -1072,20 +1072,22 @@ async function executeManagedCommand(argv: string[]): Promise<string> {
     if (!report.compatible) process.exitCode = 2;
     return JSON.stringify(report);
   }
+  // 消费机制：加载 current run 指针，自动启用 permit / flow-state / 账本目录。
+  await activateRunBindings();
   if (argv[0] === 'task-check') {
     if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-check [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
     const report = await checkTaskConfig();
     return JSON.stringify({ ok: true, ...report });
   }
-  if (argv[0] === 'task-init') {
-    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-init [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
-    const run = await initRun();
-    return JSON.stringify({ ok: true, ...run });
-  }
   if (argv[0] !== 'update') {
     const parsed = splitVersionConfirmation(argv);
     await requireSkillCompatibility(parsed.confirmation);
     argv = parsed.argv;
+  }
+  if (argv[0] === 'task-init') {
+    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-init [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
+    const run = await initRun();
+    return JSON.stringify({ ok: true, ...run });
   }
   return isAttachmentCommand(argv) ? runCommandProcess(argv) : executeCommand(argv);
 }
@@ -1142,6 +1144,7 @@ async function runInteractiveLoop(): Promise<void> {
 
 export async function runCli(argv: string[]): Promise<void> {
   if (argv[0] === 'collect') {
+    await activateRunBindings();
     const parsed = splitVersionConfirmation(argv);
     await requireSkillCompatibility(parsed.confirmation);
     argv = parsed.argv;
@@ -1151,8 +1154,14 @@ export async function runCli(argv: string[]): Promise<void> {
     }
     const mode = (opts.mode ?? 'screen') as 'screen' | 'collect-only';
     if (mode !== 'screen' && mode !== 'collect-only') die('❌ collect --mode 必须是 screen 或 collect-only。');
+    // 账本目录一致性：run 绑定的 ledgerDir 与显式 --ledger-dir 不一致即拒绝。
+    const boundLedgerDir = process.env.BOSS_LEDGER_DIR?.trim();
+    const requestedLedgerDir = opts['ledger-dir']?.trim();
+    if (boundLedgerDir && requestedLedgerDir && requestedLedgerDir !== boundLedgerDir) {
+      die(`❌ collect --ledger-dir 与运行绑定账本目录不一致：${requestedLedgerDir} / ${boundLedgerDir}`);
+    }
     try {
-      await runCollectionSession(opts['ledger-dir'] || join(APP_HOME, 'ledgers'), opts.job.trim(), mode);
+      await runCollectionSession(requestedLedgerDir || boundLedgerDir || join(APP_HOME, 'ledgers'), opts.job.trim(), mode);
     } finally { await cleanupAfterCommand('collect', true); }
     return;
   }
