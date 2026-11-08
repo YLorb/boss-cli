@@ -5,8 +5,25 @@ import { appendFileSync } from 'node:fs';
 import { Ledger } from './ledger.js';
 import { CollectionRunner, type Candidate } from './runner.js';
 import { runFullCandidateInventory } from '../toolset/list.js';
+import { getBoundRun } from '../cli/run_state.js';
+import { assertPermittedCommand } from '../cli/permit.js';
+import { assertPermittedPhase, recordCollectionDecision, readCollectionReceipt } from '../cli/phase_state.js';
 
 export type CollectionMode = 'screen' | 'collect-only';
+
+async function applyDownloadReceipt(ledger:Ledger,id:string):Promise<void>{
+  if(ledger.recoveryRequired)throw new Error('有信息需要恢复。');
+  const receipt=await readCollectionReceipt(id);
+  ledger.add({dataId:id,name:receipt.name});
+  if((getBoundRun()!.task.mode??'screen')==='screen')ledger.decide(id,'PASS');
+  ledger.recordProbe(id,receipt);
+}
+export async function syncCollectionReceipt(id:string):Promise<string>{
+  const run=getBoundRun();if(!run||run.scope!=='collect')throw new Error('collect-sync 需要正式收集任务绑定');
+  const ledger=await Ledger.load(run.ledgerDir,run.job);
+  try{await applyDownloadReceipt(ledger,id);return JSON.stringify({ok:true,dataId:id,file:ledger.file,status:ledger.get(id).status});}
+  finally{await ledger.stop();}
+}
 
 function validateDecisionEvidence(evidence: unknown): { verdict: 'fit' | 'not-fit'; ref?: string } {
   if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
@@ -59,6 +76,10 @@ export async function runCollectionSession(directory: string, job: string, mode:
         throw new Error('有信息需要恢复。');
       }
       switch (command.op) {
+        case 'receipt': {
+          await applyDownloadReceipt(ledger,command.dataId as string);
+          emit({ok:true,op:'receipt',dataId:command.dataId,status:ledger.get(command.dataId as string).status});break;
+        }
         case 'show':
           emit({ ok: true, op: 'show', recoveryRequired: ledger.recoveryRequired, candidates: ledger.entries() });
           break;
@@ -82,12 +103,16 @@ export async function runCollectionSession(directory: string, job: string, mode:
           } else {
             audit({ op: 'decision', dataId, decision: command.decision, mode: currentMode, evidence: null });
           }
+          // 先核验材料门，再更新正式账本；阶段结论在账本成功后写入。
+          await recordCollectionDecision(dataId,command.decision === 'PASS' ? 'fit' : 'not-fit',false);
           ledger.decide(dataId, command.decision);
+          await recordCollectionDecision(dataId,command.decision === 'PASS' ? 'fit' : 'not-fit');
           emit({ ok: true, op: 'decision', dataId, removed: command.decision === 'FAIL' });
           break;
         }
         case 'mode': {
           if (command.value !== 'screen' && command.value !== 'collect-only') throw new Error('mode 必须是 screen 或 collect-only。');
+          const run=getBoundRun();if(run&&command.value!==(run.task.mode??'screen'))throw new Error('mode 与冻结任务不匹配，必须明确重新初始化任务');
           currentMode = command.value;
           audit({ op: 'mode-change', value: command.value });
           emit({ ok: true, op: 'mode', mode: currentMode });
@@ -98,6 +123,8 @@ export async function runCollectionSession(directory: string, job: string, mode:
           emit({ ok: true, op: command.op, results: await runner.round(command.op) });
           break;
         case 'reconcile': {
+          await assertPermittedCommand('list',['list','--json']);
+          await assertPermittedPhase('list',['list','--json']);
           ledger.beginReconciliation();
           const inventory = JSON.parse(await runFullCandidateInventory(() => runner.stopRequested)) as { candidates: Candidate[] };
           if (runner.stopRequested) break;

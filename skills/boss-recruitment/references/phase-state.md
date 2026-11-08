@@ -1,54 +1,50 @@
 ---
-title: "阶段校验（phase）"
-read_when: "本轮按阶段推进、切换阶段、或动作被阶段拒绝"
+title: "阶段与业务前置条件"
 updated: "2026-11-08"
 scope: "phase-state"
 ---
 
-# 阶段校验
+# Agent 选择合法分支
 
-本轮任务按声明顺序分阶段推进（如先 collect、再 recommend、再 search），当前阶段只放行该阶段声明的命令。Agent 选动作，CLI 检查并拒绝越界。
+正式任务执行 task-init 后自动启用阶段/业务状态。Agent通过 `boss phase-status --json` 查看当前阶段、allowedActions、blockedActions、suggestedAction、当前对象及未决动作。建议下一步不构成额外授权；实际执行前再次校验。
 
-## 开关
+## 自由与边界
 
-- 阶段定义：task config 的 `phases` 数组（见[任务配置](task-config.md)）。
-- 当前阶段：`BOSS_PHASE_STATE` 指向阶段状态文件（`{version:1, phase, at}`）。
+Agent可以选择多个合法分支、读取已收集材料、判断 fit/not-fit/unknown，并在本轮授权内补充核验。程序不替 Agent 做主观评价。下列条件由真实命令回执建立，不能靠换阶段名声明已完成：
 
-`BOSS_PHASE_STATE` 未设置时不拦截；设置了但 task config 未声明 `phases`、或阶段状态未初始化，则 fail-closed。
+| 动作 | 前置条件 |
+| --- | --- |
+| 定位/预览/收件 | 当前岗位已核验、稳定ID在冻结范围内 |
+| OCR | 图片属于当前人的已返回截图 |
+| decide / screen收集决策 | 本人的 OCR 已完整返回 |
+| greet | 本人已评估fit，未超过触达上限，历史动作无未决/重复 |
+| 收集下载 | screen已评估fit；collect-only按明确授权收集 |
+| 消息2 | 已有实际下载文件回执，正文等于本轮授权 |
+| 寻访消息 | fit、联系确认、授权正文、没有已发送或未决记录 |
 
-## phases 结构
+首次用带 `--job <完整岗位>` 的check且返回true，或status实际岗位匹配，建立岗位核验。只读检查通过不是业务动作成功。正式业务命令带 --json；截图/OCR原文件保留，滚轮及随机停顿不变。
+
+## 可选阶段序列
 
 ```json
 {
   "phases": [
-    { "name": "collect",   "allowed": { "collect": [], "list": [], "chat": [], "probe-resume": [], "ocr": [], "action": ["resume"] } },
-    { "name": "recommend", "allowed": { "recommend": [], "preview": [], "greet": [], "decide": [] } },
-    { "name": "search",    "allowed": { "search": [], "search-more": [], "preview": [], "greet": [], "back": [], "decide": [] } }
+    {"name":"read","allowed":{"list":[],"chat":[],"preview":[],"ocr":[],"decide":[],"back":[]}},
+    {"name":"contact","allowed":{"greet":[],"send":[],"back":[]},"requires":["evaluated","no-pending"]}
   ]
 }
 ```
 
-- `name` 唯一，按声明顺序推进。
-- `allowed` 复用 permit 的「命令名 → 变体数组」结构；`[]` = 命令名级放行，非空 = 变体白名单（仅 `action` 支持子动作粒度）。
+task-init从第一个阶段开始。`phase-set --phase <名字> --json`只能保持当前阶段或前进一个阶段：当前阶段须有成功业务回执、无暂停/未决动作，且目标阶段requires全部满足。禁止跳步和倒退；默认业务门始终有效。
 
-## 命令
+requires支持job-verified、scope-frozen、material-ready、evaluated、download-confirmed、no-pending。它们读取程序保存的回执状态。allowed复用permit命令/子动作格式，并与全局permit取交集。
 
-```
-boss phase-set --phase <阶段名> [--json]   # 校验阶段名存在，写入当前阶段
-boss phase-status [--json]                  # 读当前阶段
-```
+## 停止、恢复与历史
 
-- `phase-set` 校验阶段名必须在 task config 的 phases 中，否则拒绝。
-- 阶段切换动作本身可审计（写入阶段状态文件的 at 时间戳）。
+到截止时间、观察/触达上限、连续失败阈值时拒绝依赖动作。验证/疑似风控会暂停；全局暂停时也不继续访问页面。phase-status和flow-status为本地状态读取。
 
-## 越界拒绝
+发送或联系前保存持久意图，失败未知保留未决。只读status不会清除未决。明确的发送前失败可按既有授权核验后重试；结果未知不能按未发送处理。消息核验必须匹配同人、同岗、完整正文；历史未找到不等于未发送。
 
-- 每个动作执行前，CLI 先过 permit（全局），再过 phase（阶段级）。
-- 当前阶段未放行该命令 → `PhaseDeniedError`，退出码 2，fail-closed。
-- 永不拦截：`phase-set`/`phase-status` 及只读诊断（status/check/flow-status/spec-list/task-check/task-init 等）。
+flow-resume必须在permit里显式授权，且仍有未决动作时不能恢复。旧账本恢复/对账继续遵守 ledger-and-recovery.md 的岗位与恢复范围授权规则。不得直接改状态JSON清锁。
 
-## 与 permit 的关系
-
-- **permit**：全局"能做什么"（跨阶段兜底）。
-- **phase**：当前阶段"能做什么"（时间维度收紧）。
-- 两者叠加：命令必须同时通过 permit 和当前阶段白名单。
+手工模式的 BOSS_PHASE_STATE 仅提供显式阶段能力；正式任务需要task-init建立完整状态。该机制不是操作系统权限隔离。

@@ -1,5 +1,9 @@
 # Boss URL 与功能对照
 
+2026-11-08：`task-check --json` 离线校验任务/permit/岗位规范；`task-init --json` 校验实际版本，创建 schemaVersion=2 绑定和独立 flow/phase，不连接浏览器。正式命令校验绑定内容，collect核对岗位、模式、账本目录；阶段门覆盖会话入口、stdin决策/对账及附件worker。`phase-status --json` 返回允许动作和阻断原因；`phase-set` 仅允许满足回执前置条件的相邻前进。BOSS_RUN_ID 显式固定运行。详见 Skill task-config.md、phase-state.md。
+
+`collect-sync --data-id <ID> --json` 是本地收集回执提交，不要求当前页面位置，不连接浏览器。仅限已绑定的收集任务：核验本轮同人下载回执及实际文件字节数/SHA256后写入固定岗位账本；运行中的 collect 会话使用 stdin `{"op":"receipt","dataId":"ID"}`。文件、身份或回执不符直接拒绝，不重新下载，不自动切换两种提交方式。
+
 每次新的常规搜索请求，依次独立执行 `boss search --city "城市" --json`、`boss search --job "岗位原名" --json`、`boss search --keyword "完整关键词" --json`。每条核对回执中的城市、岗位和关键词，设置阶段返回 `submitted=false`。选岗若改写城市，CLI 先恢复该步骤开始前的已选城市。三项同时符合本轮请求后，再单独执行 `boss search --submit --json`，只点击一次搜索并核验对应响应后读取简历列表。关键词中的“、”按原文保留。任一步失败保存回执并停止，不能继续提交。页面可能因筛选自动加载，CLI 不刷新页面。
 
 推荐页起始检查在主页面只读等待当前挂载的推荐 iframe 显示岗位和列表，最长 18 秒。此时内嵌页面可正常替换。开始操作下拉框后，若目标选项点击前 iframe 失效则停止。目标选项最多点击一次，点击后从主页面只读确认当前 iframe 显示目标岗位和列表。等待超时或切岗期间顶层导航时停止。页面守卫在同一文档只安装一次，新文档独立初始化。

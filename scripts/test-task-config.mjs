@@ -13,7 +13,7 @@ async function writePermit(dir) {
 
 async function writeTask(dir, overrides = {}) {
   const file = join(dir, 'task.json');
-  const doc = { schemaVersion: 1, job: '岗位 A', scope: 'collect', permit: await writePermit(dir), stop: {}, ...overrides };
+  const doc = { schemaVersion: 1, job: '岗位 A', scope: 'collect', mode:'collect-only',messageScript:'对外话术',permit: await writePermit(dir), stop: {}, ...overrides };
   await writeFile(file, JSON.stringify(doc));
   return { file, doc };
 }
@@ -44,7 +44,7 @@ test('loadTaskConfig: scope/job mismatch with permit fails closed', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'task-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   // scope 与 permit.entry 不一致
-  const { file } = await writeTask(dir, { scope: 'search' });
+  const { file } = await writeTask(dir, { scope: 'search',mode:undefined });
   const prev = process.env.BOSS_TASK_CONFIG;
   process.env.BOSS_TASK_CONFIG = file;
   t.after(() => { process.env.BOSS_TASK_CONFIG = prev; });
@@ -78,14 +78,16 @@ test('loadTaskConfig: accepts mode/jobSpec/messageScript fields', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'task-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const permit = await writePermit(dir);
+  const spec = join(dir,'job-spec.json');
+  await writeFile(spec,JSON.stringify({schemaVersion:1,job:'岗位 A'}));
   const file = join(dir, 'task.json');
   await writeFile(file, JSON.stringify({
     schemaVersion: 1, job: '岗位 A', scope: 'collect', permit, stop: {},
-    mode: 'collect-only', jobSpec: 'C:\\jobs\\岗位A.json', messageScript: '对外话术',
+    mode: 'collect-only', jobSpec: spec, messageScript: '对外话术',
   }));
   const task = await loadTaskConfig(file);
   assert.equal(task.mode, 'collect-only');
-  assert.equal(task.jobSpec, 'C:\\jobs\\岗位A.json');
+  assert.equal(task.jobSpec, spec);
   assert.equal(task.messageScript, '对外话术');
 });
 

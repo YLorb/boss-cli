@@ -19,7 +19,7 @@ writeFileSync(join(output,'run.json'),JSON.stringify({startedAt:new Date().toISO
 const stages=[];
 function run(name,command,args){
   const start=Date.now();
-  const r=spawnSync(command,args,{cwd:root,encoding:'utf8',windowsHide:true,env:{...process.env,BOSS_SKILL_DIR:join(root,'skills','boss-recruitment')},maxBuffer:32*1024*1024,timeout:180000});
+  const r=spawnSync(command,args,{cwd:root,encoding:'utf8',windowsHide:true,env:{...process.env,BOSS_APP_HOME:join(output,'isolated-home'),BOSS_RUNS_DIR:join(output,'isolated-home','runs'),BOSS_SKILL_DIR:join(root,'skills','boss-recruitment')},maxBuffer:32*1024*1024,timeout:180000});
   writeFileSync(join(output,name+'.log'),(r.stdout??'')+(r.stderr??'')+(r.error?String(r.error):''));
   const result={name,status:r.status===0&&!r.error?'passed':'failed',exitCode:r.status,ms:Date.now()-start};stages.push(result);
   console.log(JSON.stringify(result));
@@ -30,11 +30,15 @@ if(!run('build',process.execPath,['node_modules/typescript/bin/tsc']))process.ex
 if(!run('archive',opts['--python']??'python',[join(root,'scripts/harness/read_archive.py'),archive,join(output,'dataset.json')]))process.exit(1);
 // Explicit list prevents accidental discovery of scripts that access real accounts.
 const suites=[
+ ['managed-task',['scripts/test-task-config.mjs','scripts/test-run-state.mjs','scripts/test-run-atomic.mjs','scripts/test-phase-state.mjs','scripts/test-managed-routing.mjs','scripts/test-offline-boundary.mjs']],
  ['unit',['scripts/test-collection.mjs','scripts/test-resume-analysis-session.mjs','scripts/test-resume-capture-timing.mjs','scripts/test-switch-job-route.mjs']],
+ ['flow-lock',['scripts/test-flow-lock.mjs']],
+ ['iframe-guard',['scripts/test-iframe-boundary.mjs','scripts/test-session-guard-boundary.mjs','scripts/test-session-no-recovery.mjs','scripts/test-resume-frame-recovery.mjs','scripts/test-page-guard-installation.mjs']],
  ['api-contract',['scripts/test-resume-ocr.mjs']],
 ];
 let ok=true;
 for(const [name,files] of suites)if(!run(name,process.execPath,['--experimental-test-module-mocks','--test',...files]))ok=false;
+if(!run('workflow-simulation',process.execPath,['scripts/simulation/replay.mjs',join(output,'workflow')]))ok=false;
 if(!run('archive-replay',process.execPath,['scripts/harness/replay.mjs',join(output,'dataset.json'),output]))ok=false;
 console.log('Report: '+join(output,'summary.json'));
 process.exitCode=ok?0:1;

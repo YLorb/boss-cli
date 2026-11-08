@@ -2,7 +2,7 @@
 // 仅在设置 BOSS_TASK_CONFIG 时参与校验；未设置时不影响其它命令（task-check 除外）。
 // 这是编排级任务声明，不是系统级权限隔离。
 import { readFile } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { loadPermit, type PermitDoc } from './permit.js';
 
 export type TaskScope = 'collect' | 'recommend' | 'search' | 'view-only';
@@ -15,6 +15,7 @@ export type TaskStop = {
 export type Phase = {
   name: string;
   allowed: Record<string, string[]>;
+  requires?: ('job-verified' | 'scope-frozen' | 'material-ready' | 'evaluated' | 'download-confirmed' | 'no-pending')[];
 };
 export type TaskConfig = {
   schemaVersion: 1;
@@ -26,6 +27,8 @@ export type TaskConfig = {
   mode?: 'screen' | 'collect-only';
   jobSpec?: string;
   messageScript?: string;
+  ledgerDir?: string;
+  targets?: { id: string; name: string }[];
 };
 
 export function taskConfigPath(): string | null {
@@ -41,8 +44,8 @@ function rejectUnknownKeys(obj: Record<string, unknown>, allowed: readonly strin
 }
 
 const STOP_KEYS = ['observeLimit', 'contactLimit', 'deadline', 'maxConsecutiveFailures'] as const;
-const TASK_KEYS = ['schemaVersion', 'job', 'scope', 'permit', 'stop', 'phases', 'mode', 'jobSpec', 'messageScript'] as const;
-const PHASE_KEYS = ['name', 'allowed'] as const;
+const TASK_KEYS = ['schemaVersion', 'job', 'scope', 'permit', 'stop', 'phases', 'mode', 'jobSpec', 'messageScript', 'ledgerDir', 'targets'] as const;
+const PHASE_KEYS = ['name', 'allowed', 'requires'] as const;
 
 function validateStop(value: unknown): asserts value is TaskStop {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -52,13 +55,13 @@ function validateStop(value: unknown): asserts value is TaskStop {
   rejectUnknownKeys(stop, STOP_KEYS, 'task.stop');
   for (const key of ['observeLimit', 'contactLimit', 'maxConsecutiveFailures']) {
     const n = stop[key];
-    if (n !== undefined && (!Number.isInteger(n) || (n as number) <= 0)) {
-      throw new Error(`task.stop.${key} 必须是正整数。`);
+    if (n !== undefined && (!Number.isSafeInteger(n) || (n as number) < (key === 'contactLimit' ? 0 : 1))) {
+      throw new Error(`task.stop.${key} 必须是${key === 'contactLimit' ? '非负' : '正'}安全整数。`);
     }
   }
   if (stop.deadline !== undefined) {
-    if (typeof stop.deadline !== 'string' || !Number.isFinite(Date.parse(stop.deadline))) {
-      throw new Error('task.stop.deadline 必须是可解析的时间字符串。');
+    if (typeof stop.deadline !== 'string' || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(stop.deadline) || !Number.isFinite(Date.parse(stop.deadline))) {
+      throw new Error('task.stop.deadline 必须是含时区的 ISO 时间。');
     }
   }
 }
@@ -80,11 +83,23 @@ function validateTaskConfig(value: unknown): asserts value is TaskConfig {
   if (t.mode !== undefined && t.mode !== 'screen' && t.mode !== 'collect-only') {
     throw new Error('任务配置 mode 必须是 screen 或 collect-only。');
   }
+  if (t.mode !== undefined && t.scope !== 'collect') throw new Error('mode 仅适用于 collect。');
   if (t.jobSpec !== undefined && (typeof t.jobSpec !== 'string' || !t.jobSpec.trim())) {
     throw new Error('任务配置 jobSpec 必须是非空字符串（岗位规范文件路径）。');
   }
   if (t.messageScript !== undefined && typeof t.messageScript !== 'string') {
     throw new Error('任务配置 messageScript 必须是字符串。');
+  }
+  if (t.ledgerDir !== undefined && (typeof t.ledgerDir !== 'string' || !isAbsolute(t.ledgerDir))) throw new Error('ledgerDir 必须是绝对路径。');
+  if (t.targets !== undefined) {
+    if (!Array.isArray(t.targets)) throw new Error('targets 必须是候选人数组。');
+    const ids = new Set<string>();
+    for (const target of t.targets) {
+      if (!target || typeof target !== 'object' || Array.isArray(target)) throw new Error('targets 每项必须是对象。');
+      rejectUnknownKeys(target, ['id', 'name'], 'target');
+      if (typeof target.id !== 'string' || !target.id.trim() || typeof target.name !== 'string' || !target.name.trim() || ids.has(target.id)) throw new Error('targets 需要非空姓名、唯一非空 id。');
+      ids.add(target.id);
+    }
   }
   validateStop(t.stop);
   if (t.phases !== undefined) validatePhases(t.phases);
@@ -100,6 +115,7 @@ function validatePhases(value: unknown): asserts value is Phase[] {
     if (typeof p.name !== 'string' || !p.name.trim()) throw new Error('phases 的 name 必须是非空字符串。');
     if (names.has(p.name)) throw new Error(`phases 的 name 重复：${p.name}`);
     names.add(p.name);
+    if (p.requires !== undefined && (!Array.isArray(p.requires) || p.requires.some(r => !['job-verified', 'scope-frozen', 'material-ready', 'evaluated', 'download-confirmed', 'no-pending'].includes(r)))) throw new Error(`phases.${p.name}.requires 无效。`);
     if (!p.allowed || typeof p.allowed !== 'object' || Array.isArray(p.allowed)) {
       throw new Error(`phases.${p.name}.allowed 必须是非空对象。`);
     }
@@ -126,7 +142,21 @@ export async function loadTaskConfig(path: string): Promise<TaskConfig> {
     throw new Error(`任务配置文件无效 JSON：${path}；${error instanceof Error ? error.message : String(error)}`);
   }
   validateTaskConfig(value);
-  return value as TaskConfig;
+  if (value.jobSpec !== undefined) {
+    if (!isAbsolute(value.jobSpec)) throw new Error('jobSpec 必须是绝对路径。');
+    let spec: Record<string, unknown>;
+    try { spec = JSON.parse((await readFile(value.jobSpec, 'utf8')).replace(/^\uFEFF/, '')); }
+    catch (error) { throw new Error(`jobSpec 不可读或 JSON 无效：${value.jobSpec}；${String(error)}`); }
+    if (!spec || Array.isArray(spec) || spec.schemaVersion !== 1 || spec.job !== value.job) throw new Error(`jobSpec schemaVersion/job 与任务不匹配：${value.jobSpec}`);
+  }
+  return {...value,permit:resolve(value.permit),...(value.jobSpec?{jobSpec:resolve(value.jobSpec)}:{}),...(value.ledgerDir?{ledgerDir:resolve(value.ledgerDir)}:{}),...(value.scope==='collect'?{mode:value.mode??'screen'}:{}),stop:{...value.stop,...(value.stop.deadline?{deadline:new Date(value.stop.deadline).toISOString()}:{})}} as TaskConfig;
+}
+
+/** 对象字段顺序不影响任务身份，数组顺序保留业务含义。 */
+export function canonicalTask(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalTask).join(',')}]`;
+  if (value !== null && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalTask((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  return JSON.stringify(value);
 }
 
 /**
@@ -153,5 +183,7 @@ export async function checkTaskConfig(): Promise<{
   if (permit.entry !== undefined && permit.entry !== task.scope) {
     throw new Error(`任务配置 scope 与 permit.entry 不一致：${task.scope} / ${permit.entry}`);
   }
+  if ((task.scope === 'recommend' || task.scope === 'search' || (task.scope === 'collect' && task.mode !== 'collect-only')) && !task.jobSpec) throw new Error('本轮需要评估，缺少 jobSpec 岗位规范引用。');
+  if (Object.prototype.hasOwnProperty.call(permit.allowed,'send') && !task.messageScript?.trim()) throw new Error('本轮允许 send，缺少已授权的 messageScript 正文。');
   return { task, permit, permitFile: task.permit };
 }

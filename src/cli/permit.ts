@@ -1,3 +1,4 @@
+import { parseCommandArguments } from './arguments.js';
 // 命令白名单审批：单一入口，统一管理本轮允许的 boss-cli 动作。
 // 仅在 BOSS_RUN_PERMIT 设置时启用；未设置则行为不变。
 // 这是编排级收紧，不是系统级权限隔离。
@@ -98,43 +99,9 @@ const ACTION_MAP: Record<string, ChatPageAction> = {
  * argv 为完整参数（含命令名 'action'），与 cliRouter 中 action 分支的解析保持同一实现。
  */
 export function resolveAction(argv: string[]): ChatPageAction | null {
-  const tail = argv.slice(1);
-  const rest: string[] = [];
-  const opts: Record<string, string> = {};
-  for (let i = 0; i < tail.length; i++) {
-    const a = tail[i];
-    if (a === '--') {
-      rest.push(...tail.slice(i + 1));
-      break;
-    }
-    if (a.startsWith('--')) {
-      const eq = a.indexOf('=');
-      if (eq !== -1) {
-        opts[a.slice(2, eq)] = a.slice(eq + 1);
-        continue;
-      }
-      const key = a.slice(2);
-      const next = tail[i + 1];
-      if (next !== undefined && !next.startsWith('-')) {
-        opts[key] = next;
-        i += 1;
-      }
-      continue;
-    }
-    if (a.startsWith('-') && a.length > 1) {
-      const short = a.slice(1);
-      const next = tail[i + 1];
-      if (short === 't' && next !== undefined && !next.startsWith('-')) {
-        opts.t = next;
-        i += 1;
-        continue;
-      }
-      if (!/^\d/.test(short)) continue;
-    }
-    rest.push(a);
-  }
+  const { rest, opts } = parseCommandArguments(argv);
   const raw = (rest[0] ?? opts.type ?? opts.action ?? '').trim().toLowerCase();
-  return ACTION_MAP[raw] ?? null;
+  return Object.prototype.hasOwnProperty.call(ACTION_MAP,raw) ? ACTION_MAP[raw] : null;
 }
 
 /** 唯一审批入口：动作执行前调用。失真即拒绝（fail-closed），不静默放行。 */
@@ -150,7 +117,7 @@ export async function assertPermittedCommand(normalizedCmd: string, argv: string
   if (variants.length === 0) return; // 命令名级放行
   if (normalizedCmd === 'action') {
     const action = resolveAction(argv);
-    if (action !== null && variants.includes(action)) {
+    if (action !== null && variants.some(v=>resolveAction(['action',v])===action)) {
       return;
     }
     throw new PermitDeniedError(`action 的子动作未授权：${action ?? '(无法解析)'}；本轮允许：${variants.join(', ')}。`);

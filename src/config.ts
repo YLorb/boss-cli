@@ -1,7 +1,7 @@
 // 配置文件 — 应用数据位于 ~/.boss-cli/.cache/
 
 import { existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 import { homedir } from 'os';
 
 /**
@@ -17,7 +17,8 @@ export function getAgentSkillsDir(): string {
 }
 
 /** 应用主目录（业务数据在 .cache 下） */
-export const APP_HOME = join(homedir(), '.boss-cli');
+export const APP_HOME = process.env.BOSS_APP_HOME?.trim() || join(homedir(), '.boss-cli');
+if (!isAbsolute(APP_HOME)) throw new Error('BOSS_APP_HOME 必须是绝对路径');
 
 /** 存放岗位 JD 的目录（每个岗位一个 .md 文件） */
 export const JD_DIR = join(APP_HOME, 'jd');

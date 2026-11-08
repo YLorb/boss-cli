@@ -1,3 +1,4 @@
+import { parseOpts, CliError } from './arguments.js';
 import { runCheck, runStatus, type CheckCriteria } from '../toolset/check.js';
 import { runSearchSidebar } from '../toolset/search-sidebar.js';
 import { runResumeOcr } from '../common/resume_ocr.js';
@@ -38,7 +39,7 @@ import { printBossInteractiveBanner } from './banner.js';
 import { jsonError, splitJsonFlag } from './output.js';
 import { isAttachmentCommand, runCommandProcess } from './command_process.js';
 import { runProbeTargetResume } from '../toolset/attachment.js';
-import { runCollectionSession } from '../collection/session.js';
+import { runCollectionSession, syncCollectionReceipt } from '../collection/session.js';
 import { runBack } from '../toolset/back.js';
 import { parseSearchMoreArgs, runSearchMore } from '../toolset/search-more.js';
 import { inspectEmbeddedChat, checkEmbeddedChat, sendEmbeddedChat, closeEmbeddedChat } from '../toolset/embedded-chat.js';
@@ -48,8 +49,9 @@ import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
 import { checkTaskConfig } from './task_config.js';
-import { initRun, activateRunBindings } from './run_state.js';
-import { assertPermittedPhase, currentPhase, isPhaseDenied, setPhase } from './phase_state.js';
+import { initRun, activateRunBindings, getBoundRun } from './run_state.js';
+import { installOfflineTestGuard } from '../common/offline_test.js';
+import { assertPermittedPhase, isPhaseDenied, setPhase, phaseStatus, beforePhaseCommand, recordPhaseCommand, failPhaseCommand } from './phase_state.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
@@ -60,12 +62,7 @@ import {
   runPackageUpdate,
 } from './version.js';
 
-class CliError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CliError';
-  }
-}
+
 
 function envTruthy(name: string): boolean {
   const v = (process.env[name] ?? '').trim().toLowerCase();
@@ -261,6 +258,12 @@ function printHelp(): void {
       锁模式（BOSS_FLOW_STATE）下记录当前打开候选人的评估结论；实际 greet 前必须已 decide fit，否则拒绝
 
   boss spec-list [--json]
+  boss task-check --json / boss task-init --json
+      校验任务、权限、岗位规范和配套版本，创建正式运行绑定
+  boss phase-status --json / boss phase-set --phase <阶段名> --json
+      查看合法动作/阻断原因；满足前置条件后相邻推进
+  boss collect-sync --data-id <会话ID> --json
+      collect已停止时，将本轮已核验下载回执写入固定岗位账本
       枚举 ~/.boss-cli/jobs/ 下的岗位规范文件（job spec），用于多岗位收集固定本轮清单
 
   boss flow-status [--json]
@@ -302,59 +305,6 @@ function printHelp(): void {
 }
 
 /** 解析 `--key value` / `--key=value` / 布尔 `--flag` */
-function parseOpts(argv: string[], booleanFlags: ReadonlySet<string> = new Set()): {
-  rest: string[];
-  flags: Set<string>;
-  opts: Record<string, string>;
-} {
-  const rest: string[] = [];
-  const flags = new Set<string>();
-  const opts: Record<string, string> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--') {
-      rest.push(...argv.slice(i + 1));
-      break;
-    }
-    if (a.startsWith('--')) {
-      const eq = a.indexOf('=');
-      if (eq !== -1) {
-        const k = a.slice(2, eq);
-        if (booleanFlags.has(k)) die(`❌ --${k} 是布尔开关，不接受值。`);
-        opts[k] = a.slice(eq + 1);
-        continue;
-      }
-      const key = a.slice(2);
-      if (booleanFlags.has(key)) {
-        flags.add(key);
-        continue;
-      }
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith('-')) {
-        opts[key] = next;
-        i += 1;
-      } else {
-        flags.add(key);
-      }
-      continue;
-    }
-    if (a.startsWith('-') && a.length > 1 && !a.startsWith('--')) {
-      const short = a.slice(1);
-      const next = argv[i + 1];
-      if (short === 't' && next !== undefined && !next.startsWith('-')) {
-        opts.t = next;
-        i += 1;
-        continue;
-      }
-      if (!/^\d/.test(short)) {
-        flags.add(short);
-        continue;
-      }
-    }
-    rest.push(a);
-  }
-  return { rest, flags, opts };
-}
 
 function splitRequirementArg(value: string): string[] {
   return value
@@ -517,18 +467,34 @@ async function withFlowJournal<T>(
  * 执行一条子命令并返回结果（与传入 `process.argv` 切片语义一致，不含 `boss` 本身）。
  */
 export async function executeCommand(argv: string[]): Promise<string> {
+  installOfflineTestGuard();
+  if (process.env.BOSS_RUN_ID) await activateRunBindings();
+  if (!argv.length) die('命令不能为空');
+  const cmd = normalizeSubcommand(argv[0]);
+  await assertPermittedCommand(cmd, argv);
+  await assertPermittedPhase(cmd, argv);
+  await beforePhaseCommand(cmd, argv);
+  try {
+    const result = await executeCommandBody(argv);
+    await recordPhaseCommand(cmd, argv, result);
+    return result;
+  } catch (error) {
+    await failPhaseCommand(cmd, argv, error);
+    throw error;
+  }
+}
+
+async function executeCommandBody(argv: string[]): Promise<string> {
   if (argv.length === 0) {
     die('❌ 空命令');
   }
 
   const cmd = normalizeSubcommand(argv[0]);
-  await assertPermittedCommand(cmd, argv);
-  await assertPermittedPhase(cmd, argv);
   const { args: tail, json } = splitJsonFlag(argv.slice(1));
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'phase-set', 'phase-status', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['collect-sync', 'favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'phase-set', 'phase-status', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -625,9 +591,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
   if(cmd==='phase-status') {
     if(tail.length)die('phase-status 不接受参数');
-    const cur=await currentPhase();
-    if(!cur)die('❌ 阶段状态未初始化；请先 phase-set --phase <阶段名>');
-    return json?JSON.stringify({ok:true,phase:cur}):`当前阶段：${cur}`;
+    const report=await phaseStatus();
+    return JSON.stringify({ok:true,...report as object});
+  }
+  if(cmd==='collect-sync') {
+    const {rest,opts,flags}=parseOpts(tail);
+    if(rest.length||flags.size||!opts['data-id']||Object.keys(opts).some(k=>k!=='data-id'))die('collect-sync --data-id <已下载会话ID> --json');
+    return syncCollectionReceipt(opts['data-id']);
   }
   if(cmd==='spec-list') {
     if(tail.length) die('spec-list 不接受参数');
@@ -1072,22 +1042,21 @@ async function executeManagedCommand(argv: string[]): Promise<string> {
     if (!report.compatible) process.exitCode = 2;
     return JSON.stringify(report);
   }
-  // 消费机制：加载 current run 指针，自动启用 permit / flow-state / 账本目录。
-  await activateRunBindings();
   if (argv[0] === 'task-check') {
     if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-check [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
     const report = await checkTaskConfig();
     return JSON.stringify({ ok: true, ...report });
   }
+  if (argv[0] === 'task-init') {
+    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-init [--json]');
+    await requireSkillCompatibility();
+    return JSON.stringify({ ok: true, ...await initRun() });
+  }
+  await activateRunBindings();
   if (argv[0] !== 'update') {
     const parsed = splitVersionConfirmation(argv);
     await requireSkillCompatibility(parsed.confirmation);
     argv = parsed.argv;
-  }
-  if (argv[0] === 'task-init') {
-    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-init [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
-    const run = await initRun();
-    return JSON.stringify({ ok: true, ...run });
   }
   return isAttachmentCommand(argv) ? runCommandProcess(argv) : executeCommand(argv);
 }
@@ -1143,6 +1112,7 @@ async function runInteractiveLoop(): Promise<void> {
 }
 
 export async function runCli(argv: string[]): Promise<void> {
+  installOfflineTestGuard();
   if (argv[0] === 'collect') {
     await activateRunBindings();
     const parsed = splitVersionConfirmation(argv);
@@ -1152,7 +1122,10 @@ export async function runCli(argv: string[]): Promise<void> {
     if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir', 'mode'].includes(key))) {
       die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]');
     }
-    const mode = (opts.mode ?? 'screen') as 'screen' | 'collect-only';
+    const run = getBoundRun();
+    if (run && (run.scope !== 'collect' || run.job !== opts.job.trim())) die('collect 的岗位/入口与运行任务不匹配');
+    const mode = (opts.mode ?? run?.task.mode ?? 'screen') as 'screen' | 'collect-only';
+    if (run && mode !== (run.task.mode ?? 'screen')) die('collect --mode 与任务配置不匹配');
     if (mode !== 'screen' && mode !== 'collect-only') die('❌ collect --mode 必须是 screen 或 collect-only。');
     // 账本目录一致性：run 绑定的 ledgerDir 与显式 --ledger-dir 不一致即拒绝。
     const boundLedgerDir = process.env.BOSS_LEDGER_DIR?.trim();
@@ -1160,6 +1133,8 @@ export async function runCli(argv: string[]): Promise<void> {
     if (boundLedgerDir && requestedLedgerDir && requestedLedgerDir !== boundLedgerDir) {
       die(`❌ collect --ledger-dir 与运行绑定账本目录不一致：${requestedLedgerDir} / ${boundLedgerDir}`);
     }
+    await assertPermittedCommand('collect', argv);
+    await assertPermittedPhase('collect', argv);
     try {
       await runCollectionSession(requestedLedgerDir || boundLedgerDir || join(APP_HOME, 'ledgers'), opts.job.trim(), mode);
     } finally { await cleanupAfterCommand('collect', true); }

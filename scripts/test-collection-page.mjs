@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test, mock } from 'node:test';
 import puppeteer from 'puppeteer-core';
 
+// All page content is synthetic. Chrome's HTTP(S) traffic uses a closed loopback proxy.
+const launchFixtureBrowser = () => puppeteer.launch({executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',headless:true,args:['--proxy-server=http://127.0.0.1:9','--disable-background-networking']});
 let page;
 const order = [];
 mock.module('../dist/common/boss_session_page.js', { namedExports: {
@@ -21,7 +23,7 @@ const { runFullCandidateInventory } = await import('../dist/toolset/list.js');
 const {INVENTORY_STATE_SCRIPT}=await import('../dist/toolset/chat_inventory.js');
 
 test('probe distinguishes observed attachment and outgoing request from missing evidence', async () => {
-  const browser = await puppeteer.launch({ executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless: true });
+  const browser = await launchFixtureBrowser();
   try {
     page = await browser.newPage();
     const target = { name: '测试甲', dataId: '123' };
@@ -48,7 +50,7 @@ test('probe distinguishes observed attachment and outgoing request from missing 
 });
 
 test('full inventory starts at all/all, waits for the actual end marker and includes read rows', async () => {
-  const browser = await puppeteer.launch({ executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', headless: true });
+  const browser = await launchFixtureBrowser();
   try {
     page = await browser.newPage();
     await page.setRequestInterception(true);
@@ -74,7 +76,7 @@ test('full inventory starts at all/all, waits for the actual end marker and incl
 });
 
 test('inventory state rejects unknown/ambiguous structure and requires actual completion',async()=>{
- const browser=await puppeteer.launch({executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',headless:true});
+ const browser=await launchFixtureBrowser();
  try {
   const p=await browser.newPage();
   const setup=async()=>{
@@ -104,7 +106,7 @@ test('inventory state rejects unknown/ambiguous structure and requires actual co
 });
 
 test('inventory waits for next-page load and refuses incomplete virtual rows',async()=>{
- const browser=await puppeteer.launch({executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',headless:true});
+ const browser=await launchFixtureBrowser();
  try {
   page=await browser.newPage();await page.setRequestInterception(true);
   page.on('request',r=>void r.respond({status:200,contentType:'text/html',body:'<html></html>'}));

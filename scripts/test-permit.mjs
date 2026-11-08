@@ -93,6 +93,14 @@ test('resolveAction: alias and option-value resolution', () => {
   assert.equal(resolveAction(['action', '--type=resume']), 'resume');
   assert.equal(resolveAction(['action', '--remark', 'resume', 'not-fit']), 'not-fit');
   assert.equal(resolveAction(['action', 'unknown']), null);
+  assert.equal(resolveAction(['action', '--json', 'resume']), 'resume');
+  assert.equal(resolveAction(['action', 'constructor']), null);
+});
+
+test('permit public action aliases normalize on both sides',async t=>{
+  await withPermit(t,{schemaVersion:1,allowed:{action:['wechat']}});
+  await assertPermittedCommand('action',['action','exchange-wechat']);
+  await assert.rejects(()=>assertPermittedCommand('action',['action','not-fit']),PermitDeniedError);
 });
 
 test('permit: attachment command denial exits with code 2', async t => {
