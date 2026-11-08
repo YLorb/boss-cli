@@ -55,8 +55,19 @@ boss task-check [--json]
 - 交叉校验：permit 若声明 `job`/`entry`，必须与任务配置一致，否则 fail-closed。
 - 返回 `{ok:true, task, permit, permitFile}`；失败报错定位字段。
 
+## 统一启动（task-init）
+
+```
+boss task-init [--json]
+```
+
+- 校验 task config 与 permit（同上），然后生成确定性 runId（job 哈希前缀 + 秒级时间戳）。
+- 原子写入 `~/.boss-cli/runs/<runId>.json`，绑定：permit 路径、flow-state 路径（若设 BOSS_FLOW_STATE）、账本目录（`~/.boss-cli/ledgers`）、CLI/Skill 版本、stop 条件。
+- 同岗位同秒重复启动由文件 `wx` 独占检测拒绝，不覆盖已有实例。
+- 返回 `{ok:true, runId, createdAt, job, scope, permit, flowState, ledgerDir, cliVersion, skillVersion, compatibilityId, stop}`。
+
 ## 与其它配置的关系
 
-- **permit**（`permit.allowed`）仍负责"能做什么"；task config 负责"做什么/边界到哪/何时停"。
-- **runId、flow-state、账本、版本的绑定**在「统一启动」一步生成，本文件只声明静态任务结构与校验入口。
+- **permit**（`permit.allowed`）仍负责"能做什么"；task config 负责"做什么/边界到哪/何时停"；run 状态文件是"本轮运行实例"的绑定快照。
+- **stop 条件本阶段只记录，不自动判定**；Agent 编排时读取 run 状态文件的 stop 字段自行执行停机。下一阶段再接进 CLI 自动判定。
 - 这是编排级声明，不是系统级权限隔离；不阻止 Agent 另起炉灶直连 CDP（见 tool-boundary）。

@@ -48,6 +48,7 @@ import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
 import { checkTaskConfig } from './task_config.js';
+import { initRun } from './run_state.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
@@ -1061,6 +1062,11 @@ async function executeManagedCommand(argv: string[]): Promise<string> {
     if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-check [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
     const report = await checkTaskConfig();
     return JSON.stringify({ ok: true, ...report });
+  }
+  if (argv[0] === 'task-init') {
+    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-init [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
+    const run = await initRun();
+    return JSON.stringify({ ok: true, ...run });
   }
   if (argv[0] !== 'update') {
     const parsed = splitVersionConfirmation(argv);

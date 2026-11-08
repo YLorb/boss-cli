@@ -2,6 +2,12 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): 统一启动（task-init）+ run 状态绑定
+
+- 新增 `src/cli/run_state.ts`：`boss task-init` 生成确定性 runId（job 哈希 + 秒级时间戳），原子写入 `~/.boss-cli/runs/<runId>.json`。
+- 绑定 permit/flow-state/账本目录/CLI-Skill 版本/stop 条件；同岗位同秒重复启动 wx 独占拒绝。
+- stop 条件本阶段只记录不判定；test:run-state 3 例。
+
 ## 2026-11-08 · feat(cli): 统一任务配置（task config）
 
 - 新增 `src/cli/task_config.ts`：任务结构（job/scope/permit/stop）+ `checkTaskConfig` 校验入口。

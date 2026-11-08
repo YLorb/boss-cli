@@ -39,6 +39,9 @@ export const RESUME_SCREENSHOTS_DIR = join(CACHE_DIR, 'resume-screenshots');
 /** 在线简历截图经 OCR 后的纯文本保存目录（与截图同名 `.txt`） */
 export const RESUME_OCR_DIR = join(CACHE_DIR, 'ocr');
 
+/** 本轮运行实例（runId → permit/flow-state/账本/版本绑定）状态文件目录 */
+export const RUNS_DIR = join(APP_HOME, 'runs');
+
 let appDataLayoutReady = false;
 
 /** 确保 `~/.boss-cli/.cache` 目录存在（幂等） */
@@ -64,6 +67,9 @@ export function ensureAppDataLayout(): void {
   }
   if (!existsSync(RESUME_OCR_DIR)) {
     mkdirSync(RESUME_OCR_DIR, { recursive: true });
+  }
+  if (!existsSync(RUNS_DIR)) {
+    mkdirSync(RUNS_DIR, { recursive: true });
   }
   const agentSkills = getAgentSkillsDir();
   if (!existsSync(agentSkills)) {

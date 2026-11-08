@@ -78,7 +78,8 @@
     "test:favorite": "node --experimental-test-module-mocks --test scripts/test-favorite.mjs",
     "test:flow-lock": "node --test scripts/test-flow-lock.mjs",
     "test:permit": "node --test scripts/test-permit.mjs",
-    "test:task-config": "node --test scripts/test-task-config.mjs"
+    "test:task-config": "node --test scripts/test-task-config.mjs",
+    "test:run-state": "node --test scripts/test-run-state.mjs"
   },
   "dependencies": {
     "dotenv": "^17.4.2",
