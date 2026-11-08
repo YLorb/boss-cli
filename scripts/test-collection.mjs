@@ -281,3 +281,68 @@ test('real collect CLI retains records across EOF and rejects unauthorized recov
   assert.equal(abandoned.candidates[0].dataId, candidate.dataId);
   assert.equal(abandoned.header.reading, undefined);
 });
+
+async function startSession(t, dir, job, modeArgs = []) {
+  const child = spawn(process.execPath, ['dist/cli/index.js', 'collect', '--job', job, '--ledger-dir', dir, ...modeArgs],
+    { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  let stderr = '';
+  child.stderr.on('data', data => { stderr += data; });
+  const started = JSON.parse((await lines.next()).value);
+  const send = async (obj) => { child.stdin.write(JSON.stringify(obj) + '\n'); return JSON.parse((await lines.next()).value); };
+  const stop = async () => { child.stdin.write('{"op":"stop"}\n'); const r = JSON.parse((await lines.next()).value); child.stdin.end(); await new Promise(res => child.once('close', res)); return r; };
+  return { started, send, stop, getStderr: () => stderr };
+}
+
+test('screen mode: decision requires matching assessment evidence; collect-only does not', async t => {
+  const dir = await directory(t);
+  // screen（默认）
+  {
+    const s = await startSession(t, dir, '岗位 S');
+    await s.send({ op: 'add', job: '岗位 S', ...candidate });
+    const noEvidence = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'PASS' });
+    assert.equal(noEvidence.ok, false);
+    assert.match(noEvidence.error, /evidence/);
+    const mismatch = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'PASS', evidence: { verdict: 'not-fit' } });
+    assert.equal(mismatch.ok, false);
+    assert.match(mismatch.error, /不一致/);
+    const okPass = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'PASS', evidence: { verdict: 'fit' } });
+    assert.equal(okPass.ok, true);
+    await s.stop();
+  }
+  // collect-only
+  {
+    const s = await startSession(t, dir, '岗位 C', ['--mode', 'collect-only']);
+    await s.send({ op: 'add', job: '岗位 C', ...candidate });
+    const noEvidence = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'PASS' });
+    assert.equal(noEvidence.ok, true);
+    await s.stop();
+  }
+});
+
+test('screen mode: FAIL requires not-fit evidence; collect-only FAIL does not', async t => {
+  const dir = await directory(t);
+  {
+    const s = await startSession(t, dir, '岗位 F');
+    await s.send({ op: 'add', job: '岗位 F', ...candidate });
+    const failWithout = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'FAIL' });
+    assert.equal(failWithout.ok, false);
+    const failBad = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'FAIL', evidence: { verdict: 'fit' } });
+    assert.equal(failBad.ok, false);
+    const failOk = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'FAIL', evidence: { verdict: 'not-fit' } });
+    assert.equal(failOk.ok, true);
+    assert.equal(failOk.removed, true);
+    await s.stop();
+  }
+});
+
+test('screen mode: unknown evidence verdict is rejected; decision keeps PENDING', async t => {
+  const dir = await directory(t);
+  const s = await startSession(t, dir, '岗位 U');
+  await s.send({ op: 'add', job: '岗位 U', ...candidate });
+  const bad = await s.send({ op: 'decision', dataId: candidate.dataId, decision: 'PASS', evidence: { verdict: 'unknown' } });
+  assert.equal(bad.ok, false);
+  assert.match(bad.error, /verdict/);
+  await s.stop();
+});

@@ -2,6 +2,12 @@
 
 按提交记录面向使用者的功能变化。新提交在提交前新增条目；若提交只涉及文档、构建或维护配置，也需注明“无用户可见功能变化”。历史记录从 2026-10-02 开始，更早提交以 Git 历史为准。
 
+## 2026-11-08 · feat(cli): collect 评估门（screen/collect-only 模式）
+
+- `boss collect --mode screen|collect-only`；screen（默认）决策必须带评估证据（PASS↔fit、FAIL↔not-fit，可选 ref），collect-only 仅收集不评估。
+- 会话支持 `{"op":"mode"}` 显式切换并审计；决策审计流 `<账本>.decisions.jsonl`。unknown 结论保持 PENDING。
+- 新增 test:collection 3 例（screen 证据门/一致性与 collect-only 免证据）。
+
 ## 2026-11-08 · fix(cli): send 确定失败可重试 + 版本 0.6.16-dev.0 / Skill 1.0.25
 
 - send 防重放改为仅 unknown 拒绝，failed（确定失败未发送）放行重试。

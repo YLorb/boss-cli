@@ -171,7 +171,8 @@ function printHelp(): void {
   boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]
       向 BOSS_OCR_URL（默认 http://ylorb.top:9002/ocr）上传本地截图并按坐标分栏重排；保留原图
       截图后由 Agent 后台调用，评估前等待完成并优先读 textPath；失败报错，不重试、不连接浏览器
-  boss collect --job <岗位完整名称> [--ledger-dir <目录>]
+  boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]
+      screen（默认）：decision 须带评估证据（PASS↔fit，FAIL↔not-fit）；collect-only：仅收集，不要求评估
       一岗一账的常驻会话；stdin 每行一个 JSON 命令，stdout 每行一个 JSON 结果
       候选人更新逐笔保存；stop 等待在途操作并退出。待恢复时提示“有信息需要恢复。”
       recheck / reconcile 仅在用户明确授权对应范围后传 recoveryAuthorized:true；旧 reading 需要全量对账
@@ -1107,11 +1108,13 @@ export async function runCli(argv: string[]): Promise<void> {
     await requireSkillCompatibility(parsed.confirmation);
     argv = parsed.argv;
     const { rest, opts, flags } = parseOpts(argv.slice(1));
-    if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir'].includes(key))) {
-      die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>]');
+    if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir', 'mode'].includes(key))) {
+      die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]');
     }
+    const mode = (opts.mode ?? 'screen') as 'screen' | 'collect-only';
+    if (mode !== 'screen' && mode !== 'collect-only') die('❌ collect --mode 必须是 screen 或 collect-only。');
     try {
-      await runCollectionSession(opts['ledger-dir'] || join(APP_HOME, 'ledgers'), opts.job.trim());
+      await runCollectionSession(opts['ledger-dir'] || join(APP_HOME, 'ledgers'), opts.job.trim(), mode);
     } finally { await cleanupAfterCommand('collect', true); }
     return;
   }
