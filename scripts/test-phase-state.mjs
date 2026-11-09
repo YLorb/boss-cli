@@ -23,6 +23,32 @@ test('decide requires OCR result for the same screenshot',async()=>{
  await recordPhaseCommand('preview',['preview','--candidate-id','id-1','--json'],'{"path":"image.png"}');await assert.rejects(()=>assertPermittedPhase('ocr',['ocr','other.png','--json']),/不是当前/);
  await recordPhaseCommand('ocr',['ocr','image.png','--json'],'{"textPath":"image.txt"}');await assertPermittedPhase('decide',['decide','--candidate-id','id-1','--json']);
 });
+test('same screenshot is compared by path identity, not by literal spelling',async()=>{
+ // Git Bash 会把 C:\a\b 改写成 C:/a/b；同一张图不应因此被判成「换了另一张」。
+ await setup();await verified();
+ const stored=process.platform==='win32'?'C:\\tmp\\shot.png':'/tmp/shot.png';
+ const rewritten=stored.replaceAll('\\','/');
+ await recordPhaseCommand('preview',['preview','--candidate-id','id-1','--json'],JSON.stringify({path:stored}));
+ await assertPermittedPhase('ocr',['ocr',rewritten,'--json']);
+ await assert.rejects(()=>assertPermittedPhase('ocr',['ocr',rewritten.replace('shot','other'),'--json']),/不是当前/);
+});
+test('recommend greeting only becomes a contact once the small window is verified',async()=>{
+ // 推荐页 greet 固定返回 clicked：既不能直接发送，也不能卡死后续 chat --recommend --open。
+ await setup({scope:'recommend',job:'推荐岗位',targets:[{id:'id-1',name:'模拟甲'}],messageScript:'你好，方便发一份你的简历过来吗？'});
+ await verified();
+ await recordPhaseCommand('preview',['preview','--candidate-id','id-1','--json'],JSON.stringify({path:'shot.png'}));
+ await recordPhaseCommand('ocr',['ocr','shot.png','--json'],JSON.stringify({textPath:'shot.txt'}));
+ await recordPhaseCommand('decide',['decide','--candidate-id','id-1','--verdict','fit','--json'],JSON.stringify({ok:true}));
+ const greetArgs=['greet','模拟甲','--candidate-id','id-1','--json'];
+ await beforePhaseCommand('greet',greetArgs);
+ await recordPhaseCommand('greet',greetArgs,JSON.stringify({status:'clicked',candidateId:'id-1'}));
+ const sendArgs=['send','--embedded','--name','模拟甲','--candidate-id','id-1','--text','你好，方便发一份你的简历过来吗？','--json'];
+ await assert.rejects(()=>assertPermittedPhase('send',sendArgs),/未决|评估和联系/);
+ const chatArgs=['chat','模拟甲','--recommend','--open','--candidate-id','id-1','--json'];
+ await assertPermittedPhase('chat',chatArgs);
+ await recordPhaseCommand('chat',chatArgs,JSON.stringify({status:'embedded-opened',identityVerified:true,target:{candidateId:'id-1',name:'模拟甲'}}));
+ await assertPermittedPhase('send',sendArgs);
+});
 test('past deadline and zero contact budget stop business actions',async()=>{
  await setup({stop:{deadline:'2000-01-01T00:00:00Z'}});await assert.rejects(()=>assertPermittedPhase('list',['list','--json']),/截止/);
  const {run}=await setup({scope:'recommend',stop:{contactLimit:0}});await verified();const s=JSON.parse(await readFile(run.phaseState,'utf8'));s.decisions['id-1']='fit';await writeFile(run.phaseState,JSON.stringify(s));await assert.rejects(()=>assertPermittedPhase('greet',['greet','模拟甲','--candidate-id','id-1','--json']),/触达上限/);

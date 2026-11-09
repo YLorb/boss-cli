@@ -2,6 +2,7 @@ import { parseCommandArguments } from './arguments.js';
 // 阶段名只收紧命令集；业务门以真实命令回执和冻结任务为依据。
 import { readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
 import { loadTaskConfig, taskConfigPath, type TaskConfig } from './task_config.js';
 import { resolveAction, assertPermittedCommand, loadPermit } from './permit.js';
 import { getBoundRun } from './run_state.js';
@@ -32,6 +33,13 @@ export function option(argv: string[], name: string): string | undefined {
 function hasFlag(argv: string[], name: string): boolean {
   return parseCommandArguments(argv).flags.has(name.replace(/^-+/, ''));
 }
+// 同一张截图的判定不能按字面比较：Git Bash 会把 C:\a\b 转成 C:/a/b，Windows 盘符大小写也可能变。
+// 归一化后比较，避免「路径写法不同」被误判成「换了另一张图」。
+const samePath = (a: string | undefined, b: string | undefined): boolean => {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const norm = (p: string) => { const r = resolve(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
+  return norm(a) === norm(b);
+};
 function messageText(argv:string[]):string {return option(argv,'--text')?.trim() || option(argv,'-t')?.trim() || '';}
 
 function targetId(argv: string[], state: PhaseState): string { return option(argv, '--candidate-id') ?? option(argv, '--data-id') ?? (argv[0] === 'action' ? state.current ?? '' : ''); }
@@ -112,12 +120,15 @@ async function evaluate(cmd: string, argv: string[], t: TaskConfig, s: PhaseStat
     if (!s.frozen) deny('先取得并冻结本轮候选人快照');
     if (!id || !s.targets.some(x => x.id === id)) deny('目标不在本轮冻结范围，必须携带稳定 ID');
   }
-  const continuation = cmd === 'greet' && s.pending?.cmd === 'greet' && s.pending.id === id && (hasFlag(argv,'--confirm-contact') || option(argv, '--select-job') !== undefined);
+  // 推荐页 greet 只返回 clicked（点成功≠沟通成功），SOP 的下一步就是 chat --recommend --open 打开小窗核对身份，
+  // 所以它必须能穿过「结果未决」这道门；真正的联系确认在 chat 回执核验通过时落账。
+  const continuation = cmd === 'greet' && s.pending?.cmd === 'greet' && s.pending.id === id && (hasFlag(argv,'--confirm-contact') || option(argv, '--select-job') !== undefined)
+    || (cmd === 'chat' && hasFlag(argv,'--recommend') && s.pending?.cmd === 'greet' && s.pending.id === id);
   if (s.pending && !continuation && (!check || cmd !== 'send')) deny(`动作结果未决：${s.pending.cmd}/${s.pending.id}，禁止重放或继续依赖动作`);
   if(sideEffect(cmd,argv)&&!check&&!continuation)await assertActionHistory(cmd,id,messageText(argv));
   if (cmd === 'preview' && !hasFlag(argv,'--open-only') && !s.observed.includes(id) && t.stop.observeLimit !== undefined && s.observed.length >= t.stop.observeLimit) deny('已到观察上限');
   if (cmd === 'ocr') {
-    const image = parseCommandArguments(argv).rest[0]; if (!s.current || s.material[s.current]?.image !== image) deny('OCR图片不是当前候选人截图');
+    const image = parseCommandArguments(argv).rest[0]; if (!s.current || !samePath(s.material[s.current]?.image, image)) deny('OCR图片不是当前候选人截图');
   }
   if (cmd === 'decide' && !s.material[id]?.textPath) deny('材料尚未完整解析，不能评估');
   if (t.scope === 'collect' && (t.mode ?? 'screen') === 'screen' && (['accept-resume', 'download-resume'].includes(cmd) || (cmd === 'probe-resume' && hasFlag(argv,'--download'))) && s.decisions[id] !== 'fit') deny('收件/下载前必须完成本人的本轮评估');
@@ -175,7 +186,16 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
     if (targets.some((x: Target) => typeof x.id !== 'string' || !x.id || typeof x.name !== 'string' || !x.name) || new Set(targets.map((x: Target) => x.id)).size !== targets.length) deny('列表回执缺少唯一 ID/姓名');
     s.targets = targets; s.frozen = true;
   }
-  if (cmd === 'chat') s.current = id;
+  if (cmd === 'chat') {
+    s.current = id;
+    // 小窗凭同一 candidateId 打开/复用，说明该人已经处于沟通过程中：这才是推荐页的联系确认证据。
+    const chatOpened = ['embedded-opened', 'embedded-already-open'].includes(result?.status) && result?.identityVerified === true && result?.target?.candidateId === id;
+    if (chatOpened && s.pending?.cmd === 'greet' && s.pending.id === id) {
+      if (s.pending.attemptId) await finishAction(s.pending.attemptId, 'success');
+      s.pending = null;
+      if (!s.contacts.includes(id)) s.contacts.push(id);
+    }
+  }
   if (cmd === 'preview' || (cmd === 'action' && resolveAction(argv) === 'resume')) {
     if (typeof result.path !== 'string' || !result.path) deny('截图回执缺少 path');
     s.current = id; s.material[id] = { image: result.path }; if (!s.observed.includes(id)) s.observed.push(id);

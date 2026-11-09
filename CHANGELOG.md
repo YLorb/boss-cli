@@ -1,5 +1,17 @@
 # 功能变化日志
 
+## 2026-11-09 · fix(cli): 叠层简历选面板、OCR 路径判定、推荐页触达确认链路（0.6.20-dev.0 / Skill 1.0.29）
+
+- 现象：某一人的 `preview` 失败（点击后没出现在线简历 iframe）后，浏览器里留下一个没有简历内容的空 `.resume-middle-wrap`；下一个人再 `preview` 就稳定报「可见简历面板不唯一：2」，且该错误发生在 `stage=ready-check` 之前，表现为与本人无关的连锁失败。
+- 根因：`directResumeHandle` 只统计「可见面板」的数量，`panels.length>1` 直接抛错，不区分面板里到底有没有简历。
+- 修法：改为先按面板聚合其内部可见简历 iframe，只有「真的挂着可见简历」的面板才进入候选；候选为 0 返回 null。
+- 叠加时两个面板几何完全一致（实测同为 872×560、top 0），单靠几何无法分辨，故再按所属 `.dialog-wrap` 的层级状态取舍：只有一层是 `active` 时取该层；多份都 active 或都无法判定层级时才报「同时存在 N 份可见简历」并停止（保留防截错人的安全语义）。
+- 补回 `scripts/test-iframe-boundary.mjs`：该文件自 0.6.18 起在 vm 沙箱里缺 `HTMLElement` 构造器，14 个用例全部 ReferenceError，且未纳入离线回归，所以没有拦住 0.6.19 的这次回归。现已重写并纳入 `test:managed`。
+- `check.ts` 的 `one()` 与 `recommend_identity.ts` 的可见面板取法同步同一取舍规则：这两处各有一份独立实现，只改 `resume_frame_locator.ts` 会出现「截图截 A、身份核验 B」，症状是身份核验报「可见简历面板不唯一」而预览本身成功。
+- OCR 的「同一张截图」判定改为**路径归一化比较**（`resolve` 后比较，Windows 下忽略盘符大小写）：Git Bash 会把命令行里的 `C:\a\b` 改写成 `C:/a/b`，按字面比较必然失败，表现为 `preview` 成功但 `ocr` 恒报「OCR图片不是当前候选人截图」。
+- 推荐页触达链路打通：`greet` 在推荐页固定返回 `clicked`（点成功≠沟通成功），而 `contacts` 只在 `contact-confirmed`/`already-contacted` 时落账，导致「动作结果未决」永久卡住、`chat` 与 `send` 被永久拒绝。现允许 `chat --recommend --open` 作为 continuation 穿过未决门，并在其回执为 `embedded-opened`/`embedded-already-open` 且 `identityVerified` 为真、`candidateId` 一致时才落账为已联系。
+- 使用者可见变化：一次失败不会连坐后续候选人；确实同时打开两份有效简历时仍然明确报错而不是猜一个截图；Windows 下 `preview` 与 `ocr` 不再因路径写法不同而互相拒绝；推荐页走完「打招呼 → 打开小窗 → 发消息」不再在第二步被流程锁死。
+
 ## 2026-11-09 · fix(cli): 推荐页预览 ready-check 恒失败（0.6.19-dev.0 / Skill 1.0.28）
 
 - 0.6.18 把「src 必须含 c-resume」的 iframe 判据同时用在 `.resume-middle-wrap` 面板 DIV 上，面板没有 src 属性 → 恒判不可见 → `directResumeHandle` 返回 null → 推荐页 `preview` 稳定报「在线简历 iframe 已出现，但内容未在预期时间内渲染完成」（实测耗时约 8s，6s ready 超时）。

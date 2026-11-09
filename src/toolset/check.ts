@@ -16,7 +16,13 @@ export const STATUS_SCRIPT = `(() => {
  const norm=v=>(v||'').replace(/\\s+/g,' ').trim();
  const visible=e=>!!e&&e.getClientRects().length>0&&getComputedStyle(e).visibility!=='hidden'&&getComputedStyle(e).display!=='none';
  const one=(selector,root=document)=>{const a=Array.from(root.querySelectorAll(selector)).filter(visible);if(a.length>1)throw new Error('状态不唯一：'+selector);return a[0];};
- const panel=one('.resume-middle-wrap');
+ // 叠层简历：失败残留的一层会带 deactive，只有最上层是 active；几何完全一致，只能按层级状态取舍。
+ const oneLayer=(selector)=>{const a=Array.from(document.querySelectorAll(selector)).filter(visible);
+   if(a.length<=1)return a[0];
+   const act=a.filter(e=>{const l=e.closest('.dialog-wrap');return !!l&&l.classList.contains('active')&&!l.classList.contains('deactive');});
+   if(act.length===1)return act[0];
+   throw new Error('状态不唯一：'+selector);};
+ const panel=oneLayer('.resume-middle-wrap');
  const box=panel&&one('.resume-right-side .resume-simple-box',panel);
  const props=box?.__vue__?.$props;
  const recommendContext=location.pathname.replace(/\\/+$/,'')==='/web/frame/recommend';

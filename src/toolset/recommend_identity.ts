@@ -30,7 +30,13 @@ export async function readRecommendCandidateId(frame: Frame, name: string, candi
 
 function resumeIdentityScript(cardProp: string, detailProp: string): string { return `(() => {
  const visible=e=>e.getClientRects().length>0&&getComputedStyle(e).display!=='none'&&getComputedStyle(e).visibility!=='hidden';
- const panels=[...document.querySelectorAll('.resume-middle-wrap')].filter(visible);
+ // 叠层简历：失败残留的一层带 deactive，几何与 active 层完全一致，只能按 .dialog-wrap 的层级状态取舍
+ // （与 resume_frame_locator.ts 的取法保持一致，否则身份核验会和截图选到不同的面板）。
+ const allPanels=[...document.querySelectorAll('.resume-middle-wrap')].filter(visible);
+ const livePanels=allPanels.filter(p=>[...p.querySelectorAll('iframe[src*="c-resume"]')].some(visible));
+ const pool=livePanels.length?livePanels:allPanels;
+ const activePanels=pool.filter(p=>{const l=p.closest('.dialog-wrap');return !!l&&l.classList.contains('active')&&!l.classList.contains('deactive');});
+ const panels=activePanels.length?activePanels:pool;
  if(panels.length!==1)throw Error('可见简历面板不唯一：'+panels.length);
  const boxes=[...panels[0].querySelectorAll('.resume-right-side .resume-simple-box')].filter(visible);
  if(boxes.length!==1)throw Error('简历身份组件不唯一：'+boxes.length);
