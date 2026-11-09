@@ -17,31 +17,33 @@
 
 一句话：**它把「招人要看几百份简历、逐个打招呼」这件重复劳动，交给脚本去自动执行**，同时用「权限、阶段、逐人闭环」三道闸保证每一步都在你的授权范围内、不越界、不重复。
 
-它不是独立浏览器，而是**驱动本机 Chrome 的控制器**。运行需要：能跑 shell 的 Agent、Node.js、Chrome、以及你自己的 BOSS 登录态。
+它不是独立浏览器，而是**驱动本机 Chrome 的控制器**。运行需要：
 
-- 代码位置：`https://github.com/YLorb/boss-cli`（**只从这个 GitHub 拉源码，不从 npm 拉包**）
-- 当前版本：CLI `0.6.20-dev.0`，配套 Skill `1.0.29`
+- 能跑 shell 的 Agent（WorkBuddy等）
+- Node.js
+- Chrome
+
+代码位置：`https://github.com/YLorb/boss-cli`（**你可以从这里的 dev 分支获取到最新的版本或者补丁版本**）
+
+当前版本：CLI `0.6.20-dev.0`，配套 Skill `1.0.29`
 
 ---
 
 ## 2. 怎么安装
 
-> 重要约定：**不从 npm 拉包**。安装 = 从 GitHub 取源码到本机。
+> **默认方式：让 Agent 帮你装。** 你不需要手动敲命令——只要对 Agent 说一句「帮我装好 boss-cli」，Agent 会自己完成下面的全过程。
 
-```bash
-# 1. 克隆代码（dev 分支）
-git clone https://github.com/YLorb/boss-cli.git
-cd boss-cli
-git checkout dev
+Agent 会按 `skills/boss-recruitment/references/install.md` 执行：
 
-# 2. 安装依赖
-npm install
+1. 检查 Node.js / npm 是否就绪，缺了会**先征得你同意**，再由它从 `https://nodejs.org/` 下载配置；
+2. 从 GitHub 取源码（**只从 `https://github.com/YLorb/boss-cli` 的 tag 或固定提交取，不从 npm 拉包**）；
+3. 装依赖 + 编译：`npm ci` → `npm run build`；
+4. 把 `skills/boss-recruitment/` 文件夹交给宿主的 Skill 导入机制（这就是让 Agent 能「按规范操作」的那份说明书）；
+5. 跑 `node .\dist\cli\index.js version-check --json` 核验版本配套。
 
-# 3. 编译 TypeScript 到 dist/
-npm run build
-```
+装完后，可执行入口是 `dist/cli/index.js`，日常由 Agent 用 `node dist/cli/index.js <命令>` 调用（`package.json` 里 `bin.boss = dist/cli/index.js`）。
 
-装完后，可执行入口是 `dist/cli/index.js`。日常用 `node dist/cli/index.js <命令>` 调用，也可以 `npm link` 或配置 `bin` 里的 `boss` 指向它（`package.json` 里 `bin.boss = dist/cli/index.js`）。
+> 如果你**手动**安装，本质也是这三步——clone/下载源码 → `npm ci` → `npm run build`（详见 install.md 的「GitHub 标签 ZIP 下载」一节，无需 Git 也能装）。
 
 > 不要用 `npm install -g @joohw/boss-cli`，也不要依赖 `boss update` 升级——它们对应的是 npm 发布版，可能与源码能力不一致，且不会同步本机源码。
 
