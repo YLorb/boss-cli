@@ -21,7 +21,7 @@ boss login
 boss help
 ```
 
-> 纯 CLI，不内置对话式 Agent。当前 `dev` 分支的命令默认输出文本；`boss list --json` 和 `boss download-resume` 提供 JSON，便于 Agent 编排。
+> 纯 CLI，不内置对话式 Agent，由外部 Agent 通过子进程编排。业务命令均支持 `--json`（stdout 仅结果、诊断写 stderr），详见 [docs/cli-json-output.md](docs/cli-json-output.md)。
 
 ---
 
@@ -34,7 +34,7 @@ boss help
 | Boss直聘候选人筛选 | `boss list` / `boss list --unread` |
 | Boss直聘脚本自动化 | 本机 Chrome + CDP，Cookie 本地存储 |
 | AI 招聘 Agent | 子进程调用，输出 Agent 友好 |
-| 数据隐私 | 不经过第三方服务器，数据在 `~/.boss-cli/` |
+| 数据隐私 | Cookie/缓存/账本在本地 `~/.boss-cli/`；OCR 走可配置外部服务（默认 `http://ylorb.top:9002/ocr`） |
 
 ---
 
@@ -95,6 +95,18 @@ node dist/cli/index.js help
 | `boss deep-search [岗位关键字] [--core <要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]` | 深度搜索表单状态；`--core` / `--bonus` 可重复，并按传入列表同步分组；`--clear-*` 清空分组；默认不输出候选列表，`--match` 输出最新 20 条 |
 | `boss positions` | 读取职位列表 |
 | `boss jd <名称>` | 抓取职位 JD 缓存到本地 |
+| `boss --check-login [--json]` | 只读检查现有浏览器首个 BOSS 标签页的登录态 |
+| `boss check --page <…> [--state …] [--name …] [--data-id …]` / `boss status [--json]` | 只读页面状态核验；check 返回布尔，status 返回当前页面详情 |
+| `boss version-check [--json]` | 离线校验 CLI 与 Skill 配套版本 |
+| `boss ocr <PNG绝对路径> [--layout …]` | 上传截图到 `BOSS_OCR_URL` 做 OCR，按坐标分栏重排 |
+| `boss switch-job --list / --job <岗位>` | 沟通页展开选岗菜单 / 精确唯一选岗 |
+| `boss chat-search <昵称> [--data-id …] [--job …]` | 沟通页按昵称直接搜索定位已有候选人 |
+| `boss probe-resume <姓名> --data-id <ID> [--download]` | 检查附件与已发送求简历消息，可选下载 |
+| `boss search-more --max-scrolls <…> --max-candidates <…>` | 常规搜索页有上限滚动扩池，按候选人 ID 去重 |
+| `boss favorite --candidate-id <ID> [--check]` | 搜索/推荐页已打开简历的收藏（未收藏才点击一次） |
+| `boss dismiss-contact-notice <姓名> --candidate-id <ID> --job <岗位>` | 关闭搜索简历的畅聊卡使用成功提示 |
+| `boss back [--if-open] / back --previous --expect-url <URL>` | 关闭在线简历弹层 / 显式返回上一条浏览器历史 |
+| `boss search --city <城市>` / `--job <岗位>` / `--keyword <关键词>` / `--submit` | 搜索页独立设置条件并显式提交一次 |
 
 完整用法：`boss help`
 
@@ -171,7 +183,7 @@ boss-cli 基于 CDP 连接本机 Chrome，复用已有登录态，针对 Boss直
 不需要。使用本机已安装的 Chrome / Chromium，通过 CDP 协议连接。
 
 **数据会上传到服务器吗？**
-不会。Cookie 和缓存仅存储在本地 `~/.boss-cli/`，CLI 不经过任何第三方服务器。
+Cookie、缓存和账本仅存储在本地 `~/.boss-cli/`。唯一例外是 OCR：`boss ocr` 会把简历截图上传到可配置的外部服务（默认 `http://ylorb.top:9002/ocr`），可用 `BOSS_OCR_URL` 指向内网或本地服务。
 
 **如何无头模式运行？**
 设置环境变量 `BOSS_BROWSER_HEADLESS=true`（默认 headful，便于扫码登录）。

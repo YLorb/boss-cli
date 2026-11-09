@@ -60,6 +60,56 @@ test('top navigation and recommendation frame detachment stop selection with dis
   }
 });
 
+test('job-click frame replacement is confirmed read-only; navigation boundaries remain enforced', async t => {
+  for (const scenario of [
+    {name:'iframe navigation destroys click response',events:['framenavigated']},
+    {name:'iframe detachment destroys click response',events:['framedetached']},
+    {name:'iframe navigation followed by replacement',events:['framenavigated','framedetached']},
+    {name:'top navigation during click',events:['top'],error:/顶层页面导航/},
+    {name:'top navigation during confirmation',events:['framedetached'],confirmNavigation:true,error:/顶层页面导航/},
+    {name:'iframe navigation before click',before:'framenavigated',error:/推荐 iframe 导航/},
+    {name:'iframe detachment before click',before:'framedetached',error:/推荐 iframe 已分离/},
+    {name:'replacement job does not match',events:['framedetached'],label:'错误岗位',error:/推荐岗位与目标不符/},
+    {name:'confirmation times out',events:['framedetached'],timeout:true,error:/SIM_CONFIRM_TIMEOUT/},
+    {name:'unrelated click error',clickError:'SIM_CLICK_FAILURE',error:/SIM_CLICK_FAILURE/},
+  ]) await t.test(scenario.name,async()=>{
+    const page=new EventEmitter(),main={},updated={parentFrame:()=>main,evaluate:async()=>scenario.label??'目标岗位'};
+    page.mainFrame=()=>main;
+    let reads=0,waits=0,clicks=0,confirmations=0,disposed=0;
+    const frame={page:()=>page,evaluate:async()=>{
+      switch(++reads){
+        case 1:return '当前岗位';
+        case 2:return true; // Open dropdown.
+        case 3:return true; // Set job query.
+        case 4:return {ok:true,label:'目标岗位',changed:true};
+        case 5:
+          clicks++;
+          for(const event of scenario.events??[])page.emit(event==='top'?'framenavigated':event,event==='top'?main:frame);
+          throw Error(scenario.clickError??'Execution context was destroyed, most likely because of a navigation.');
+        default:throw Error('Unexpected access to original frame after click');
+      }
+    },waitForFunction:async()=>{
+      if(++waits===2&&scenario.before)page.emit(scenario.before,frame);
+    }};
+    page.waitForFunction=async()=>{
+      confirmations++;
+      if(scenario.confirmNavigation)page.emit('framenavigated',main);
+      if(scenario.timeout)throw Error('SIM_CONFIRM_TIMEOUT');
+      return {asElement:()=>({contentFrame:async()=>updated}),dispose:async()=>{disposed++;}};
+    };
+    if(scenario.error)await assert.rejects(selectJob(frame,'目标岗位',true),scenario.error);
+    else{
+      const result=await selectJob(frame,'目标岗位',true);
+      assert.equal(result.label,'目标岗位');assert.equal(result.frame,updated);
+    }
+    assert.equal(clicks,scenario.before?0:1,'selection must never be replayed');
+    assert.equal(confirmations,scenario.before||scenario.events?.includes('top')||scenario.clickError?0:1);
+    assert.equal(disposed,confirmations&&!scenario.timeout?1:0);
+    assert.equal(page.listenerCount('framenavigated'),0);
+    assert.equal(page.listenerCount('framedetached'),0);
+  });
+});
+
 test('different jobs select once; partial current-job matches only close dropdown; exact duplicates fail', async () => {
   let label='旧岗位', clicks=0, selected=0, open=false;
   class HTMLElement {

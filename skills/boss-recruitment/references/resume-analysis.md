@@ -21,3 +21,23 @@ node '<实际Skill目录>/scripts/resume-analysis-session.mjs' finish --output '
 2026-10-30 同一份已知竖版模拟样本：原流程 OCR 之后50.02秒；预置保存程序后30.85秒；紧凑行号交接后17.20秒。最后一轮缓存核验8ms，Agent及工具间隙17189ms，校验保存3ms。未重跑OCR；加历史OCR命令3.91秒约21.11秒仅为估算。该样本不是盲测，不能外推真实简历吞吐量。
 
 同日另生成不同内容的33行单栏模拟简历，首次调用OCR1次：OCR命令3.992秒，衔接0.101秒，Agent解析及保存6.848秒，全程10.941秒。未复用此前样本OCR或解析结果；计时从OCR命令启动到结果保存，包含工具间隙，不含造图、授权与事后质量核验。helper中的ocrReused=true仅表示读取刚生成的成功回执，不能据此称为历史缓存命中；ocrCalls=0仅是helper自身调用数，整个流程仍调用OCR1次。服务预热和模型提示词缓存未测量，一次简单版面测试不保证所有简历耗时。
+
+## 评分模式（mode=screen）
+
+`start` 时加 `--spec <job-spec.json>`，脚本从 spec 的 `mustHave`/`veto`/`bonus` 生成规则清单（`must-1`/`veto-1`/`bonus-1`…），stdout 摘要返回 `rules`（仅 id+kind+label）与 `suggested`。Agent 只输出结构化结论，不写散文：
+
+```json
+{ "mode": "screen", "rules": [
+  { "id": "must-1", "verdict": "pass", "evidence": [12, 35], "note": "命中" },
+  { "id": "veto-1", "verdict": "unknown", "evidence": [], "note": "简历未展示" }
+] }
+```
+
+`finish` 校验每条规则 id 必须覆盖 spec 中全部规则、`verdict` ∈ `pass/fail/unknown`、证据行号有效，展开证据原文，写 `agent-result.json`（含规则原文、verdict、evidence 文本、note）与 `summary={pass,fail,unknown}`。
+
+- **unknown 报告但不停止**：某规则无法判定时记 `verdict=unknown` 并报告，不视为 fail、不阻断本轮；Agent 按 SOP `back` 后继续下一位。unknown 只是"待确认"，不是淘汰结论。
+- 不求和、不内置权重；脚本只做规则命中与证据展开，不做总分。
+
+## 确定性字段建议（suggested）
+
+`start` 无论是否评分，都用规则提取低歧义字段（邮箱、手机号、城市、工作年限），**仅唯一命中才写入** `suggested`，否则为 null。这是给 Agent 的提示而非结论；Agent 仍须核对，不得把 `suggested` 当事实，也不得把提取失败当作字段缺失。

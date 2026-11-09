@@ -9,7 +9,8 @@ mock.module('../dist/common/boss_session_page.js',{namedExports:{withBossSession
 }}});
 const {executeCommand}=await import('../dist/cli/cliRouter.js');
 test('public switch-job validates args before shared session and propagates guard failure without action',async()=>{
-  for(const args of [[],['--list','--job','A'],['--list','--cdp-url','http://localhost'],['--job','A','--check'],['--list','--timeout-ms','0']])
+  for(const args of [[],['--list','--job','A'],['--list','--cdp-url','http://localhost'],['--job','A','--check'],['--list','--timeout-ms','0'],
+    ['--list','--skip-guards'],['--list','--no-guard'],['--list','--unguarded'],['--list','--guard=false']])
     await assert.rejects(executeCommand(['switch-job',...args,'--json']));
   assert.equal(entered,0);assert.equal(reads,0);
   fail=true;await assert.rejects(executeCommand(['switch-job','--list','--json']),/guard installation failed/);

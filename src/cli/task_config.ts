@@ -1,0 +1,189 @@
+// 统一任务配置：本轮任务的唯一声明入口（岗位、范围、permit 引用、停止条件）。
+// 仅在设置 BOSS_TASK_CONFIG 时参与校验；未设置时不影响其它命令（task-check 除外）。
+// 这是编排级任务声明，不是系统级权限隔离。
+import { readFile } from 'node:fs/promises';
+import { isAbsolute, resolve } from 'node:path';
+import { loadPermit, type PermitDoc } from './permit.js';
+
+export type TaskScope = 'collect' | 'recommend' | 'search' | 'view-only';
+export type TaskStop = {
+  observeLimit?: number;
+  contactLimit?: number;
+  deadline?: string;
+  maxConsecutiveFailures?: number;
+};
+export type Phase = {
+  name: string;
+  allowed: Record<string, string[]>;
+  requires?: ('job-verified' | 'scope-frozen' | 'material-ready' | 'evaluated' | 'download-confirmed' | 'no-pending')[];
+};
+export type TaskConfig = {
+  schemaVersion: 1;
+  job: string;
+  scope: TaskScope;
+  permit: string;
+  stop: TaskStop;
+  phases?: Phase[];
+  mode?: 'screen' | 'collect-only';
+  jobSpec?: string;
+  messageScript?: string;
+  ledgerDir?: string;
+  targets?: { id: string; name: string }[];
+};
+
+export function taskConfigPath(): string | null {
+  const raw = process.env.BOSS_TASK_CONFIG?.trim();
+  return raw ? raw : null;
+}
+
+/** 拒绝未知字段：防止拼写错误（如 observeLmit）被静默接受。 */
+function rejectUnknownKeys(obj: Record<string, unknown>, allowed: readonly string[], label: string): void {
+  for (const key of Object.keys(obj)) {
+    if (!allowed.includes(key)) throw new Error(`${label} 含未知字段：${key}；允许：${allowed.join(', ')}。`);
+  }
+}
+
+const STOP_KEYS = ['observeLimit', 'contactLimit', 'deadline', 'maxConsecutiveFailures'] as const;
+const TASK_KEYS = ['schemaVersion', 'job', 'scope', 'permit', 'stop', 'phases', 'mode', 'jobSpec', 'messageScript', 'ledgerDir', 'targets'] as const;
+const PHASE_KEYS = ['name', 'allowed', 'requires'] as const;
+
+function validateStop(value: unknown): asserts value is TaskStop {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('task.stop 必须是对象。');
+  }
+  const stop = value as Record<string, unknown>;
+  rejectUnknownKeys(stop, STOP_KEYS, 'task.stop');
+  for (const key of ['observeLimit', 'contactLimit', 'maxConsecutiveFailures']) {
+    const n = stop[key];
+    if (n !== undefined && (!Number.isSafeInteger(n) || (n as number) < (key === 'contactLimit' ? 0 : 1))) {
+      throw new Error(`task.stop.${key} 必须是${key === 'contactLimit' ? '非负' : '正'}安全整数。`);
+    }
+  }
+  if (stop.deadline !== undefined) {
+    if (typeof stop.deadline !== 'string' || !/T.*(?:Z|[+-]\d{2}:\d{2})$/.test(stop.deadline) || !Number.isFinite(Date.parse(stop.deadline))) {
+      throw new Error('task.stop.deadline 必须是含时区的 ISO 时间。');
+    }
+  }
+}
+
+function validateTaskConfig(value: unknown): asserts value is TaskConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('任务配置必须是对象。');
+  }
+  const t = value as Record<string, unknown>;
+  rejectUnknownKeys(t, TASK_KEYS, '任务配置');
+  if (t.schemaVersion !== 1) throw new Error('任务配置 schemaVersion 必须为 1。');
+  if (typeof t.job !== 'string' || !t.job.trim()) throw new Error('任务配置 job 必须是非空字符串。');
+  if (t.scope !== 'collect' && t.scope !== 'recommend' && t.scope !== 'search' && t.scope !== 'view-only') {
+    throw new Error('任务配置 scope 必须是 collect/recommend/search/view-only。');
+  }
+  if (typeof t.permit !== 'string' || !t.permit.trim() || !isAbsolute(t.permit)) {
+    throw new Error('任务配置 permit 必须是指向 permit 文件的绝对路径。');
+  }
+  if (t.mode !== undefined && t.mode !== 'screen' && t.mode !== 'collect-only') {
+    throw new Error('任务配置 mode 必须是 screen 或 collect-only。');
+  }
+  if (t.mode !== undefined && t.scope !== 'collect') throw new Error('mode 仅适用于 collect。');
+  if (t.jobSpec !== undefined && (typeof t.jobSpec !== 'string' || !t.jobSpec.trim())) {
+    throw new Error('任务配置 jobSpec 必须是非空字符串（岗位规范文件路径）。');
+  }
+  if (t.messageScript !== undefined && typeof t.messageScript !== 'string') {
+    throw new Error('任务配置 messageScript 必须是字符串。');
+  }
+  if (t.ledgerDir !== undefined && (typeof t.ledgerDir !== 'string' || !isAbsolute(t.ledgerDir))) throw new Error('ledgerDir 必须是绝对路径。');
+  if (t.targets !== undefined) {
+    if (!Array.isArray(t.targets)) throw new Error('targets 必须是候选人数组。');
+    const ids = new Set<string>();
+    for (const target of t.targets) {
+      if (!target || typeof target !== 'object' || Array.isArray(target)) throw new Error('targets 每项必须是对象。');
+      rejectUnknownKeys(target, ['id', 'name'], 'target');
+      if (typeof target.id !== 'string' || !target.id.trim() || typeof target.name !== 'string' || !target.name.trim() || ids.has(target.id)) throw new Error('targets 需要非空姓名、唯一非空 id。');
+      ids.add(target.id);
+    }
+  }
+  validateStop(t.stop);
+  if (t.phases !== undefined) validatePhases(t.phases);
+}
+
+function validatePhases(value: unknown): asserts value is Phase[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error('任务配置 phases 必须是非空数组。');
+  const names = new Set<string>();
+  for (const phase of value) {
+    if (!phase || typeof phase !== 'object' || Array.isArray(phase)) throw new Error('phases 的每一项必须是对象。');
+    const p = phase as Record<string, unknown>;
+    rejectUnknownKeys(p, PHASE_KEYS, 'phase');
+    if (typeof p.name !== 'string' || !p.name.trim()) throw new Error('phases 的 name 必须是非空字符串。');
+    if (names.has(p.name)) throw new Error(`phases 的 name 重复：${p.name}`);
+    names.add(p.name);
+    if (p.requires !== undefined && (!Array.isArray(p.requires) || p.requires.some(r => !['job-verified', 'scope-frozen', 'material-ready', 'evaluated', 'download-confirmed', 'no-pending'].includes(r)))) throw new Error(`phases.${p.name}.requires 无效。`);
+    if (!p.allowed || typeof p.allowed !== 'object' || Array.isArray(p.allowed)) {
+      throw new Error(`phases.${p.name}.allowed 必须是非空对象。`);
+    }
+    for (const [cmd, variants] of Object.entries(p.allowed)) {
+      if (!cmd.trim()) throw new Error(`phases.${p.name}.allowed 的命令名不能为空。`);
+      if (!Array.isArray(variants) || variants.some(v => typeof v !== 'string')) {
+        throw new Error(`phases.${p.name}.allowed.${cmd} 必须是字符串数组。`);
+      }
+    }
+  }
+}
+
+export async function loadTaskConfig(path: string): Promise<TaskConfig> {
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (error) {
+    throw new Error(`任务配置文件不可读：${path}；${error instanceof Error ? error.message : String(error)}`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(raw.replace(/^\uFEFF/, ''));
+  } catch (error) {
+    throw new Error(`任务配置文件无效 JSON：${path}；${error instanceof Error ? error.message : String(error)}`);
+  }
+  validateTaskConfig(value);
+  if (value.jobSpec !== undefined) {
+    if (!isAbsolute(value.jobSpec)) throw new Error('jobSpec 必须是绝对路径。');
+    let spec: Record<string, unknown>;
+    try { spec = JSON.parse((await readFile(value.jobSpec, 'utf8')).replace(/^\uFEFF/, '')); }
+    catch (error) { throw new Error(`jobSpec 不可读或 JSON 无效：${value.jobSpec}；${String(error)}`); }
+    if (!spec || Array.isArray(spec) || spec.schemaVersion !== 1 || spec.job !== value.job) throw new Error(`jobSpec schemaVersion/job 与任务不匹配：${value.jobSpec}`);
+  }
+  return {...value,permit:resolve(value.permit),...(value.jobSpec?{jobSpec:resolve(value.jobSpec)}:{}),...(value.ledgerDir?{ledgerDir:resolve(value.ledgerDir)}:{}),...(value.scope==='collect'?{mode:value.mode??'screen'}:{}),stop:{...value.stop,...(value.stop.deadline?{deadline:new Date(value.stop.deadline).toISOString()}:{})}} as TaskConfig;
+}
+
+/** 对象字段顺序不影响任务身份，数组顺序保留业务含义。 */
+export function canonicalTask(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalTask).join(',')}]`;
+  if (value !== null && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalTask((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+/**
+ * task-check 核心：读取并校验任务配置 + 其引用的 permit，返回报告。
+ * 交叉校验：permit 若声明了 job/entry，必须与任务配置一致（fail-closed）。
+ */
+export async function checkTaskConfig(): Promise<{
+  task: TaskConfig;
+  permit: PermitDoc;
+  permitFile: string;
+}> {
+  const path = taskConfigPath();
+  if (!path) throw new Error('未设置 BOSS_TASK_CONFIG；请在启动前指向任务配置文件。');
+  const task = await loadTaskConfig(path);
+  let permit: PermitDoc;
+  try {
+    permit = await loadPermit(task.permit);
+  } catch (error) {
+    throw new Error(`任务配置引用的 permit 无效：${task.permit}；${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (permit.job !== undefined && permit.job !== task.job) {
+    throw new Error(`任务配置 job 与 permit.job 不一致：${task.job} / ${permit.job}`);
+  }
+  if (permit.entry !== undefined && permit.entry !== task.scope) {
+    throw new Error(`任务配置 scope 与 permit.entry 不一致：${task.scope} / ${permit.entry}`);
+  }
+  if ((task.scope === 'recommend' || task.scope === 'search' || (task.scope === 'collect' && task.mode !== 'collect-only')) && !task.jobSpec) throw new Error('本轮需要评估，缺少 jobSpec 岗位规范引用。');
+  if (Object.prototype.hasOwnProperty.call(permit.allowed,'send') && !task.messageScript?.trim()) throw new Error('本轮允许 send，缺少已授权的 messageScript 正文。');
+  return { task, permit, permitFile: task.permit };
+}

@@ -1,7 +1,7 @@
 // 配置文件 — 应用数据位于 ~/.boss-cli/.cache/
 
 import { existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, isAbsolute } from 'path';
 import { homedir } from 'os';
 
 /**
@@ -17,10 +17,14 @@ export function getAgentSkillsDir(): string {
 }
 
 /** 应用主目录（业务数据在 .cache 下） */
-export const APP_HOME = join(homedir(), '.boss-cli');
+export const APP_HOME = process.env.BOSS_APP_HOME?.trim() || join(homedir(), '.boss-cli');
+if (!isAbsolute(APP_HOME)) throw new Error('BOSS_APP_HOME 必须是绝对路径');
 
 /** 存放岗位 JD 的目录（每个岗位一个 .md 文件） */
 export const JD_DIR = join(APP_HOME, 'jd');
+
+/** 存放岗位规范文件（job spec，每个岗位一个 .json）的目录，见 job-spec.md */
+export const JOBS_DIR = join(APP_HOME, 'jobs');
 
 /**
  * 应用缓存与生成数据根目录（浏览器配置等）
@@ -35,6 +39,9 @@ export const RESUME_SCREENSHOTS_DIR = join(CACHE_DIR, 'resume-screenshots');
 
 /** 在线简历截图经 OCR 后的纯文本保存目录（与截图同名 `.txt`） */
 export const RESUME_OCR_DIR = join(CACHE_DIR, 'ocr');
+
+/** 本轮运行实例（runId → permit/flow-state/账本/版本绑定）状态文件目录；可用 BOSS_RUNS_DIR 覆盖（测试隔离） */
+export const RUNS_DIR = process.env.BOSS_RUNS_DIR?.trim() || join(APP_HOME, 'runs');
 
 let appDataLayoutReady = false;
 
@@ -53,11 +60,17 @@ export function ensureAppDataLayout(): void {
   if (!existsSync(JD_DIR)) {
     mkdirSync(JD_DIR, { recursive: true });
   }
+  if (!existsSync(JOBS_DIR)) {
+    mkdirSync(JOBS_DIR, { recursive: true });
+  }
   if (!existsSync(RESUME_SCREENSHOTS_DIR)) {
     mkdirSync(RESUME_SCREENSHOTS_DIR, { recursive: true });
   }
   if (!existsSync(RESUME_OCR_DIR)) {
     mkdirSync(RESUME_OCR_DIR, { recursive: true });
+  }
+  if (!existsSync(RUNS_DIR)) {
+    mkdirSync(RUNS_DIR, { recursive: true });
   }
   const agentSkills = getAgentSkillsDir();
   if (!existsSync(agentSkills)) {

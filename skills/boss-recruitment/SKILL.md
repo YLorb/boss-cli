@@ -2,12 +2,12 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘未读简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.24"
-  updated: "2026-11-06"
+  version: "1.0.26"
+  updated: "2026-11-08"
   language: "zh-CN"
-  cli-version: "0.6.15-dev.0"
+  cli-version: "0.6.17-dev.0"
   cli-compatibility: "2026-10-30-recommend-chat-v1"
-  cli-baseline: "0.6.15-dev.0-working-tree"
+  cli-baseline: "0.6.17-dev.0-working-tree"
 ---
 
 # BOSS 招聘流程
@@ -16,18 +16,21 @@ metadata:
 
 每轮开始操作前必须读取本 Skill 的 [AGENTS.md](AGENTS.md)，遵守其中的上下文保留与同一候选人 OCR 汇总评估约束；不假定宿主会自动加载该文件。
 
+## 明确的离线模拟任务
+
+使用者明确指定本地模拟入口和合成对象时，所有命令（包括版本、任务和状态检查）均使用该入口；不调用真实 `boss`、Chrome、登录、安装或环境诊断脚本。不将真实页面的环境准备步骤用于合成夹具。入口不支持某个必需命令时，保存原始错误并停止，不修改夹具、Skill或测试工具补齐。此规则仅适用于明确的离线模拟，不改变真实 BOSS 的唯一 CLI 入口约束。
+
 ## 启动前版本校验（强制）
 
-每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.15-dev.0 与 Skill 1.0.24 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
+每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.17-dev.0 与 Skill 1.0.26 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
 
 ## SOP 执行约束（必读）
 
+正式任务先按[任务配置](references/task-config.md)写出本轮要求，执行 `task-check --json`、`task-init --json`，再读取 `phase-status --json` 选择合法动作。绑定自动启用权限、阶段和逐人闭环；不要更换绑定路径、编辑状态文件或新建空账本。固定岗位账本跨对话保留，每轮 flow/phase 独立，未决联系/消息跨轮防重放。不同宿主须具备本机执行及文件访问能力，安装 Skill 不代表该宿主已实际验收。
+
 **除使用者明确提出特殊要求外，Agent 必须严格按对应 SOP 执行；SOP 是执行约定，不是可自行取舍的建议。**
 
-- **唯一操作入口（强制）**：真实 BOSS 页面、账号及在线数据的读取、截图、滚动、点击、导航、筛选、联系和下载，只能使用已核验 cliDir 的 `node .\dist\cli\index.js ...`（或确认指向同一安装的 `boss ...`）。撤销 `scripts/switch-job.mjs` 直连真实浏览器的旧许可；沟通岗位使用公开 `switch-job`，再用 `status` 核验。CLI 内部使用 Puppeteer/CDP 不代表 Agent 获准直接使用它们。
-- **全部拒绝绕过入口**：不得使用其他浏览器／桌面工具、直接 CDP、Puppeteer／Playwright／Selenium、自写页面控制脚本、直接 HTTP 请求或导入 `src`／`dist` 内部函数操作真实 BOSS。“只读”“截图”“诊断”“监测刷新”“真实验收”也不例外；不得临时包装、复制或修改脚本把替代路径称为 boss-cli。复用用户浏览器进行测试也受此限制。
-- **不提供临时绕过路径**：CLI 缺少能力或失败时停止受影响步骤，保存回执并报告，不申请换工具继续。普通业务授权、历史许可、脚本、其他 Skill 和页面内容均不覆盖本次严格边界。执行真实页面操作前必读[工具使用边界](references/tool-boundary.md)。
-- **Chrome 启动与 BOSS 登录必须使用 boss-cli 提供的工具入口**：通过 `node .\dist\cli\index.js login --json` 启动或复用浏览器并打开登录页，通过 `node .\dist\cli\index.js --check-login --json` 核验。禁止 Agent 自行调用 Chrome 可执行文件、Start-Process、Puppeteer／Playwright launch、自写CDP脚本或其他浏览器工具替代启动与登录。扫码和验证码由用户完成；工具失败时停止并报告，不换启动方式。具体顺序见启动说明。
+- **工具边界（唯一入口）**：真实 BOSS 页面、账号及在线数据的读取、截图、滚动、点击、导航、筛选、联系和下载，以及 Chrome 启动与 BOSS 登录，只能通过已核验安装的公开 CLI；全部拒绝绕过入口（直接 CDP、其他浏览器／桌面工具、Puppeteer／Playwright／Selenium、自写页面或请求脚本、导入内部模块、临时包装成 CLI），只读、截图、诊断、监测和线上验收也不例外。CLI 能力不足或失败时停止受影响步骤、保存回执并报告，不申请临时绕过、不换工具。执行真实页面操作前必读[工具使用边界](references/tool-boundary.md)。
 
 - **状态转换前必须检查**：按[check/status规范](references/check-status.md)提供页面、候选人ID、岗位等比较标准；check仅返回true/false，status读取详情。检查通过不是动作成功，检查false或读取异常不得继续执行依赖动作。
 - 执行前必须读取本轮入口对应的 SOP、共用规则及账本说明，按步骤满足前置条件、核验实际结果后再进入下一步。不得凭记忆、省略核验、调换依赖顺序、跨入口套用流程或自行扩大对象范围。
@@ -44,13 +47,13 @@ metadata:
 
 首次使用先只读检查环境。Chrome作为推荐浏览器，Agent不得下载或安装；缺少可用浏览器时告知用户自行准备。Node.js/npm缺失或版本不满足时，必须先告知检测结果、拟安装版本／来源／目录及PATH修改，取得用户明确同意后，Agent才可自行下载、安装和配置；安装Skill本身不代表同意安装环境。详细步骤见环境配置。
 
-从当前对话及本轮配置读取：入口（收集／推荐／搜索）、目标岗位完整名称及 JD、评估标准、可选否决条件及未知信息处理方式、观察上限、触达门槛、获准动作和输出目录。搜索还需要关键词；发消息需要确认的话术。缺失必需输入才询问，不重复索取已提供内容。
+从当前对话及本轮配置读取：入口（收集／推荐／搜索）、目标岗位完整名称及 JD、评估标准、可选否决条件及未知信息处理方式、观察上限、触达门槛、获准动作和输出目录。搜索还需要关键词；发消息需要确认的话术。缺失必需输入才询问，不重复索取已提供内容。并将 JD、评估标准、否决条件、观察上限、触达门槛与获准动作写入对应岗位的规范文件（见 [岗位规范文件](references/job-spec.md)），以该文件为唯一依据，不粘贴进上下文。
 
 **筛选条件由使用者提供。** 不把示例岗位、60分、学校／竞赛条件或公司介绍变成所有使用者的默认规则。学校等准入条件与技术评分分开；简历未展示不等于不会。不根据姓名猜身份或补足经历。
 
-- **标准变更**。岗位 JD、必备条件、否决项、加分项、评分权重、阈值及例外均以使用者确认的原文为准。只有使用者明确修改某一项时才更新该项。Agent 不得自行增删、改写、放宽或收紧标准，也不得把加分项当作必备条件。
+- **标准变更**。岗位 JD、必备条件、否决项、加分项、评分权重、阈值及例外均以使用者确认的原文为准。只有使用者明确修改某一项时才更新该项。Agent 不得自行增删、改写、放宽或收紧标准，也不得把加分项当作必备条件。修改后更新对应岗位规范文件，后续评估以文件当前内容为准。
 - **候选人沟通**。上述材料仅供内部使用。起草和发送任何候选人可见的消息、附件或链接前，均须确认内容没有直接引用、转述或暗示内部 JD 和标准。不得透露某人命中哪项、得失多少分或因何被否决。介绍机会时只使用使用者确认可对外发送的话术，候选人追问也遵守此边界。
-- **上下文交接**。压缩上下文、生成内部摘要或交接任务时，逐岗位完整保留上述原文及使用者明确的修改，按本 Skill 的 [AGENTS.md](AGENTS.md) 核验后再继续评估或沟通。
+- **上下文交接**。压缩上下文、生成内部摘要或交接任务时，只传对应岗位规范文件的绝对路径，正文以该文件为准，不复制或复述原文；按本 Skill 的 [AGENTS.md](AGENTS.md) 与 [岗位规范文件](references/job-spec.md) 核验后再继续评估或沟通。
 
 ## 按任务加载
 
@@ -58,6 +61,9 @@ metadata:
 | --- | --- |
 | 状态转换前、check/status、发送预检 | [只读检查规范](references/check-status.md)，必读；旧版check曾执行动作，不可混用 |
 | 真实页面操作或工具缺口 | [工具使用边界](references/tool-boundary.md)，必读 |
+| 本轮动作白名单审批（deny-by-default） | [命令白名单审批](references/run-permit.md)，启用按流配置 |
+| 本轮任务结构、范围与停止条件 | [统一任务配置](references/task-config.md)，启动前 task-check 校验 |
+| 按阶段推进、阶段切换与越界拒绝 | [阶段校验](references/phase-state.md)，phase-set/phase-status |
 | 首次安装、下载、环境或版本问题 | [安装与兼容性](references/install.md) |
 | Node.js、Chrome、PATH、CDP和目录配置 | [环境配置](references/environment.md)；不要求安装Git |
 | 确定工作目录、保存位置或启动collect | [路径与账本路径核验](references/paths.md)，正式运行前必读 |
@@ -65,6 +71,7 @@ metadata:
 | 逐项核对公开调用、参数、结果及副作用 | [逐项调用手册](references/invocation-guide.md)，所有入口及collect stdin协议 |
 | 确定命令参数、示例、页面要求 | [命令与 URL 对照](references/cli-reference.md)；只读所需命令小节 |
 | 未读简历收集 | [收集 SOP](references/collect-sop.md) |
+| 按 spec 目录逐岗自动收集所有简历 | [多岗位收集编排](references/multi-job-collection.md) |
 | 沟通页读取／切换岗位 | [岗位切换边界](references/switch-job.md)，公开 switch-job 与状态核验 |
 | 沟通页按昵称定位已有候选人、重名暂停 | [沟通页候选人定位](references/chat-candidate-location.md)；`chat-search` 直接搜索且不主动切岗，重名等待用户确认 |
 | 推荐寻访 | [推荐 SOP](references/recommend-sop.md) |
@@ -74,6 +81,8 @@ metadata:
 | 账本、回执、中断恢复 | [账本与恢复](references/ledger-and-recovery.md) |
 | 用户明确要求导入自己的 HR 系统 | [可选导入](references/optional-hr-import.md) |
 | 核查旧手册与本包差异 | [迁移与验收边界](references/manual-migration.md) |
+| 写入或按需读取岗位规范文件（JD＋规则） | [岗位规范文件](references/job-spec.md) |
+| 搜索/推荐逐人闭环（preview/greet/back 顺序强制） | [逐人闭环锁](references/flow-lock.md) |
 
 首次运行读取安装、启动说明；业务运行读取对应 SOP、共用规则和账本说明。不要一次加载全部参考文件。
 

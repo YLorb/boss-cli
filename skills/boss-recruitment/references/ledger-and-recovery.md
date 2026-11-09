@@ -40,7 +40,7 @@ candidate字段：dataId、name、createdAt、updatedAt、attachment、status、
 
 ## 外部结果合并
 
-独立CLI下载或发送不会自动更新collect。先保存真实回执，stop当前collect并确认退出，才允许在离线阶段用当前源码的 `Ledger.load/recordProbe/recordFailure/stop` API写回。stdin没有这些op，不直接改活动JSON。当前包不提供未经测试的通用合并脚本；需要实现时先按实际API及回执schema验证，未合并前明确报告“外部结果已保存，账本尚未同步”。
+正式任务独立下载后，活动collect会话通过stdin `{"op":"receipt","dataId":"实际ID"}` 入账；会话已停止时使用公开 `boss collect-sync --data-id <实际ID> --json`。只消费绑定run的实际下载回执，重新核验文件bytes/SHA-256后更新固定岗位账本。锁冲突、文件改变、无回执或恢复未完成均报错，不自行删锁或换入口重试。发送回执保存在固定岗位的actions记录中，与账本关联；不能用消息回执伪造收到附件。
 
 只有真实附件证据才能写RECEIVED；消息3不能写附件请求SENT；NOT_OBSERVED仅表示已加载历史未看到。新的空探测不能覆盖之前已核验发送或下载证据。RECHECK不能用旧回执自动解除。
 

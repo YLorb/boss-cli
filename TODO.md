@@ -1,5 +1,18 @@
 # TODO
 
+## 2026-11-08 决策级护栏（第二道门）
+
+- [x] 评估先于触达：新增 `boss decide --candidate-id X --verdict fit|not-fit|unknown`，实际 greet 前强制 `decided[X].verdict==='fit'`，否则拒绝；unknown 报告但不阻断（back 后继续下一位）。
+
+## 2026-11-08 剩余待办
+
+- [x] permit 命令白名单（目标 1 的另一半）：`src/cli/permit.ts` 单点审批 + BOSS_RUN_PERMIT + deny-by-default + action 子动作白名单。
+- [x] 加速 Agent 解析（目标 2 / 阶段 C）。
+- [ ] 文档一致性校验脚本 scripts/check-doc-drift.mjs + test:docs：从 `boss help` 抽命令名与 README/cli-reference 比对，防止再次漂移。
+- [ ] 接续判断补齐：已做 done/continue/needs-verify 三态（flow-status）+ greet/send/confirm-contact 重放禁止 + 必须暂停（paused）；send 正常形态已接入。
+- [x] 停滞监测：进程消失由 CLI 全命令超时（附件 15/30s 进程级、页面操作 Puppeteer 超时）+ Agent 发现失效覆盖；业务停滞由 Agent 每轮 flow-status 查 stalled/paused。无需独立 watchdog 进程（Agent 是编排者始终存活，Chrome 挂起必被 CLI 超时暴露）。
+- [ ] 未读收集与多岗位收集端到端真实验收（规范已补齐，未在真实账号跑通）。
+
 ## 2026-11-06
 
 - [ ] 修复普通 `send` 在输入框未获得焦点时可能触发整页全选的问题。`src/toolset/send.ts` 点击 `#boss-chat-editor-input` 后直接执行 Ctrl+A / Ctrl+V，缺少遮挡与实际焦点校验；用户截图显示简历弹层打开时菜单、正文和按钮文字被全选。当前仅确认代码风险，尚无对应调用回执证明此次由 `send` 触发；CLI 0.6.15-dev.0 及本次交付 ZIP 均包含该逻辑。按键前核验输入框可编辑、未被遮挡且实际持有焦点，不满足立即报错并保留上下文，不自动关闭弹层、重试点击或补发；修饰键须在异常时释放。离线验收覆盖正常发送、简历弹层遮挡、点击后焦点未进入输入框、粘贴前焦点丢失及按键异常，确保失败时不继续全选、粘贴或发送。排查 `action remark` 与 `deep-search` 的同类全选调用；修复后同步交付包，真实验收仅使用公开 CLI。
@@ -15,7 +28,7 @@
 - [ ] 补测发现：`jd` 新版编辑按钮可以打开 `/web/chat/job/edit`，但旧详情表单 `.job-edit-container.edit-job` 不存在，读取超时；需依据当前编辑页结构修复详情解析。未修改或发布职位。
 - [x] 补测发现并修复：真实在线简历拼接误用取整后的PNG宽度反推DPR，导致位置累计偏差；改为实际 devicePixelRatio，并按已确认的末屏像素范围计算输出高度。保持重叠校验阈值，不加回退。真实7屏截图863×3968成功，恢复位置后写入文件，再等待3562ms关闭，确认无可见弹层；4项离线回归通过。见 [本轮实测记录](docs/live-validation-2026-10-14.md)。
 
-- [x] 在线简历滚动到底部并完成截图后，随机等待 1000～5050ms 再关闭；保留打开简历后首次滚动前随机等待 2000～10000ms 的规则。`test:resume-timing` 覆盖成功关闭顺序与失败不关闭。
+- [x] 在线简历滚动到底部并完成截图后，随机等待 1000～5050ms 再关闭；保留打开简历后首次滚动前随机等待 2000～5000ms 的规则。`test:resume-timing` 覆盖成功关闭顺序与失败不关闭。
 - [x] 相邻两次分段滚动之间增加随机 500～3000ms 间隔；与单次滚动内部的加减速脉冲区分，补充离线回归验证。覆盖截图滚动、顶部定位/原位置恢复，不增加首次滚动前的分段间隔。
 - [x] 验证经授权在沙箱外通过 boss-cli 启动 Chrome 后，启动命令结束时浏览器和 CDP 监听是否持续存活。2026-10-14 独立 profile/53471 端口实验：login --json 退出码 0；退出后 3 次检查均为同一 PID 22300、启动时间及 WebSocket 地址，最后检查距首次退出检查约 26 秒；无需用长期 CLI sleep 保活。环境与复现边界见 docs/browser-session.md。
 

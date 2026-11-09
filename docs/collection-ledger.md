@@ -8,6 +8,13 @@
 
 ## 流程起点
 
+`boss collect --job "岗位完整名称" [--mode <screen|collect-only>]`：
+
+- `screen`（默认）：完整收集 SOP = 评估 + 决策 + 收件。`decision` 必须带 `evidence.verdict`，且与决策一致（PASS↔fit、FAIL↔not-fit），`evidence.ref` 可选指向评估回执；无评估证据或结论不一致即拒绝。
+- `collect-only`：仅收集简历/材料，不做匹配评估。`decision` 不要求评估证据。
+- 会话中途切换用 `{"op":"mode","value":"screen|collect-only"}`，切换记录写入 `<账本>.decisions.jsonl` 审计流。
+- `decision PASS` 与 `decision FAIL` 都携带同款 `evidence`；评估结论为 unknown 时保持 `decision=PENDING`，不改账本。
+
 2026-10-13 用户纠正：正常SOP只在目标岗位“未读”中逐人执行，评估一人后完成其消息/收件或等待处理，再读取下一人；附件先存本地，本轮收集结束后统一上传。对账、复查或仅收集须人工明确声明。**下文round是现有全账本命令的技术说明，不是正常SOP默认步骤**；严格未读及单对象调度尚未由round实现。详见 [WorkBuddy执行手册](workbuddy-recruitment-runbook.md)。
 
 登录和岗位确认完成后，候选人处理流程必须按以下顺序开始：

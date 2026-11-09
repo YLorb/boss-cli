@@ -32,7 +32,7 @@ test('fractional DPR uses actual scale and captured bottom extent; corrupted ove
 
 test('reading and segment delays include their specified endpoints', () => {
   assert.equal(resumeReadingDelayMs(() => 0), 2000);
-  assert.equal(resumeReadingDelayMs(() => 1 - Number.EPSILON), 10000);
+  assert.equal(resumeReadingDelayMs(() => 1 - Number.EPSILON), 5000);
   assert.equal(resumeScrollIntervalMs(() => 0), 500);
   assert.equal(resumeScrollIntervalMs(() => 1 - Number.EPSILON), 3000);
 });

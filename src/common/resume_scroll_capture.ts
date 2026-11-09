@@ -12,7 +12,7 @@ const MAX_CROP_SIZE_DELTA = 1.5;
 
 /** One reading pause after opening the resume, before any capture scrolling. */
 export function resumeReadingDelayMs(random = Math.random): number {
-  return 2_000 + Math.floor(random() * 8_001);
+  return 2_000 + Math.floor(random() * 3_001);
 }
 
 /** Reading interval between complete scroll segments, not between wheel pulses. */

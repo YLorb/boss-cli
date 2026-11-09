@@ -1,3 +1,4 @@
+import { parseOpts, CliError } from './arguments.js';
 import { runCheck, runStatus, type CheckCriteria } from '../toolset/check.js';
 import { runSearchSidebar } from '../toolset/search-sidebar.js';
 import { runResumeOcr } from '../common/resume_ocr.js';
@@ -8,6 +9,8 @@ import { parseSwitchJobArgs, runSwitchJob } from '../toolset/switch-job.js';
  */
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { readdir, readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { detachBrowserSession } from '../browser/index.js';
 import {
   implChatAction,
@@ -31,13 +34,12 @@ import {
   implSetBaiduCredentials,
   implBossSearch,
   implSendMessage,
-  type ChatPageAction,
 } from '../toolset/index.js';
 import { printBossInteractiveBanner } from './banner.js';
 import { jsonError, splitJsonFlag } from './output.js';
 import { isAttachmentCommand, runCommandProcess } from './command_process.js';
 import { runProbeTargetResume } from '../toolset/attachment.js';
-import { runCollectionSession } from '../collection/session.js';
+import { runCollectionSession, syncCollectionReceipt } from '../collection/session.js';
 import { runBack } from '../toolset/back.js';
 import { parseSearchMoreArgs, runSearchMore } from '../toolset/search-more.js';
 import { inspectEmbeddedChat, checkEmbeddedChat, sendEmbeddedChat, closeEmbeddedChat } from '../toolset/embedded-chat.js';
@@ -45,21 +47,22 @@ import { dismissContactNotice } from '../toolset/contact-notice.js';
 import { favoriteResume } from '../toolset/favorite.js';
 import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
+import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
+import { checkTaskConfig } from './task_config.js';
+import { initRun, activateRunBindings, getBoundRun } from './run_state.js';
+import { installOfflineTestGuard } from '../common/offline_test.js';
+import { assertPermittedPhase, isPhaseDenied, setPhase, phaseStatus, beforePhaseCommand, recordPhaseCommand, failPhaseCommand } from './phase_state.js';
 import { runCheckLogin } from '../toolset/check_login.js';
-import { APP_HOME } from '../config.js';
+import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
+import { acquireFlowOpen, clearFlowPause, consecutiveActionFailures, flowStatePath, flowStatus, flowWatch, pauseFlow, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, verifyFlowNotPaused, verifyFlowNotReplayed, type JournalAction } from '../common/flow_state.js';
 import {
   printPackageUpdateNoticeIfDue,
   printVersionInfo,
   runPackageUpdate,
 } from './version.js';
 
-class CliError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CliError';
-  }
-}
+
 
 function envTruthy(name: string): boolean {
   const v = (process.env[name] ?? '').trim().toLowerCase();
@@ -170,7 +173,8 @@ function printHelp(): void {
   boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]
       向 BOSS_OCR_URL（默认 http://ylorb.top:9002/ocr）上传本地截图并按坐标分栏重排；保留原图
       截图后由 Agent 后台调用，评估前等待完成并优先读 textPath；失败报错，不重试、不连接浏览器
-  boss collect --job <岗位完整名称> [--ledger-dir <目录>]
+  boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]
+      screen（默认）：decision 须带评估证据（PASS↔fit，FAIL↔not-fit）；collect-only：仅收集，不要求评估
       一岗一账的常驻会话；stdin 每行一个 JSON 命令，stdout 每行一个 JSON 结果
       候选人更新逐笔保存；stop 等待在途操作并退出。待恢复时提示“有信息需要恢复。”
       recheck / reconcile 仅在用户明确授权对应范围后传 recoveryAuthorized:true；旧 reading 需要全量对账
@@ -250,6 +254,21 @@ function printHelp(): void {
       显式返回上一条浏览器历史，仅一步；核对前后历史ID及URL。不刷新、不重新路由、不重跑失败动作。
       仅支持已知列表、在线简历页及权益页；登录、验证、未知页或简历弹层仍打开时停止。
 
+  boss decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]
+      锁模式（BOSS_FLOW_STATE）下记录当前打开候选人的评估结论；实际 greet 前必须已 decide fit，否则拒绝
+
+  boss spec-list [--json]
+  boss task-check --json / boss task-init --json
+      校验任务、权限、岗位规范和配套版本，创建正式运行绑定
+  boss phase-status --json / boss phase-set --phase <阶段名> --json
+      查看合法动作/阻断原因；满足前置条件后相邻推进
+  boss collect-sync --data-id <会话ID> --json
+      collect已停止时，将本轮已核验下载回执写入固定岗位账本
+      枚举 ~/.boss-cli/jobs/ 下的岗位规范文件（job spec），用于多岗位收集固定本轮清单
+
+  boss flow-status [--json]
+      锁模式（BOSS_FLOW_STATE）下输出接续状态：已打开候选人的下一步、需核验（结果未知）与已完成清单
+
   boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
       --ensure-job 优先精确匹配岗位名和城市，忽略薪资；精确零匹配时用原参数做一次关键词匹配。不带该选项直接按关键词匹配。多项匹配即停止
   boss search [关键词] [--city 城市 --job 搜索岗位]
@@ -286,59 +305,6 @@ function printHelp(): void {
 }
 
 /** 解析 `--key value` / `--key=value` / 布尔 `--flag` */
-function parseOpts(argv: string[], booleanFlags: ReadonlySet<string> = new Set()): {
-  rest: string[];
-  flags: Set<string>;
-  opts: Record<string, string>;
-} {
-  const rest: string[] = [];
-  const flags = new Set<string>();
-  const opts: Record<string, string> = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--') {
-      rest.push(...argv.slice(i + 1));
-      break;
-    }
-    if (a.startsWith('--')) {
-      const eq = a.indexOf('=');
-      if (eq !== -1) {
-        const k = a.slice(2, eq);
-        if (booleanFlags.has(k)) die(`❌ --${k} 是布尔开关，不接受值。`);
-        opts[k] = a.slice(eq + 1);
-        continue;
-      }
-      const key = a.slice(2);
-      if (booleanFlags.has(key)) {
-        flags.add(key);
-        continue;
-      }
-      const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith('-')) {
-        opts[key] = next;
-        i += 1;
-      } else {
-        flags.add(key);
-      }
-      continue;
-    }
-    if (a.startsWith('-') && a.length > 1 && !a.startsWith('--')) {
-      const short = a.slice(1);
-      const next = argv[i + 1];
-      if (short === 't' && next !== undefined && !next.startsWith('-')) {
-        opts.t = next;
-        i += 1;
-        continue;
-      }
-      if (!/^\d/.test(short)) {
-        flags.add(short);
-        continue;
-      }
-    }
-    rest.push(a);
-  }
-  return { rest, flags, opts };
-}
 
 function splitRequirementArg(value: string): string[] {
   return value
@@ -466,10 +432,59 @@ function startProcessingSpinner(): () => void {
   };
 }
 
+/** 动作结果分类：副作用结果未确认的错误记为 unknown，其余 failed。 */
+function classifyJournalResult(error: unknown): 'failed' | 'unknown' {
+  const name = error instanceof Error ? error.name : '';
+  return name === 'EmbeddedSendUnconfirmedError' || name === 'AttachmentTimeoutError' ? 'unknown' : 'failed';
+}
+
+/** 触达受阻（付费/风控等）视为必须暂停的硬失败。 */
+function isHardFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /付费|VIP|购买|权益|限流|风控|验证码|访问频繁/.test(msg);
+}
+
+/** 动作前后机械落盘意图/结果到流程日志；flow 为空（未开锁）时直接执行，不改日志。 */
+async function withFlowJournal<T>(
+  flow: string | null,
+  target: { candidateId: string; name: string; action: JournalAction },
+  fn: () => Promise<T>,
+  extractEvidence?: (value: T) => Record<string, string> | undefined,
+): Promise<T> {
+  if (!flow) return fn();
+  await recordJournalIntent(flow, target.candidateId, target.name, target.action);
+  try {
+    const value = await fn();
+    await recordJournalResult(flow, target.candidateId, target.name, target.action, 'success', undefined, extractEvidence ? extractEvidence(value) : undefined);
+    return value;
+  } catch (error) {
+    await recordJournalResult(flow, target.candidateId, target.name, target.action, classifyJournalResult(error), error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+}
+
 /**
  * 执行一条子命令并返回结果（与传入 `process.argv` 切片语义一致，不含 `boss` 本身）。
  */
 export async function executeCommand(argv: string[]): Promise<string> {
+  installOfflineTestGuard();
+  if (process.env.BOSS_RUN_ID) await activateRunBindings();
+  if (!argv.length) die('命令不能为空');
+  const cmd = normalizeSubcommand(argv[0]);
+  await assertPermittedCommand(cmd, argv);
+  await assertPermittedPhase(cmd, argv);
+  await beforePhaseCommand(cmd, argv);
+  try {
+    const result = await executeCommandBody(argv);
+    await recordPhaseCommand(cmd, argv, result);
+    return result;
+  } catch (error) {
+    await failPhaseCommand(cmd, argv, error);
+    throw error;
+  }
+}
+
+async function executeCommandBody(argv: string[]): Promise<string> {
   if (argv.length === 0) {
     die('❌ 空命令');
   }
@@ -479,7 +494,7 @@ export async function executeCommand(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['favorite', 'switch-job', 'ocr', 'check', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['collect-sync', 'favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'phase-set', 'phase-status', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -497,8 +512,14 @@ export async function executeCommand(argv: string[]): Promise<string> {
       else paths.push(tail[i]);
     }
     if (paths.length !== 1) die('用法: boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]');
-    const result = await runResumeOcr(paths[0], timeoutMs, layout);
-    return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
+    try {
+      const result = await runResumeOcr(paths[0], timeoutMs, layout);
+      return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
+    } catch (error) {
+      const ocrFlow = flowStatePath();
+      if (ocrFlow) await pauseFlow(ocrFlow, 'OCR服务错误').catch(() => {});
+      throw error;
+    }
   }
   if(cmd==='status') {
     if(tail.length) die('status 不接受参数');
@@ -516,6 +537,87 @@ export async function executeCommand(argv: string[]): Promise<string> {
     for(const [k,v] of Object.entries(opts)){if(!v.trim()&&k!=='keyword')die('check 比较标准不能为空');(criteria as any)[keys[k]!]=v.trim();}
     if(flags.has('embedded'))criteria.embedded=true;
     return runCheck(criteria);
+  }
+  if(cmd==='decide') {
+    const {rest,opts,flags}=parseOpts(tail);
+    if(rest.length||flags.size||!opts['candidate-id']?.trim()||!opts.verdict?.trim()||Object.keys(opts).some(k=>!['candidate-id','verdict'].includes(k)))
+      die('❌ 用法: decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]');
+    if(!['fit','not-fit','unknown'].includes(opts.verdict))die('❌ decide --verdict 必须是 fit/not-fit/unknown');
+    const decideFlow=flowStatePath();
+    if(!decideFlow)die('❌ decide 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    await verifyFlowNotPaused(decideFlow);
+    const decideCandidateId=opts['candidate-id'].trim();
+    const decideVerdict=opts.verdict as 'fit'|'not-fit'|'unknown';
+    const decideOpenName=(await readFlowOpen(decideFlow))?.name ?? '';
+    await recordJournalIntent(decideFlow,decideCandidateId,decideOpenName,'decide');
+    try {
+      await recordFlowDecision(decideFlow,decideCandidateId,decideVerdict);
+      await recordJournalResult(decideFlow,decideCandidateId,decideOpenName,'decide','success',undefined,{verdict:decideVerdict});
+    } catch (error) {
+      await recordJournalResult(decideFlow,decideCandidateId,decideOpenName,'decide','failed',error instanceof Error?error.message:String(error));
+      throw error;
+    }
+    return json?JSON.stringify({ok:true,candidateId:decideCandidateId,verdict:decideVerdict}):`已记录评估结论：${decideCandidateId} ${decideVerdict}`;
+  }
+  if(cmd==='flow-status') {
+    if(tail.length) die('flow-status 不接受参数');
+    const fsFlow=flowStatePath();
+    if(!fsFlow)die('❌ flow-status 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    const report=await flowStatus(fsFlow);
+    const watch=await flowWatch(fsFlow);
+    const summary={...report,paused:watch.paused,lastProgressAt:watch.lastProgressAt,idleMs:watch.idleMs,watchState:watch.state};
+    return json?JSON.stringify(summary):`已打开：${report.open?`${report.open.name}（${report.open.state}${report.open.next?`→${report.open.next}`:''}）`:'无'}\n需核验：${report.candidates.filter(c=>c.state==='needs-verify').map(c=>c.name).join('、')||'无'}\n已完成：${report.candidates.filter(c=>c.state==='done').length} 人\n停滞：${watch.state}${watch.paused?`（${watch.paused.reason}）`:''}`;
+  }
+  if(cmd==='flow-pause') {
+    const {rest,opts,flags}=parseOpts(tail);
+    if(rest.length||flags.size||!opts.reason?.trim()||Object.keys(opts).some(k=>k!=='reason'))die('❌ 用法: flow-pause --reason <原因> [--json]');
+    const fpFlow=flowStatePath();
+    if(!fpFlow)die('❌ flow-pause 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    await pauseFlow(fpFlow,opts.reason.trim());
+    return json?JSON.stringify({ok:true,paused:true,reason:opts.reason.trim()}):`已暂停：${opts.reason.trim()}`;
+  }
+  if(cmd==='flow-resume') {
+    if(tail.length)die('flow-resume 不接受参数');
+    const frFlow=flowStatePath();
+    if(!frFlow)die('❌ flow-resume 需要在锁模式（BOSS_FLOW_STATE）下使用');
+    await clearFlowPause(frFlow);
+    return json?JSON.stringify({ok:true,paused:false}):'已恢复';
+  }
+  if(cmd==='phase-set') {
+    const {rest,opts,flags}=parseOpts(tail);
+    if(rest.length||flags.size||!opts.phase?.trim()||Object.keys(opts).some(k=>k!=='phase'))die('❌ 用法: phase-set --phase <阶段名> [--json]');
+    const ps=await setPhase(opts.phase.trim());
+    return json?JSON.stringify({ok:true,phase:ps.phase,at:ps.at}):`已进入阶段：${ps.phase}`;
+  }
+  if(cmd==='phase-status') {
+    if(tail.length)die('phase-status 不接受参数');
+    const report=await phaseStatus();
+    return JSON.stringify({ok:true,...report as object});
+  }
+  if(cmd==='collect-sync') {
+    const {rest,opts,flags}=parseOpts(tail);
+    if(rest.length||flags.size||!opts['data-id']||Object.keys(opts).some(k=>k!=='data-id'))die('collect-sync --data-id <已下载会话ID> --json');
+    return syncCollectionReceipt(opts['data-id']);
+  }
+  if(cmd==='spec-list') {
+    if(tail.length) die('spec-list 不接受参数');
+    const specs = [];
+    if (existsSync(JOBS_DIR)) {
+      const names = await readdir(JOBS_DIR);
+      for (const name of names) {
+        if (!name.endsWith('.json')) continue;
+        const file = join(JOBS_DIR, name);
+        let job = '';
+        try {
+          const raw = await readFile(file, 'utf8');
+          const parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
+          job = typeof parsed.job === 'string' ? parsed.job : '';
+        } catch { job = ''; }
+        specs.push({ file, job });
+      }
+      specs.sort((a, b) => a.job.localeCompare(b.job, 'zh'));
+    }
+    return json ? JSON.stringify({ dir: JOBS_DIR, jobs: specs }) : (specs.map(s => `${s.job || '(缺 job 字段)'}\t${s.file}`).join('\n') || '(空)');
   }
   configureHeadlessForCommand(cmd);
   if (cmd === 'switch-job') return runSwitchJob(parseSwitchJobArgs(tail), json);
@@ -661,27 +763,13 @@ export async function executeCommand(argv: string[]): Promise<string> {
   }
 
   if (cmd === 'action') {
-    const { rest, opts } = parseOpts(tail);
-    const raw = (rest[0] ?? opts.type ?? opts.action ?? '').trim().toLowerCase();
-    const actionMap: Record<string, ChatPageAction> = {
-      resume: 'resume',
-      'not-fit': 'not-fit',
-      remark: 'remark',
-      'agree-resume': 'agree-resume',
-      'request-attachment-resume': 'request-attachment-resume',
-      'ask-attachment-resume': 'request-attachment-resume',
-      'ask-resume': 'request-attachment-resume',
-      history: 'history',
-      'chat-history': 'history',
-      wechat: 'exchange-wechat',
-      'exchange-wechat': 'exchange-wechat',
-    };
-    const action = actionMap[raw];
+    const action = resolveAction(argv);
     if (!action) {
       die(
         '❌ 用法: action <resume|not-fit|remark|agree-resume|request-attachment-resume|history|wechat> [--remark <备注>]',
       );
     }
+    const { opts } = parseOpts(tail);
     const remark = (opts.remark ?? '').trim();
     if (action === 'remark' && !remark) {
       die('❌ 当操作为 remark 时，必须提供 --remark <备注内容>。');
@@ -722,7 +810,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
       if(rest.length || !opts.name || !opts['candidate-id'] || !opts.job || !(opts.text||opts.t) ||
         [...flags].some(f=>!['embedded','check'].includes(f)) || Object.keys(opts).some(k=>!['name','candidate-id','job','text','t'].includes(k)))
         die('send --embedded --name <实际姓名> --candidate-id <ID> --job <完整岗位> --text <正文> [--check]');
-      return sendEmbeddedChat({name:opts.name.trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()},opts.text||opts.t,flags.has('check'));
+      const sendFlow = flags.has('check') ? null : flowStatePath();
+      if (sendFlow) {
+        await verifyFlowNotPaused(sendFlow);
+        await verifyFlowNotReplayed(sendFlow, opts['candidate-id'].trim(), opts.name.trim(), 'send');
+      }
+      return withFlowJournal(sendFlow, { candidateId: opts['candidate-id'].trim(), name: opts.name.trim(), action: 'send' }, () => sendEmbeddedChat({name:opts.name.trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()},opts.text||opts.t,flags.has('check')));
     }
     const check = flags.has('check');
     const text = opts.text?.trim() || opts.t?.trim() || '';
@@ -740,7 +833,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
         Array.from(flags).some((flag) => flag !== 'request-resume' && flag !== 'check')) {
       die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]');
     }
-    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check });
+    const normalSendFlow = check ? null : flowStatePath();
+    if (normalSendFlow) {
+      await verifyFlowNotPaused(normalSendFlow);
+      await verifyFlowNotReplayed(normalSendFlow, dataId || name || '', name, 'send');
+    }
+    return withFlowJournal(normalSendFlow, { candidateId: dataId || name || '', name, action: 'send' }, () => implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check }));
   }
 
   if (cmd === 'positions') {
@@ -817,7 +915,30 @@ export async function executeCommand(argv: string[]): Promise<string> {
       die('❌ 用法: preview <姓名>');
     }
     if(flags.has('reopen-on-frame-error')&&!opts['candidate-id']?.trim())die('--reopen-on-frame-error 要求 --candidate-id');
-    return implPreview({ candidateTarget, json, ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) });
+    const previewCandidateId = opts['candidate-id']?.trim();
+    const previewFlow = flowStatePath();
+    if (previewFlow) {
+      if (!previewCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下 preview 必须提供 --candidate-id；深度搜索不支持锁，请勿对深度搜索设置 BOSS_FLOW_STATE。');
+      await verifyFlowNotPaused(previewFlow);
+      await verifyFlowCandidate(previewFlow, previewCandidateId, candidateTarget);
+    }
+    let previewResult: string;
+    try {
+      previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }), (result) => {
+        if (!json) return undefined;
+        try {
+          const obj = JSON.parse(result);
+          return obj && typeof obj.path === 'string' ? { screenshot: obj.path } : undefined;
+        } catch { return undefined; }
+      });
+    } catch (error) {
+      if (previewFlow && (await consecutiveActionFailures(previewFlow, 'preview')) >= 3) {
+        await pauseFlow(previewFlow, '在线简历连续打开失败');
+      }
+      throw error;
+    }
+    if (previewFlow) await acquireFlowOpen(previewFlow, previewCandidateId!, candidateTarget, !flags.has('open-only'));
+    return previewResult;
   }
 
   if (cmd === 'back') {
@@ -831,7 +952,12 @@ export async function executeCommand(argv: string[]): Promise<string> {
     }
     if (Object.keys(opts).length) die('--expect-url 仅用于 back --previous');
     if(flags.has('check-in_online_resume')) {if(flags.has('if-open'))die('检查不能与返回动作混用');return runCheck({state:'online-resume-open'});}
-    return runBack(flags.has('if-open'), json);
+    const backFlow = flowStatePath();
+    if (backFlow) await verifyFlowNotPaused(backFlow);
+    const backOpen = backFlow ? await readFlowOpen(backFlow) : null;
+    const backResult = await withFlowJournal(backFlow, { candidateId: backOpen?.candidateId ?? '', name: backOpen?.name ?? '', action: 'back' }, () => runBack(flags.has('if-open'), json));
+    if (backFlow) await releaseFlowOpen(backFlow);
+    return backResult;
   }
 
   if (cmd === 'recommend') {
@@ -867,7 +993,29 @@ export async function executeCommand(argv: string[]): Promise<string> {
     if (!target) {
       die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
-    return implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) });
+    const contactForm = !flags.has('check') && !flags.has('continue-chat');
+    const actualContact = contactForm && !flags.has('confirm-contact') && !opts['select-job'];
+    const greetAction: JournalAction = flags.has('confirm-contact') ? 'confirm-contact' : opts['select-job'] ? 'select-job' : 'greet';
+    const greetCandidateId = opts['candidate-id']?.trim();
+    const greetFlow = flowStatePath();
+    if (contactForm && greetFlow) {
+      if (!greetCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下联系动作（greet/select-job/confirm-contact）必须提供 --candidate-id。');
+      await verifyFlowNotPaused(greetFlow);
+      await verifyFlowCandidate(greetFlow, greetCandidateId, target);
+      await verifyFlowDecided(greetFlow, greetCandidateId, target);
+      await verifyFlowNotReplayed(greetFlow, greetCandidateId, target, greetAction);
+    }
+    let greetResult: string;
+    try {
+      greetResult = await withFlowJournal(contactForm ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: greetAction }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
+    } catch (error) {
+      if (actualContact && greetFlow && isHardFailure(error)) {
+        await pauseFlow(greetFlow, '触达受阻（付费/风控）');
+      }
+      throw error;
+    }
+    if ((actualContact || flags.has('confirm-contact')) && greetFlow) await releaseFlowOpen(greetFlow);
+    return greetResult;
   }
 
   die(`❌ 未知命令 “${argv[0]}”。输入 help 查看用法。`);
@@ -883,7 +1031,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   } catch (e) {
     if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
     else console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = 1;
+    process.exitCode = (isPermitDenied(e) || isPhaseDenied(e)) ? 2 : 1;
   }
 }
 
@@ -894,6 +1042,17 @@ async function executeManagedCommand(argv: string[]): Promise<string> {
     if (!report.compatible) process.exitCode = 2;
     return JSON.stringify(report);
   }
+  if (argv[0] === 'task-check') {
+    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-check [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
+    const report = await checkTaskConfig();
+    return JSON.stringify({ ok: true, ...report });
+  }
+  if (argv[0] === 'task-init') {
+    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-init [--json]');
+    await requireSkillCompatibility();
+    return JSON.stringify({ ok: true, ...await initRun() });
+  }
+  await activateRunBindings();
   if (argv[0] !== 'update') {
     const parsed = splitVersionConfirmation(argv);
     await requireSkillCompatibility(parsed.confirmation);
@@ -953,16 +1112,31 @@ async function runInteractiveLoop(): Promise<void> {
 }
 
 export async function runCli(argv: string[]): Promise<void> {
+  installOfflineTestGuard();
   if (argv[0] === 'collect') {
+    await activateRunBindings();
     const parsed = splitVersionConfirmation(argv);
     await requireSkillCompatibility(parsed.confirmation);
     argv = parsed.argv;
     const { rest, opts, flags } = parseOpts(argv.slice(1));
-    if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir'].includes(key))) {
-      die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>]');
+    if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir', 'mode'].includes(key))) {
+      die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]');
     }
+    const run = getBoundRun();
+    if (run && (run.scope !== 'collect' || run.job !== opts.job.trim())) die('collect 的岗位/入口与运行任务不匹配');
+    const mode = (opts.mode ?? run?.task.mode ?? 'screen') as 'screen' | 'collect-only';
+    if (run && mode !== (run.task.mode ?? 'screen')) die('collect --mode 与任务配置不匹配');
+    if (mode !== 'screen' && mode !== 'collect-only') die('❌ collect --mode 必须是 screen 或 collect-only。');
+    // 账本目录一致性：run 绑定的 ledgerDir 与显式 --ledger-dir 不一致即拒绝。
+    const boundLedgerDir = process.env.BOSS_LEDGER_DIR?.trim();
+    const requestedLedgerDir = opts['ledger-dir']?.trim();
+    if (boundLedgerDir && requestedLedgerDir && requestedLedgerDir !== boundLedgerDir) {
+      die(`❌ collect --ledger-dir 与运行绑定账本目录不一致：${requestedLedgerDir} / ${boundLedgerDir}`);
+    }
+    await assertPermittedCommand('collect', argv);
+    await assertPermittedPhase('collect', argv);
     try {
-      await runCollectionSession(opts['ledger-dir'] || join(APP_HOME, 'ledgers'), opts.job.trim());
+      await runCollectionSession(requestedLedgerDir || boundLedgerDir || join(APP_HOME, 'ledgers'), opts.job.trim(), mode);
     } finally { await cleanupAfterCommand('collect', true); }
     return;
   }
