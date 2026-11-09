@@ -11,10 +11,12 @@
  *
  * 该片段注入页面执行，只读、无副作用。
  */
-export const LIVE_RESUME_FRAME_FN = `(el) => {
+/**
+ * 容器通用「可见且在视口内」判据（不含 src 限制，可同时用于面板 DIV 与 iframe）。
+ * 只读、无副作用。
+ */
+export const VISIBLE_BOX_FN = `(el) => {
   if (!(el instanceof HTMLElement)) return false;
-  const src = el.getAttribute('src') || '';
-  if (src.indexOf('c-resume') < 0) return false;
   const r = el.getBoundingClientRect();
   if (!(r.width > 8 && r.height > 8)) return false;
   for (let n = el; n && n !== document.body; n = n.parentElement) {
@@ -29,6 +31,14 @@ export const LIVE_RESUME_FRAME_FN = `(el) => {
     if (d.height > window.innerHeight * 1.2) return false;
   }
   return true;
+}`;
+
+/** 在线简历 iframe 判据 = 通用可见判据 + src 必须指向 c-resume。 */
+export const LIVE_RESUME_FRAME_FN = `(el) => {
+  const visible = ${VISIBLE_BOX_FN};
+  if (!visible(el)) return false;
+  const src = el.getAttribute('src') || '';
+  return src.indexOf('c-resume') >= 0;
 }`;
 
 /** 从当前文档中取“真正在展示”的那份在线简历 iframe；多次失败会叠加残留，取 DOM 最后一个。 */

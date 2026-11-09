@@ -1,5 +1,13 @@
 # 功能变化日志
 
+## 2026-11-09 · fix(cli): 推荐页预览 ready-check 恒失败（0.6.19-dev.0 / Skill 1.0.28）
+
+- 0.6.18 把「src 必须含 c-resume」的 iframe 判据同时用在 `.resume-middle-wrap` 面板 DIV 上，面板没有 src 属性 → 恒判不可见 → `directResumeHandle` 返回 null → 推荐页 `preview` 稳定报「在线简历 iframe 已出现，但内容未在预期时间内渲染完成」（实测耗时约 8s，6s ready 超时）。
+- 拆分为两个判据：`VISIBLE_BOX_FN`（通用可见/视口几何，面板与 iframe 共用）与 `LIVE_RESUME_FRAME_FN`（= 通用判据 + src 指向 c-resume）。
+- `resume_frame_locator.ts` 面板过滤改用 `VISIBLE_BOX_FN`，iframe 过滤仍用 `LIVE_RESUME_FRAME_FN`；同面板多个候选时取最后一个，与叠加场景一致。
+- 新增 `BOSS_CLI_TRACE` 下的只读 `[frame-diag]` 输出（面板/iframe 的 rect、dialog rect、视口高度、display/visibility），定位此类几何误判不再需要直连 CDP。
+- 使用者可见变化：推荐页逐人预览恢复正常；在线简历弹层叠层时同样可用。
+
 ## 2026-11-09 · fix(cli): 在线简历弹层累积与误判遮挡修复（0.6.18-dev.0 / Skill 1.0.27）
 
 - 新增 `resume_dom_predicates.ts`：可见在线简历 iframe 改用几何判据（弹层是否落在视口内、高度是否超过 1.2 倍视口）筛选，不再依赖 `active`/`deactive` 类名；`LIVE_RESUME_FRAME_PICK` 取 DOM 中最后一个合格 iframe，避免取到被遮挡的旧弹层。

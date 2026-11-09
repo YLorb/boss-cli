@@ -2,7 +2,7 @@
 
 > 面向对象：后续接手本仓库收集任务的 Agent / 开发者。
 > 定位：本文只记录**本轮实测踩到的坑 + 已验证的修法**，不重复 SOP 本身。SOP 见 `skills/*/references/collect-sop.md`、`multi-job-collection.md`、`non-contact-continuation.md`、`chat-candidate-location.md`。
-> 环境：boss-cli `0.6.18-dev.0` + Skill `1.0.27`，`version-check` = `compatible=true`；无凭据 CDP（`BOSS_BROWSER_REMOTE_DEBUGGING_PORT=53470`，Chrome 由计划任务 `BossChromeKeepalive` 保活）。
+> 环境：boss-cli `0.6.19-dev.0` + Skill `1.0.28`，`version-check` = `compatible=true`；无凭据 CDP（`BOSS_BROWSER_REMOTE_DEBUGGING_PORT=53470`，Chrome 由计划任务 `BossChromeKeepalive` 保活）。
 
 ---
 
