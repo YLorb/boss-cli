@@ -26,8 +26,10 @@
 
 ## 文档索引
 
+- **源码仓库（唯一）**：`https://github.com/YLorb/boss-cli`。只从 GitHub tag／固定提交获取源码；不从 npm 拉包、不写 npm 地址。
 - 页面 URL、命令功能和当前位置要求记录在 `docs/boss-url-map.md`。
 - 修改导航、命令入口、当前位置校验或 help 文案前，先查阅并同步更新该文档。
+- 招聘流程执行规范、命令指南与问题排查见 `skills/boss-recruitment/`（入口 `SKILL.md`，每轮先读 `AGENTS.md`）。
 
 ## Puppeteer evaluate 约束（重要）
 

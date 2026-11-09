@@ -25,7 +25,7 @@ source: "本地cliRouter、help、docs/boss-url-map.md"
 | `boss help` | 查看实际安装版本的入口和参数 |
 | `boss` | 交互模式；exit／quit退出；Agent优先使用单命令进程 |
 | `boss version`、`boss ver`、`boss -v`、`boss --version` | 显示版本并检查npm更新；不是纯离线核验 |
-| `boss update` | 更新全局npm包；不更新源码工作区，不在业务中自动执行 |
+| `boss update` | 更新全局npm包；本项目不从 npm 拉包，不把它作为安装／升级途径，不在业务中执行 |
 | `boss login --json` | 打开登录页，用户扫码，命令返回不代表已登录 |
 | `boss --check-login --json` | 只读检查已有BOSS标签，不导航；已登录返回true、未登录false，无法判断报错 |
 

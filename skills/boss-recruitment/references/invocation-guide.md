@@ -225,7 +225,7 @@ stdin不支持send、download、upload、recordProbe。独立下载回执不会�
 | --- | --- |
 | `boss help` | 本地入口与语法，不连接BOSS |
 | `boss version`／`boss ver`／`boss --version`／`boss -v` | 版本及npm更新检查，可能联网 |
-| `boss update` | 更新全局npm包，不等于更新当前源码／ZIP；不要在业务中自动升级 |
+| `boss update` | 更新全局npm包；本项目不从 npm 拉包，不把它作为安装／升级途径，不在业务中执行 |
 
 没有通用的搜索清空、批量候选人选择、账本导入下载回执或上传HR系统命令。常规搜索扩池使用下节有上限的 search-more；不支持其他页面加载更多。遇到能力缺口保存现场并报告，不编造选项、不使用跨页往返恢复。失败后仅可按下节显式 back --previous 返回一步，不重新执行失败动作。`_baidu-keys` 是内部凭据入口，不属于本SOP；截图后使用独立公开 `ocr` 命令异步提取，见[OCR规范](resume-ocr.md)。
 

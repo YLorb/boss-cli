@@ -83,16 +83,9 @@ npm run build
 node .\dist\cli\index.js help
 ```
 
-以上固定到 v0.6.11 标签，Skill 使用该标签内的配套目录。后续升级需由交付者提供新的已验收 ref。原上游为 https://github.com/joohw/boss-cli ，不保证与此分支能力一致；更换来源须重新核验。
+以上固定到 v0.6.11 标签，Skill 使用该标签内的配套目录。后续升级需由交付者提供新的已验收 ref；更换来源须重新核验。
 
-## npm 发布版（单独选择，不是失败回退）
-
-```powershell
-npm install -g @joohw/boss-cli
-boss help
-```
-
-npm 版可能缺少本包依赖的 collect、联合键、JSON、check-login 等能力；`boss update` 会更新全局 npm 包，不会同步本地源码快照。不要在运行中自动升级。本文后续统一使用源码入口，避免命中另一份全局 boss。
+> **不从 npm 拉包**：本项目只从 GitHub 仓库（`https://github.com/YLorb/boss-cli`）的 tag 或固定提交获取源码，构建后运行；不写 npm 地址、不使用 `npm install -g @joohw/boss-cli` 或 `boss update` 作为安装／升级途径，避免命中能力不齐的全局 npm 包。统一使用源码入口 `node .\dist\cli\index.js ...`。
 
 ## 必须核验的能力
 
