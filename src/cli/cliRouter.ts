@@ -289,10 +289,11 @@ function printHelp(): void {
       --candidate-id 支持推荐及常规搜索：姓名和 ID 联合唯一核验；无 ID 时重名暂停；深度搜索不支持该参数
       --open-only 仅搜索页：打开并核验候选人 ID，保持展开，不截图、不沟通；已打开同一人时复用
       注意：平台对在线简历每日可查看次数有限，请按需使用、谨慎查看
-  boss greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]
+  boss greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--contact-mode <开聊模式>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]
       须在推荐、深度搜索或常规搜索页；常规搜索支持当前在线简历，不自动跳转
       点击目标的“打招呼/立即沟通”；--check 只读核对推荐列表或搜索在线简历的身份及按钮；搜索页不支持 --job
       --select-job 仅选择联系岗位；--confirm-contact 确认已选岗位；--continue-chat 配合回执 ID 打开已联系会话
+      --contact-mode 仅搜索页：点「搜索畅聊卡」后弹出的「选择开聊模式」中选项，如“使用账号权益”“使用畅聊卡”；须与成功回执同一 --candidate-id
       chat <姓名> --check 只读返回身份匹配 true/false；读取详情用 status
       可选 --job 先在岗位下拉中模糊匹配；同岗位不重复选择（与 recommend 共用同一套选择逻辑）
       会消耗打招呼次数且单次成本较高，请谨慎使用
@@ -983,8 +984,13 @@ async function executeCommandBody(argv: string[]): Promise<string> {
     if (flags.has('continue-chat') && !opts['candidate-id']?.trim()) die('--continue-chat 必须配合成功回执的 --candidate-id');
     if (flags.has('continue-chat') && (opts.job || opts['select-job'] || flags.has('confirm-contact'))) die('--continue-chat 不能与选岗或确认联系混用');
     if (flags.has('confirm-contact') && !opts['select-job']?.trim()) die('--confirm-contact 需要 --select-job 指定已选岗位');
+    if (opts['contact-mode'] !== undefined) {
+      if (!opts['contact-mode'].trim()) die('--contact-mode 不能为空');
+      if (!opts['candidate-id']?.trim()) die('--contact-mode 必须配合成功回执的 --candidate-id');
+      if (flags.has('continue-chat') || opts['select-job'] || opts.job) die('--contact-mode 不能与 --continue-chat／--select-job／--job 混用');
+    }
     const jobKeyword = opts.job?.trim();
-    const extraOpts = Object.keys(opts).filter((k) => k !== 'job' && k !== 'select-job' && k !== 'candidate-id');
+    const extraOpts = Object.keys(opts).filter((k) => k !== 'job' && k !== 'select-job' && k !== 'contact-mode' && k !== 'candidate-id');
     if (extraOpts.length > 0) {
       die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
@@ -1007,7 +1013,7 @@ async function executeCommandBody(argv: string[]): Promise<string> {
     }
     let greetResult: string;
     try {
-      greetResult = await withFlowJournal(contactForm ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: greetAction }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}) }));
+      greetResult = await withFlowJournal(contactForm ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: greetAction }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}), ...(opts['contact-mode'] !== undefined ? {contactMode:opts['contact-mode'].trim()} : {}) }));
     } catch (error) {
       if (actualContact && greetFlow && isHardFailure(error)) {
         await pauseFlow(greetFlow, '触达受阻（付费/风控）');

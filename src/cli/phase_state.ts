@@ -7,7 +7,7 @@ import { loadTaskConfig, taskConfigPath, type TaskConfig } from './task_config.j
 import { resolveAction, assertPermittedCommand, loadPermit } from './permit.js';
 import { getBoundRun } from './run_state.js';
 import { flowWatch, recordJournalResult } from '../common/flow_state.js';
-import { recommendJobKey } from '../toolset/recommend_job.js';
+import { recommendJobKey, recommendJobQuery } from '../toolset/recommend_job.js';
 import { assertActionHistory, beginAction, finishAction } from '../common/action_history.js';
 import {createHash} from 'node:crypto';
 import type {AttachmentProbe} from '../toolset/attachment.js';
@@ -22,7 +22,11 @@ export function isPhaseEnabled(): boolean { return phaseStatePath() !== null; }
 const ALWAYS = new Set(['phase-set', 'phase-status', 'status', 'check', 'search-sidebar', '--check-login', 'flow-status', 'spec-list', 'task-check', 'task-init', 'help', 'version', 'version-check', 'flow-pause', 'flow-resume']);
 // 岗位身份 = 岗位名 + 城市；薪资只是展示数据（与 recommendJobKey 的既有约定一致）。
 // 任务配置的 job 是账本键（去薪资），页面下拉/筛选标签带薪资，故一律归一化后比较。
-const sameJobKey = (actual: string | undefined, expected: string): boolean => actual !== undefined && recommendJobKey(actual) === recommendJobKey(expected);
+// 搜索页岗位下拉只显示岗位名（不含城市），`--job` 必须与下拉文案逐字相同才选得中，
+// 因此「省略城市后缀的岗位名」也视为同一岗位，否则搜索模式永远无法设置岗位。
+const sameJobKey = (actual: string | undefined, expected: string): boolean => actual !== undefined
+  && (recommendJobKey(actual) === recommendJobKey(expected)
+    || recommendJobKey(actual) === recommendJobKey(recommendJobQuery(expected)));
 const TARGETED = new Set(['chat', 'preview', 'decide', 'greet', 'send', 'probe-resume', 'accept-resume', 'download-resume', 'action']);
 const SIDE_EFFECTS = new Set(['send', 'greet', 'accept-resume', 'download-resume', 'probe-resume', 'action']);
 function sideEffect(cmd:string,argv:string[]):boolean{return SIDE_EFFECTS.has(cmd)&&!(cmd==='action'&&resolveAction(argv)==='resume')&&!(cmd==='probe-resume'&&!hasFlag(argv,'--download'));}
@@ -99,7 +103,7 @@ function phaseAllowed(t: TaskConfig, s: PhaseState, cmd: string, argv: string[])
 async function evaluate(cmd: string, argv: string[], t: TaskConfig, s: PhaseState): Promise<void> {
   if (getBoundRun() && ['status', 'check', 'search-sidebar', '--check-login'].includes(cmd)) {
     const watch = await flowWatch(getBoundRun()!.flowState);
-    const verifying = cmd === 'check' && s.pending?.cmd === 'send' && targetId(argv, s) === s.pending.id && option(argv, '--job') === t.job && option(argv, '--text') === s.pending.text && !/验证码|风控|限流|verification|risk/i.test(s.paused ?? '') && !watch.paused;
+    const verifying = cmd === 'check' && s.pending?.cmd === 'send' && targetId(argv, s) === s.pending.id && sameJobKey(option(argv, '--job'), t.job) && option(argv, '--text') === s.pending.text && !/验证码|风控|限流|verification|risk/i.test(s.paused ?? '') && !watch.paused;
     if ((s.paused || watch.paused) && !verifying) deny('全局暂停期间禁止继续读取真实页面');
   }
   if (ALWAYS.has(cmd)) return;
@@ -122,10 +126,13 @@ async function evaluate(cmd: string, argv: string[], t: TaskConfig, s: PhaseStat
   }
   // 推荐页 greet 只返回 clicked（点成功≠沟通成功），SOP 的下一步就是 chat --recommend --open 打开小窗核对身份，
   // 所以它必须能穿过「结果未决」这道门；真正的联系确认在 chat 回执核验通过时落账。
-  const continuation = cmd === 'greet' && s.pending?.cmd === 'greet' && s.pending.id === id && (hasFlag(argv,'--confirm-contact') || option(argv, '--select-job') !== undefined)
+  const continuation = cmd === 'greet' && s.pending?.cmd === 'greet' && s.pending.id === id && (hasFlag(argv,'--confirm-contact') || option(argv, '--select-job') !== undefined || option(argv, '--contact-mode') !== undefined)
     || (cmd === 'chat' && hasFlag(argv,'--recommend') && s.pending?.cmd === 'greet' && s.pending.id === id);
   if (s.pending && !continuation && (!check || cmd !== 'send')) deny(`动作结果未决：${s.pending.cmd}/${s.pending.id}，禁止重放或继续依赖动作`);
-  if(sideEffect(cmd,argv)&&!check&&!continuation)await assertActionHistory(cmd,id,messageText(argv));
+  // --continue-chat 只是打开已建立的会话，不是再次触达：按「重复 greet」拦会与搜索 SOP 的
+  // 「联系确认后点继续沟通」直接冲突，故不走进触达历史门（仍需已打开简历与回执 ID）。
+  const openExisting = cmd === 'greet' && hasFlag(argv,'--continue-chat');
+  if(sideEffect(cmd,argv)&&!check&&!continuation&&!openExisting)await assertActionHistory(cmd,id,messageText(argv));
   if (cmd === 'preview' && !hasFlag(argv,'--open-only') && !s.observed.includes(id) && t.stop.observeLimit !== undefined && s.observed.length >= t.stop.observeLimit) deny('已到观察上限');
   if (cmd === 'ocr') {
     const image = parseCommandArguments(argv).rest[0]; if (!s.current || !samePath(s.material[s.current]?.image, image)) deny('OCR图片不是当前候选人截图');
@@ -154,7 +161,7 @@ export async function assertPermittedPhase(cmd: string, argv: string[]): Promise
 export async function beforePhaseCommand(cmd: string, argv: string[]): Promise<void> {
   if (!phaseStatePath() || ALWAYS.has(cmd) || !getBoundRun() || hasFlag(argv,'--check')) return;
   const s = await state(), id = targetId(argv, s);
-  if (sideEffect(cmd,argv)) {
+  if (sideEffect(cmd,argv) && !(cmd === 'greet' && hasFlag(argv,'--continue-chat'))) {
     if (cmd === 'greet' && s.pending?.cmd === 'greet') return;
     const text = messageText(argv);
     const attemptId = await beginAction(cmd, id, text);
@@ -168,7 +175,10 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
   const id = targetId(argv, s);
   if (cmd === 'check' && result === true && sameJobKey(option(argv, '--job'), t.job)) s.jobVerified = true;
   if (cmd === 'flow-pause') s.paused = option(argv, '--reason')!;
-  if (cmd === 'flow-resume') { if (s.pending) deny('未决动作尚未核验，不能解除暂停'); s.paused = null; }
+  // 解除暂停的目的常常就是去核验未决动作：若在此要求 pending 已清空，会与「读页面需 resume、
+  // resume 需 pending 清空、清 pending 又需读页面」形成死锁（推荐页 chat 未决 + 暂停即如此）。
+  // 故只解暂停、保留 pending；重放仍由 evaluate 的「动作结果未决」门拦截，安全语义不降低。
+  if (cmd === 'flow-resume') s.paused = null;
   if (cmd === 'check' && result === true && s.pending?.cmd === 'send' && id === s.pending.id && sameJobKey(option(argv, '--job'), t.job) && option(argv, '--text') === s.pending.text) {
     if (s.pending.attemptId) await finishAction(s.pending.attemptId, 'success');
     await recordJournalResult(getBoundRun()!.flowState, id, s.targets.find(x => x.id === id)!.name, 'send', 'success', undefined, { verifiedBy: 'check', text: s.pending.text, job: t.job });

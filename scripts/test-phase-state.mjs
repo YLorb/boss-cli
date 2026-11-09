@@ -83,3 +83,30 @@ test('valid JSON with missing pause state fails closed',async()=>{
 test('risk pause blocks page reads while local phase status remains readable',async()=>{
  await setup();await failPhaseCommand('preview',['preview','--json'],new Error('verification required'));await assert.rejects(()=>assertPermittedPhase('status',['status','--json']),/全局暂停/);assert.match((await phaseStatus()).paused,/verification/);
 });
+test('resume clears pause but keeps pending, so an unresolved action can still be verified',async()=>{
+ // 推荐页真实故障链：greet 已点击（pending）→ chat 核验失败（paused）。若 resume 要求 pending 已清空，
+ // 「读页面需 resume、resume 需 pending 清空、清 pending 又需读页面」会形成永久死锁。
+ const {run}=await setup();await verified();
+ const s=JSON.parse(await readFile(run.phaseState,'utf8'));
+ s.pending={cmd:'greet',id:'id-1',text:''};
+ s.paused='Error: 内嵌会话身份／岗位不符：job';
+ await writeFile(run.phaseState,JSON.stringify(s));
+ await assert.rejects(()=>assertPermittedPhase('status',['status','--json']),/全局暂停/);
+ await recordPhaseCommand('flow-resume',['flow-resume','--json'],'{"ok":true}');
+ const after=await phaseStatus();
+ assert.equal(after.paused,null);
+ assert.equal(after.pending?.cmd,'greet','解除暂停不得丢弃未决动作');
+ await assertPermittedPhase('status',['status','--json']);
+ await assert.rejects(()=>assertPermittedPhase('preview',['preview','--candidate-id','id-1','--json']),/未决/,'pending 仍须阻止重放与依赖动作');
+});
+
+
+test('bare job title from the search dropdown counts as the same job scope',async()=>{
+ // 搜索页岗位下拉只显示岗位名，`--job` 必须与下拉文案逐字相同才选得中；任务键是「岗位 _ 城市」。
+ await setup({job:'Harness工程师 _ 深圳'});
+ await assertPermittedPhase('search',['search','--job','Harness工程师','--json']);
+ await assertPermittedPhase('search',['search','--job','Harness工程师 _ 深圳','--json']);
+ await assert.rejects(()=>assertPermittedPhase('search',['search','--job','后训练平台工程师','--json']),/范围以外/);
+ await recordPhaseCommand('status',['status','--json'],JSON.stringify({searchJob:'Harness工程师'}));
+ assert.equal((await phaseStatus()).jobVerified,true,'搜索页岗位标签不带城市，也应核验通过');
+});

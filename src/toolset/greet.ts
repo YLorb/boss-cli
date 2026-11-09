@@ -58,6 +58,7 @@ export type GreetOptions = {
   selectJob?: string;
   confirmContact?: boolean;
   continueChat?: boolean;
+  contactMode?: string;
   candidateId?: string;
   json?: boolean;
 };
@@ -68,7 +69,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
   if (!t) {
     throw new Error('请提供打招呼目标（姓名）。');
   }
-  if(options.check) return runCheck({...(options.selectJob||options.continueChat?{page:'search'}:{}),state:options.selectJob?'job-selected':options.continueChat?'contacted':'contact-ready',name:t,candidateId:options.candidateId,job:options.selectJob||options.jobKeyword});
+  if(options.check && options.contactMode === undefined) return runCheck({...(options.selectJob||options.continueChat?{page:'search'}:{}),state:options.selectJob?'job-selected':options.continueChat?'contacted':'contact-ready',name:t,candidateId:options.candidateId,job:options.selectJob||options.jobKeyword});
   try {
     return await withBossSessionPage(async (page) => {
       const url = page.url();
@@ -81,7 +82,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
         }
         let result;
         try {
-          result = await greetNormalSearch(page, frame, t, options.check === true, options.continueChat === true, options.candidateId);
+          result = await greetNormalSearch(page, frame, t, options.check === true, options.continueChat === true, options.candidateId, options.contactMode);
         } catch (error) {
           if (!options.check) throw error;
           const diagnostics = await inspectSearchContactFrames(page, t);
@@ -90,6 +91,7 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
         return options.json ? JSON.stringify(result) : `候选人：${t}；入口：${result.source}；状态：${result.status}；clicked=${result.clicked}`;
       }
       if (options.continueChat) throw new Error('--continue-chat 仅支持搜索页');
+      if (options.contactMode !== undefined) throw new Error('--contact-mode 仅支持搜索页已打开的联系入口');
       if (options.selectJob) throw new Error('--select-job 仅支持搜索页已打开的联系岗位弹层');
       if (isBossChatAiFormUrl(url)) {
         if(options.candidateId)throw new Error('--candidate-id 仅支持搜索或推荐页');

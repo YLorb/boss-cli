@@ -25,7 +25,7 @@ function readinessScript(target: RecommendChatTarget, url: string): string {
     if(!missing(s.editorId)&&!missing(s.conversationId)&&s.editorId!==s.conversationId)conflicts.push('editorId');
     if(!missing(s.rootFriendId)&&!missing(s.friendId)&&s.rootFriendId!==s.friendId)conflicts.push('rootFriendId');
     if(!missing(s.friendId)&&!s.friendId)conflicts.push('friendId');
-    if(conflicts.length)return {error:'打开的内嵌会话身份／岗位不符：'+conflicts.join(',')+'，禁止发送'};
+    if(conflicts.length)return {error:'打开的内嵌会话身份／岗位不符：'+conflicts.map(function(k){var a=JSON.stringify(s[k]);var e=k==='job'?JSON.stringify(${JSON.stringify(target.job)}):(k==='candidateId'?JSON.stringify(${JSON.stringify(target.candidateId)}):'');return e?k+'（期望 '+e+'，实际 '+a+'）':k+'（实际 '+a+'）';}).join('；')+'，禁止发送'};
     const pending=Object.keys(s).filter(k=>missing(s[k])||(k==='name'&&!String(s[k]).trim()));
     return pending.length?{pending}:{opened:true};
   })()`;

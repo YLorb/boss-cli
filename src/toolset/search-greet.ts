@@ -54,6 +54,41 @@ function contactScript(name: string, resume: boolean, click: boolean, candidateI
 
 type ContactState = { name: string; buttonText: string; status: string; point?: { x: number; y: number } };
 
+/**
+ * 开聊模式弹层：点「搜索畅聊卡」后页面出现「选择开聊模式 → 使用账号权益 / 使用畅聊卡」。
+ * 与选岗弹层同类：点击本身不等于联系成功，必须由随后按钮变为「继续沟通」确认。
+ * label 为空时只读列出可选项，不点击。
+ */
+function contactModeScript(label: string | null, click: boolean): string {
+  return `(() => {
+    const norm = value => (value || '').replace(/\\s+/g, ' ').trim();
+    const visible = el => {
+      const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0;
+    };
+    const boxes = Array.from(document.querySelectorAll('.bubble-reference.chat-btns')).filter(visible);
+    if (boxes.length > 1) throw new Error('开聊模式弹层不唯一：' + boxes.length);
+    if (!boxes.length) return {present:false, options:[]};
+    const root = boxes[0];
+    const all = Array.from(root.querySelectorAll('*')).filter(el => visible(el) && /^使用\\S*沟通$/.test(norm(el.textContent)));
+    const leaves = all.filter(el => !all.some(other => other !== el && el.contains(other)));
+    const options = leaves.map(el => norm(el.textContent));
+    if (!options.length) throw new Error('开聊模式弹层未找到可选项');
+    const label = ${JSON.stringify(label)};
+    if (!label) return {present:true, options};
+    const hits = leaves.filter(el => { const n = norm(el.textContent); return n === label || n.startsWith(label); });
+    if (hits.length !== 1) throw new Error('开聊模式选项不唯一：' + label + '；matches=' + hits.length + '；options=' + JSON.stringify(options));
+    const el = hits[0];
+    const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight || !hit || !(hit === el || el.contains(hit)))
+      throw new Error('开聊模式选项在视口外或被遮挡：' + label);
+    if (${click}) (el.closest('button') || el).click();
+    return {present:true, options, clicked:${click}, label:norm(el.textContent), point:{x,y}};
+  })()`;
+}
+
+
 /** An iframe's own hit test cannot see overlays in an ancestor document. */
 async function assertAncestorFramesExposed(frame: Frame, point: { x: number; y: number }): Promise<void> {
   let child = frame, position = point;
@@ -99,7 +134,7 @@ export async function readSearchCandidateId(searchFrame: Frame, name: string, ex
 }
 
 /** Explicit search branch: never closes a resume, changes jobs or retries a click. */
-export async function greetNormalSearch(page: Page, searchFrame: Frame, name: string, check = false, continueChat = false, expectedCandidateId?: string) {
+export async function greetNormalSearch(page: Page, searchFrame: Frame, name: string, check = false, continueChat = false, expectedCandidateId?: string, contactMode?: string) {
   const resumeFrame = await visibleResumeFrame(page);
   if (resumeFrame && resumeFrame.parentFrame() !== page.mainFrame())
     throw new Error('搜索简历 iframe 不属于主页面，停止操作');
@@ -107,6 +142,32 @@ export async function greetNormalSearch(page: Page, searchFrame: Frame, name: st
   const source = resumeFrame ? 'search-resume' : 'search';
   if (continueChat && (!resumeFrame || !expectedCandidateId?.trim()))
     throw new Error('继续沟通需要已打开简历及成功回执中的 --candidate-id');
+  if (contactMode !== undefined) {
+    // 开聊模式弹层依附于已打开的在线简历；与选岗一致：不关闭、不重开，凭同一 candidateId 核验。
+    if (!resumeFrame) throw new Error('选择开聊模式需要已打开在线简历');
+    if (!expectedCandidateId?.trim()) throw new Error('选择开聊模式需要 --candidate-id');
+    const main = page.mainFrame();
+    const state = await main.evaluate(contactScript(name, true, false, expectedCandidateId, false)) as ContactState;
+    if (state.status === 'already-contacted')
+      return { source, ...state, candidateId: expectedCandidateId, identityVerified: true, clicked: false };
+    const paywall = await describeBossPaywallPopupIfPresent(page, 'greet');
+    if (paywall) throw new Error(paywall);
+    if (check) {
+      const probe = await main.evaluate(contactModeScript(null, false)) as { present: boolean; options: string[] };
+      return { source, name, candidateId: expectedCandidateId, identityVerified: true, status: probe.present ? 'mode-ready' : 'mode-missing', options: probe.options, clicked: false };
+    }
+    const picked = await main.evaluate(contactModeScript(contactMode, true)) as { present: boolean; options: string[]; label: string };
+    try {
+      await main.waitForFunction(`(() => {
+        const state = ${contactScript(name, true, false, expectedCandidateId, false)};
+        return state.status === 'already-contacted';
+      })()`, { timeout: 8_000, polling: 200 });
+      return { source, name, candidateId: expectedCandidateId, identityVerified: true, buttonText: '继续沟通', status: 'contact-confirmed', clicked: true, mode: picked.label };
+    } catch {
+      // 已点击选项但按钮未翻转：动作可能已发生，只报未确认，不重试、不推断成功。
+      return { source, name, candidateId: expectedCandidateId, identityVerified: true, status: 'mode-clicked', clicked: true, mode: picked.label, options: picked.options };
+    }
+  }
   const candidateId = continueChat ? expectedCandidateId! : await readSearchCandidateId(searchFrame, name, expectedCandidateId);
   const paywall = await describeBossPaywallPopupIfPresent(page, 'greet');
   if (paywall) throw new Error(paywall);
@@ -130,6 +191,10 @@ export async function greetNormalSearch(page: Page, searchFrame: Frame, name: st
     })()`, { timeout: 5_000, polling: 200 });
     return { source, name, candidateId, identityVerified:true, buttonText: '继续沟通', status: 'contact-confirmed', clicked: true };
   } catch (error) {
+    // 首次联系可能只弹出「选择开聊模式」：这不是失败，下一步用 --contact-mode 选择后确认。
+    const probe = await frame.evaluate(contactModeScript(null, false)).catch(() => null) as { present: boolean; options: string[] } | null;
+    if (probe?.present)
+      return { source, name, candidateId, identityVerified: true, buttonText: clicked.buttonText, status: 'mode-required', clicked: true, options: probe.options };
     throw new Error(`已点击一次「${clicked.buttonText}」，但未确认沟通成功；可能已产生动作，禁止自动重试。候选人=${name}；原因=${error instanceof Error ? error.message : String(error)}`);
   }
 }
