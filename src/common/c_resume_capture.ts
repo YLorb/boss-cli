@@ -4,6 +4,7 @@ import { captureResumeByWheel } from './resume_scroll_capture.js';
 import { traceResumeCapture } from './resume_capture_trace.js';
 import { directResumeHandle } from './resume_frame_locator.js';
 import { closeChatResumeByBlankClick } from './resume_chat_close.js';
+import { LIVE_RESUME_FRAME_FN, LIVE_RESUME_FRAME_PICK } from './resume_dom_predicates.js';
 
 /** 在线简历 iframe：`src` 常为相对路径 `/web/frame/c-resume/...`，故用子串匹配 */
 export const C_RESUME_IFRAME_SELECTOR =
@@ -52,10 +53,9 @@ const CLOSE_C_RESUME_PANEL_SCRIPT = `(() => {
 export const C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS = { min: 1_000, max: 5_050 } as const;
 
 const VISIBLE_C_RESUME_IN_FRAME_SCRIPT = `(() => {
-  var iframe = document.querySelector(${JSON.stringify(C_RESUME_IFRAME_SELECTOR)});
-  if (!(iframe instanceof HTMLElement)) return false;
-  var r = iframe.getBoundingClientRect();
-  return r.width > 8 && r.height > 8;
+  const live = ${LIVE_RESUME_FRAME_FN};
+  var frames = Array.from(document.querySelectorAll(${JSON.stringify(C_RESUME_IFRAME_SELECTOR)})).filter(live);
+  return frames.length > 0;
 })()`;
 
 export async function frameHasVisibleCResumeIframe(frame: Frame): Promise<boolean> {
@@ -105,10 +105,13 @@ export async function findVisibleCResumeIframeHandle(page: Page, host?: Frame): 
       if (!(await frameHasVisibleCResumeIframe(frame))) {
         continue;
       }
-      const h = await frame.$(C_RESUME_IFRAME_SELECTOR);
-      if (h) {
-        return h;
-      }
+      // 必须取“活跃弹层内”的 live iframe：残留弹层(deactive)里的 iframe 仍可见，
+      // 用 frame.$ 取第一个匹配会量到已关闭弹层的尺寸。
+      // 取“真正在展示”的那份 iframe：失败重试会叠加残留弹层，按 DOM 顺序取最后一个通过几何判据的。
+      const handle = await frame.evaluateHandle(LIVE_RESUME_FRAME_PICK);
+      const h = handle.asElement() as ElementHandle<Element> | null;
+      if (!h) { await handle.dispose(); continue; }
+      return h;
     } catch {
       /* detached */
     }
@@ -173,16 +176,37 @@ export async function captureCResumeIframeToFile(
   if (!(await waitForVisibleCResumeIframeReady(page, 2_000,host))) throw new Error('在线简历未就绪');
   const iframe = await findVisibleCResumeIframeHandle(page,host);
   if (!iframe) throw new Error('未找到可见在线简历 iframe');
+  let captureError: unknown = null;
   try { await captureResumeByWheel(page, iframe, absPath); }
+  catch (error) { captureError = error; }
   finally { await iframe.dispose(); }
+  if (captureError) {
+    // 截图失败同样要关掉弹层：BOSS 关闭后不清 DOM，不关就会在下次查看时再叠一层，
+    // 叠加到 3 层以上后残留弹层会被撑大/移出视口，连锁破坏后续所有人的采集。
+    try { await closeCResumePanel(page); } catch { /* 关不掉时保留原始错误，交给上层暂停 */ }
+    await sleepRandom(200, 500);
+    throw captureError;
+  }
   if (afterCapture === 'keep-open') return true;
   const started = performance.now();
   traceResumeCapture('close-wait-start', C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS);
   await sleepRandom(C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS.min, C_RESUME_CLOSE_AFTER_CAPTURE_DELAY_MS.max);
   traceResumeCapture('close-wait-end', { elapsedMs: Math.round(performance.now() - started) });
   traceResumeCapture('close-start');
+  let closeError: unknown = null;
   try { await closeChatResumeByBlankClick(page); }
-  catch (error) { throw new Error(`简历截图已保存：${absPath}；退出失败：${error instanceof Error ? error.message : String(error)}`); }
+  catch (error) { closeError = error; }
+  if (closeError) {
+    // 弹层化布局下 iframe 左侧安全空白已不属于弹窗背景，空白点击无法命中；
+    // 先按弹层关闭按钮收一次，仍失败才保留原错误。
+    await closeCResumePanel(page);
+    await sleepRandom(150, 400);
+    const stuck = await findVisibleCResumeIframeHandle(page);
+    if (stuck) {
+      await stuck.dispose();
+      throw new Error(`简历截图已保存：${absPath}；退出失败：${closeError instanceof Error ? closeError.message : String(closeError)}`);
+    }
+  }
   const remaining = await findVisibleCResumeIframeHandle(page,host);
   if (remaining) {
     await remaining.dispose();

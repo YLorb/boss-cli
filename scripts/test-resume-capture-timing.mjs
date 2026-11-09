@@ -121,23 +121,36 @@ mock.module('../dist/common/resume_chat_close.js', { namedExports: {
 } });
 const { captureCResumeIframeToFile } = await import('../dist/common/c_resume_capture.js');
 
-test('explicit capture disposition: preview stays open; collection closes only after successful image; failures retain screenshot context', async () => {
+test('explicit capture disposition: preview stays open; collection closes after success; capture failure also closes to stop overlay stacking', async () => {
   const iframe = { boundingBox: async () => ({ width: 100, height: 100 }), contentFrame: async () => null, dispose: async () => {} };
-  const frame = { $: async () => iframe, evaluate: async () => !closed };
+  const frame = {
+    evaluateHandle: async () => ({ asElement: () => iframe, dispose: async () => {} }),
+    // 弹层关闭脚本返回 false（本例不测按钮命中），可见性判据跟随 `closed`
+    evaluate: async script => script.includes('dialog-lib-resume')
+      ? (closingEvents.push(['panel-close']), false)
+      : !closed,
+  };
   const page = { frames: () => [frame] };
+  closed = false; keepOpen = false; captureError = undefined;
+
   closingEvents.length=0;
   await captureCResumeIframeToFile(page,'unused',{afterCapture:'keep-open'});
   assert.deepEqual(closingEvents,[['capture']]);assert.equal(closed,false);
+
   closingEvents.length=0;
   await captureCResumeIframeToFile(page,'unused',{afterCapture:'close-chat-blank'});
   assert.deepEqual(closingEvents,[['capture'],['wait',1000,5050],['blank-close']]);
+  assert.equal(closed,true);
+
+  // 截图失败必须仍然关闭弹层：BOSS 关闭后不清 DOM，不关会在下次查看时再叠一层
   captureError=new Error('overlap mismatch');closed=false;closingEvents.length=0;
   for(const mode of ['keep-open','close-chat-blank']) {
-    closingEvents.length=0;
+    closed=false;closingEvents.length=0;
     await assert.rejects(captureCResumeIframeToFile(page,'unused',{afterCapture:mode}),/overlap mismatch/);
-    assert.deepEqual(closingEvents,[['capture']]);assert.equal(closed,false);
+    assert.deepEqual(closingEvents,[['capture'],['panel-close'],['wait',200,500]]);
   }
-  captureError=undefined;keepOpen=true;closingEvents.length=0;
+
+  captureError=undefined;keepOpen=true;closed=false;closingEvents.length=0;
   await assert.rejects(captureCResumeIframeToFile(page,'unused',{afterCapture:'close-chat-blank'}),/关闭后在线简历弹层仍可见/);
   assert.equal(closingEvents.filter(e=>e[0]==='blank-close').length,1);
 });
@@ -167,8 +180,9 @@ test('verified host and capture disposition work together without scanning unrel
 
   closed = false; captureError = new Error('target capture failed'); closingEvents.length = 0;
   await assert.rejects(captureCResumeIframeToFile(page, 'unused', { host, afterCapture: 'close-chat-blank' }), /target capture failed/);
-  assert.deepEqual(closingEvents, [['capture']]);
-  assert.equal(closed, false, 'failed capture must not trigger closing');
+  // 失败路径同样要先尝试关弹层再抛原始错误；page.frames() 被禁止扫描，故只留等待记录
+  assert.deepEqual(closingEvents, [['capture'], ['wait', 200, 500]]);
+  assert.equal(closed, false, 'failed capture keeps panel state for the upper layer to report');
   captureError = undefined;
   const beforeInvalidPolicy = hostLookups;
   await assert.rejects(captureCResumeIframeToFile(page, 'unused', { host, afterCapture: 'unknown' }), /必须指定截图后的页面处理方式/);

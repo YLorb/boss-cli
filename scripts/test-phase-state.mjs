@@ -29,7 +29,7 @@ test('past deadline and zero contact budget stop business actions',async()=>{
 });
 test('status exposes choices and blockers',async()=>{await setup();const result=await phaseStatus();assert.ok(Array.isArray(result.allowedActions));assert.ok(result.blockedActions.preview);assert.equal(result.phase,'task');});
 test('unknown send remains pending across readonly status and across runs',async()=>{
- const {run}=await setup({mode:'collect-only'});await verified();const s=JSON.parse(await readFile(run.phaseState,'utf8'));s.downloaded=['id-1'];await writeFile(run.phaseState,JSON.stringify(s));
+ const {run}=await setup({mode:'collect-only'});await verified();const s=JSON.parse(await readFile(run.phaseState,'utf8'));s.decisions['id-1']='fit';await writeFile(run.phaseState,JSON.stringify(s));
  const args=['send','--name','模拟甲','--data-id','id-1','--text','已收到简历。','--json'];await assertPermittedPhase('send',args);await beforePhaseCommand('send',args);await failPhaseCommand('send',args,new Error('connection lost'));
  await recordPhaseCommand('status',['status','--json'],'{"chatFilterJob":"测试岗位"}');assert.ok((await phaseStatus()).pending);
  await setup({mode:'collect-only'});await verified();await assert.rejects(()=>assertPermittedPhase('send',args),/历史动作结果未决/);
@@ -40,13 +40,13 @@ test('observation budget prevents another physical open but permits same-person 
  await assert.rejects(()=>assertPermittedPhase('preview',['preview','模拟乙','--candidate-id','id-2','--json']),/观察上限/);
  await assertPermittedPhase('preview',['preview','模拟甲','--candidate-id','id-1','--open-only','--json']);
 });
-test('collect needs file receipt and approved message, not only a phase name',async()=>{
+test('collect needs a fit decision and the approved message, not a download receipt or a bare phase name',async()=>{
  await setup({job:'收件岗位',mode:'collect-only'});await verified();
  await assert.rejects(()=>assertPermittedPhase('send',['send','--data-id','id-1','--text','其他正文','--json']),/话术不一致/);
- await assert.rejects(()=>assertPermittedPhase('send',['send','--data-id','id-1','--text','已收到简历。','--json']),/下载成功回执/);
+ await assert.rejects(()=>assertPermittedPhase('send',['send','--data-id','id-1','--text','已收到简历。','--json']),/先完成本人评估/);
 });
 test('known send precondition failure requires check and permits only one retry',async()=>{
- const {run}=await setup({job:'重试岗位',mode:'collect-only'});await verified();const s=JSON.parse(await readFile(run.phaseState,'utf8'));s.downloaded=['id-1'];await writeFile(run.phaseState,JSON.stringify(s));
+ const {run}=await setup({job:'重试岗位',mode:'collect-only'});await verified();const s=JSON.parse(await readFile(run.phaseState,'utf8'));s.decisions['id-1']='fit';await writeFile(run.phaseState,JSON.stringify(s));
  const argv=['send','--name','模拟甲','--data-id','id-1','--text','已收到简历。','--json'],error=Object.assign(new Error('editor absent; attempted=false'),{name:'SendPreconditionError'});
  await beforePhaseCommand('send',argv);await failPhaseCommand('send',argv,error);await assert.rejects(()=>assertPermittedPhase('send',argv),/未决/);
  await recordPhaseCommand('send',[...argv,'--check'],'true');await assertPermittedPhase('send',argv);await beforePhaseCommand('send',argv);await failPhaseCommand('send',argv,error);await assert.rejects(()=>assertPermittedPhase('send',argv),/必须暂停/);

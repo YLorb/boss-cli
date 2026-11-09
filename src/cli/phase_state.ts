@@ -6,6 +6,7 @@ import { loadTaskConfig, taskConfigPath, type TaskConfig } from './task_config.j
 import { resolveAction, assertPermittedCommand, loadPermit } from './permit.js';
 import { getBoundRun } from './run_state.js';
 import { flowWatch, recordJournalResult } from '../common/flow_state.js';
+import { recommendJobKey } from '../toolset/recommend_job.js';
 import { assertActionHistory, beginAction, finishAction } from '../common/action_history.js';
 import {createHash} from 'node:crypto';
 import type {AttachmentProbe} from '../toolset/attachment.js';
@@ -18,6 +19,9 @@ export function isPhaseDenied(error: unknown): boolean { return error instanceof
 export function phaseStatePath(): string | null { return process.env.BOSS_PHASE_STATE?.trim() || null; }
 export function isPhaseEnabled(): boolean { return phaseStatePath() !== null; }
 const ALWAYS = new Set(['phase-set', 'phase-status', 'status', 'check', 'search-sidebar', '--check-login', 'flow-status', 'spec-list', 'task-check', 'task-init', 'help', 'version', 'version-check', 'flow-pause', 'flow-resume']);
+// 岗位身份 = 岗位名 + 城市；薪资只是展示数据（与 recommendJobKey 的既有约定一致）。
+// 任务配置的 job 是账本键（去薪资），页面下拉/筛选标签带薪资，故一律归一化后比较。
+const sameJobKey = (actual: string | undefined, expected: string): boolean => actual !== undefined && recommendJobKey(actual) === recommendJobKey(expected);
 const TARGETED = new Set(['chat', 'preview', 'decide', 'greet', 'send', 'probe-resume', 'accept-resume', 'download-resume', 'action']);
 const SIDE_EFFECTS = new Set(['send', 'greet', 'accept-resume', 'download-resume', 'probe-resume', 'action']);
 function sideEffect(cmd:string,argv:string[]):boolean{return SIDE_EFFECTS.has(cmd)&&!(cmd==='action'&&resolveAction(argv)==='resume')&&!(cmd==='probe-resume'&&!hasFlag(argv,'--download'));}
@@ -99,7 +103,7 @@ async function evaluate(cmd: string, argv: string[], t: TaskConfig, s: PhaseStat
   if (t.stop.deadline && Date.now() >= Date.parse(t.stop.deadline)) deny('本轮已到截止时间');
   if (t.stop.maxConsecutiveFailures !== undefined && s.failures >= t.stop.maxConsecutiveFailures) deny('已到连续失败上限');
   if (cmd === 'collect') return; // 会话各 stdin op 和 worker 仍逐步过门，不在此操作页面。
-  if (['switch-job', 'search', 'recommend'].includes(cmd) && option(argv, '--job') !== undefined && option(argv, '--job') !== t.job) deny('不得切换到本轮岗位范围以外');
+  if (['switch-job', 'search', 'recommend'].includes(cmd) && option(argv, '--job') !== undefined && !sameJobKey(option(argv, '--job'), t.job)) deny('不得切换到本轮岗位范围以外');
   if (t.scope === 'view-only' && (['greet', 'send', 'accept-resume', 'download-resume'].includes(cmd) || (cmd === 'probe-resume' && hasFlag(argv,'--download')))) deny('view-only 未授权联系、收件或下载');
   if (!parseCommandArguments(argv).json) deny('正式任务命令必须使用 --json 保存结构化回执');
   const id = targetId(argv, s), check = hasFlag(argv,'--check');
@@ -125,7 +129,12 @@ async function evaluate(cmd: string, argv: string[], t: TaskConfig, s: PhaseStat
     const text = messageText(argv);
     if (!t.messageScript || text !== t.messageScript) deny('消息正文与本轮授权话术不一致');
     if (s.sent.includes(id)) deny('本轮该对象已发送，禁止重复');
-    if (t.scope === 'collect') { if (!s.downloaded.includes(id)) deny('尚无下载成功回执，不能发送消息2'); }
+    if (t.scope === 'collect') {
+      // 收集轮的话术是「求简历」，不是收件后确认：只要本人已完成评估且为 fit 即可发送，
+      // 不要求先有下载回执；同一对象本轮仍只能发一次（上方 s.sent 已拦截）。
+      if (!s.decisions[id]) deny('先完成本人评估，再发求简历话术');
+      if (s.decisions[id] !== 'fit') deny('仅向评估为 fit 的对象发求简历话术');
+    }
     else if (s.decisions[id] !== 'fit' || !s.contacts.includes(id)) deny('尚未完成评估和联系，不能发送');
   }
   if (cmd === 'action' && resolveAction(argv) !== 'resume') deny('正式任务 action 只用于查看简历；其他动作使用有对象 ID 的公开入口');
@@ -146,10 +155,10 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
   const s = await state(), t = await task(); let result: any;
   try { result = JSON.parse(output); } catch (error) { deny(`命令 ${cmd} 回执不是 JSON，保留未决状态：${String(error)}`); }
   const id = targetId(argv, s);
-  if (cmd === 'check' && result === true && option(argv, '--job') === t.job) s.jobVerified = true;
+  if (cmd === 'check' && result === true && sameJobKey(option(argv, '--job'), t.job)) s.jobVerified = true;
   if (cmd === 'flow-pause') s.paused = option(argv, '--reason')!;
   if (cmd === 'flow-resume') { if (s.pending) deny('未决动作尚未核验，不能解除暂停'); s.paused = null; }
-  if (cmd === 'check' && result === true && s.pending?.cmd === 'send' && id === s.pending.id && option(argv, '--job') === t.job && option(argv, '--text') === s.pending.text) {
+  if (cmd === 'check' && result === true && s.pending?.cmd === 'send' && id === s.pending.id && sameJobKey(option(argv, '--job'), t.job) && option(argv, '--text') === s.pending.text) {
     if (s.pending.attemptId) await finishAction(s.pending.attemptId, 'success');
     await recordJournalResult(getBoundRun()!.flowState, id, s.targets.find(x => x.id === id)!.name, 'send', 'success', undefined, { verifiedBy: 'check', text: s.pending.text, job: t.job });
     s.sent.push(s.pending.id); s.pending = null; s.paused = null;
@@ -158,7 +167,7 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
     if ((s.safeRetries[id] ?? 0) >= 1) deny('发送前失败已完成一次核验重试，必须停止');
     s.safeRetries[id] = 1; s.pending = null;
   }
-  if (cmd === 'status' && [result.chatFilterJob, result.searchJob, result.recommendJob].includes(t.job)) s.jobVerified = true;
+  if (cmd === 'status' && [result.chatFilterJob, result.searchJob, result.recommendJob].some((x: unknown) => typeof x === 'string' && sameJobKey(x as string, t.job))) s.jobVerified = true;
   if (['list', 'recommend', 'search'].includes(cmd) && Array.isArray(result.candidates) && !s.frozen) {
     if (!s.jobVerified) deny('冻结快照前必须核验岗位');
     const field = cmd === 'list' ? 'dataId' : cmd === 'recommend' ? 'geekId' : 'candidateId';

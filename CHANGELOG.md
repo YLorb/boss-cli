@@ -1,5 +1,15 @@
 # 功能变化日志
 
+## 2026-11-09 · fix(cli): 在线简历弹层累积与误判遮挡修复（0.6.18-dev.0 / Skill 1.0.27）
+
+- 新增 `resume_dom_predicates.ts`：可见在线简历 iframe 改用几何判据（弹层是否落在视口内、高度是否超过 1.2 倍视口）筛选，不再依赖 `active`/`deactive` 类名；`LIVE_RESUME_FRAME_PICK` 取 DOM 中最后一个合格 iframe，避免取到被遮挡的旧弹层。
+- `c_resume_capture.ts`：截图失败时同样执行 `closeCResumePanel`，阻断残留弹层叠加（实测面板数 1→4→8、残留高度被撑到 25556px 后全部抓取失败）；关闭优先走面板关闭，空白点击仅兜底。
+- `resume_frame_locator.ts` / `resume_scroll_capture.ts`：遮挡扫描跳过 deactive 元素与滚动根内部，滚动根为简历自身文档时不做遮挡判定。
+- `resume_scroll_capture.ts`：拼接重叠校验 `absoluteDifference / samples` 阈值 2 → 3，`different / samples` 仍卡 1.5%，消除分数 DPR 抗锯齿噪声误拦。
+- `phase_state.ts`：collect 轮 send 门槛由"必须已下载附件"改为"本人已评估且 fit"，与按需索要简历的实际流程对齐。
+- 新增 `docs/multijob-collect-troubleshooting-2026-11-09.md`，记录本次 6 类故障的现象、根因、修法与给后续 Agent 的操作要求。
+- 使用者可见变化：在线简历抓取在弹层叠层、吸顶元素、高 DPR 场景下不再中断；未下载附件不再阻断求简历话术发送。
+
 ## 2026-11-09 · 推荐切岗 iframe 替换边界核验
 
 - 当前实现已区分顶层导航与点击后的推荐 iframe 替换；新增上下文销毁、点击前失效、顶层导航、错误岗位及确认超时的离线回归，无用户可见功能变化。

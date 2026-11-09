@@ -3,6 +3,7 @@ import { PNG } from 'pngjs';
 import { writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { traceResumeCapture } from './resume_capture_trace.js';
+import { LIVE_RESUME_FRAME_FN } from './resume_dom_predicates.js';
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const MAX_PIXELS = 80_000_000;
@@ -33,7 +34,7 @@ export const RESUME_SCROLL_ROOT_SCRIPT = `(() => {
   return roots.length === 1 ? roots[0] : doc;
 })()`;
 
-export const RESUME_SCROLL_METRICS_SCRIPT = `((el, sourceUrl) => {
+export const RESUME_SCROLL_METRICS_SCRIPT = `((el, sourceUrl, skipObstruction) => {
   const source = new URL(sourceUrl);
   const warnOnFixedOverlay = source.origin === 'https://www.zhipin.com' &&
     ['/web/chat/recommend', '/web/chat/search'].includes(source.pathname.replace(/\\/+$/, ''));
@@ -47,8 +48,10 @@ export const RESUME_SCROLL_METRICS_SCRIPT = `((el, sourceUrl) => {
   if (el.scrollWidth > width + 1) throw new Error('在线简历存在横向溢出，无法确认完整截图');
   if (x < 0 || y < 0 || x + width > innerWidth + 1 || y + height > innerHeight + 1)
     throw new Error('在线简历滚动区域未完整显示在 iframe 内');
-  for (const node of document.querySelectorAll('*')) {
+  // 滚动根就是简历自身文档时，其内部 fixed 层属于简历内容，不构成外部遮挡。
+  for (const node of skipObstruction ? [] : document.querySelectorAll('*')) {
     if (node === el || node.contains(el)) continue;
+    if (node.closest('.dialog-wrap.deactive')) continue;
     const s = getComputedStyle(node);
     if (s.position !== 'fixed' && s.position !== 'sticky') continue;
     const b = node.getBoundingClientRect();
@@ -121,7 +124,10 @@ export function stitchResumeTiles(tiles: ResumeTile[], cssWidth: number, cssHeig
         }
       }
       traceResumeCapture('overlap', { top, start, overlap, scale, differentRatio: different / samples, meanDifference: absoluteDifference / samples });
-      if (samples && (different / samples > 0.015 || absoluteDifference / samples > 2)) throw new Error(`简历截图重叠校验失败：内容变化、遮挡或位置不一致；top=${top}；scale=${scale}；differentRatio=${different / samples}；meanDifference=${absoluteDifference / samples}`);
+      // differentRatio 是主判据（错位/漏内容会让大量补丁点整体改变）；
+      // meanDifference 对 scale=1.25 这类分数 DPR 的抗锯齿噪声过于敏感，
+      // 实测 4 例 differentRatio 0.66%~0.89% 却因 mean 2.01~2.15 被拦，故放宽到 3.0。
+      if (samples && (different / samples > 0.015 || absoluteDifference / samples > 3)) throw new Error(`简历截图重叠校验失败：内容变化、遮挡或位置不一致；top=${top}；scale=${scale}；differentRatio=${different / samples}；meanDifference=${absoluteDifference / samples}`);
     }
     const end = Math.min(height, start + image.height);
     image.data.copy(output.data, covered * width * 4, overlap * width * 4, (end - start) * width * 4);
@@ -182,13 +188,41 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
   // BOSS may size c-resume to its content and scroll its parent dialog instead.
   // Select the actual scroll surface before capture; never retry with a different mechanism.
   const parentFrame = iframe.frame;
+  if (process.env.BOSS_CLI_TRACE === 'true' || process.env.BOSS_CLI_TRACE === '1') {
+    // Read-only probe: record the real container shape before any capture assumption fails.
+    const probe = await parentFrame.evaluate(`(() => {
+      const vis = el => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 8 && r.height > 8 && s.display !== 'none' && s.visibility !== 'hidden'; };
+      const box = el => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.x), y: Math.round(r.y) }; };
+      const frames = [...document.querySelectorAll('iframe')].map(f => ({ src: (f.getAttribute('src') || '').slice(0, 90), visible: vis(f), ...box(f) })).slice(0, 12);
+      const wraps = [...document.querySelectorAll('[class*="dialog"],[class*="popup"],[class*="drawer"]')]
+        .slice(0, 12)
+        .map(e => ({ cls: String(e.className).slice(0, 70), pos: getComputedStyle(e).position, hasCResume: !!e.querySelector('iframe[src*="c-resume"]'), ...box(e) }));
+      const panels = [...document.querySelectorAll('.resume-middle-wrap')].map(e => ({ visible: vis(e), ...box(e) }));
+      const self = [...document.querySelectorAll('iframe[src*="c-resume"]')].find(vis) || null;
+      const ancestors = [];
+      for (let n = self && self.parentElement; n && ancestors.length < 10; n = n.parentElement) {
+        const s = getComputedStyle(n);
+        ancestors.push({ cls: n.tagName + '.' + String(n.className).slice(0, 46), overflowY: s.overflowY,
+          scrollH: n.scrollHeight, clientH: n.clientHeight, pos: s.position, ...box(n) });
+      }
+      return {
+        url: location.href,
+        cResumeAll: frames.filter(f => /c-resume/.test(f.src)).length,
+        cResumeVisible: frames.filter(f => /c-resume/.test(f.src) && f.visible).length,
+        frames, wraps, panels, ancestors,
+      };
+    })()`) as Record<string, unknown>;
+    traceResumeCapture('dom-probe', probe);
+  }
+
   const key = JSON.stringify('__bossResumeCapture_' + randomUUID().replaceAll('-', ''));
   const iframeScript = `(() => {
-    const items = Array.from(document.querySelectorAll('iframe[src*="c-resume"]')).filter(el => {
-      const r = el.getBoundingClientRect(); return r.width > 8 && r.height > 8;
-    });
-    if (items.length !== 1) throw new Error('可见在线简历 iframe 数量异常');
-    return items[0];
+    const live = ${LIVE_RESUME_FRAME_FN};
+    const items = Array.from(document.querySelectorAll('iframe[src*="c-resume"]')).filter(live);
+    const active = items.filter(el => el.closest('.dialog-wrap.active'));
+    const pick = active.length === 1 ? active : items;
+    if (pick.length !== 1) throw new Error('可见在线简历 iframe 数量异常');
+    return pick[0];
   })()`;
   const outerHandle = await parentFrame.evaluateHandle(`globalThis[${key}] = ((el) => {
     const roots = [];
@@ -205,11 +239,23 @@ export async function captureResumeByWheel(page: Page, iframe: ElementHandle<Ele
   const rootHandle = outer ? outerHandle : await frame.evaluateHandle(`globalThis[${key}] = ${RESUME_SCROLL_ROOT_SCRIPT}`);
   const root = rootHandle.asElement() as ElementHandle<Element> | null;
   if (!root) { await rootHandle.dispose(); throw new Error('未找到在线简历滚动容器'); }
+  if (process.env.BOSS_CLI_TRACE === 'true' || process.env.BOSS_CLI_TRACE === '1') {
+    const shape = await rootFrame.evaluate(`((el) => {
+      const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+      const chain = [];
+      for (let n = el; n && chain.length < 8; n = n.parentElement) chain.push(n.tagName + '.' + String(n.className).slice(0, 40));
+      return { tag: el.tagName, cls: String(el.className).slice(0, 60), scrollTop: el.scrollTop,
+        total: el.scrollHeight, client: el.clientHeight, overflowY: s.overflowY,
+        isDocRoot: el === document.scrollingElement, rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+        chain };
+    })(globalThis[${key}])`) as Record<string, unknown>;
+    traceResumeCapture('root-choice', { outer: !!outer, rootFrame: outer ? 'parent' : 'iframe', ...shape });
+  }
   const reportedObstructions = new Set<string>();
   const read = async (): Promise<Metrics> => {
     const sourceUrl = page.url();
     const { obstructionMessages, ...metrics } = await rootFrame.evaluate(
-      `${RESUME_SCROLL_METRICS_SCRIPT}(globalThis[${key}], ${JSON.stringify(sourceUrl)})`,
+      `${RESUME_SCROLL_METRICS_SCRIPT}(globalThis[${key}], ${JSON.stringify(sourceUrl)}, ${rootFrame === frame})`,
     ) as Metrics & { obstructionMessages: string[] };
     for (const detail of obstructionMessages) {
       if (reportedObstructions.has(detail)) continue;
