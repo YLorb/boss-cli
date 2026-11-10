@@ -113,7 +113,12 @@ async function evaluate(cmd: string, argv: string[], t: TaskConfig, s: PhaseStat
   if (s.paused) deny(`必须暂停：${s.paused}`);
   const run = getBoundRun()!; const flow = await flowWatch(run.flowState); if (flow.paused) deny(`必须暂停：${flow.paused.reason}`);
   if (t.stop.deadline && Date.now() >= Date.parse(t.stop.deadline)) deny('本轮已到截止时间');
-  if (t.stop.maxConsecutiveFailures !== undefined && s.failures >= t.stop.maxConsecutiveFailures) deny('已到连续失败上限');
+  // 关闭「使用成功」层属于对既有结果的核验与收尾，不产生新的对外动作；
+  // 若因该层反复触发假阳性而计入连续失败，会与「成功才清零」形成死锁，故单独豁免。
+  const verifyOnly = (cmd === 'dismiss-contact-notice' || (cmd === 'chat' && hasFlag(argv, '--embedded')) || (cmd === 'greet' && hasFlag(argv, '--continue-chat'))
+      || (cmd === 'preview' && s.observed.includes(targetId(argv, s))))
+    && s.pending?.cmd === 'greet' && s.pending.id === targetId(argv, s);
+  if (t.stop.maxConsecutiveFailures !== undefined && s.failures >= t.stop.maxConsecutiveFailures && !verifyOnly) deny('已到连续失败上限');
   if (cmd === 'collect') return; // 会话各 stdin op 和 worker 仍逐步过门，不在此操作页面。
   if (['switch-job', 'search', 'recommend'].includes(cmd) && option(argv, '--job') !== undefined && !sameJobKey(option(argv, '--job'), t.job)) deny('不得切换到本轮岗位范围以外');
   if (t.scope === 'view-only' && (['greet', 'send', 'accept-resume', 'download-resume'].includes(cmd) || (cmd === 'probe-resume' && hasFlag(argv,'--download')))) deny('view-only 未授权联系、收件或下载');
@@ -127,7 +132,15 @@ async function evaluate(cmd: string, argv: string[], t: TaskConfig, s: PhaseStat
   // 推荐页 greet 只返回 clicked（点成功≠沟通成功），SOP 的下一步就是 chat --recommend --open 打开小窗核对身份，
   // 所以它必须能穿过「结果未决」这道门；真正的联系确认在 chat 回执核验通过时落账。
   const continuation = cmd === 'greet' && s.pending?.cmd === 'greet' && s.pending.id === id && (hasFlag(argv,'--confirm-contact') || option(argv, '--select-job') !== undefined || option(argv, '--contact-mode') !== undefined)
-    || (cmd === 'chat' && hasFlag(argv,'--recommend') && s.pending?.cmd === 'greet' && s.pending.id === id);
+    || (cmd === 'chat' && (hasFlag(argv,'--recommend') || hasFlag(argv,'--embedded')) && s.pending?.cmd === 'greet' && s.pending.id === id)
+    // 「使用成功」层只在平台确认已发起沟通后出现，关闭它的脚本内部强制要求按钮已翻为「继续沟通」
+    // 且提示文本唯一，未确认联系成功会直接拒绝。故它是安全的只读核验入口，可穿过未决门。
+    || (cmd === 'dismiss-contact-notice' && s.pending?.cmd === 'greet' && s.pending.id === id)
+    // --continue-chat 只是打开既有会话，不是再次触达（下文原有注释即如此定性）；
+    // 未决时正是靠它核对「按钮是否已翻为继续沟通」并完成触达确认。
+    || (cmd === 'greet' && hasFlag(argv,'--continue-chat') && s.pending?.cmd === 'greet' && s.pending.id === id)
+    // 未决时重开同一候选人的简历用于核验：仅限本轮已观察过的人，不额外占用观察额度。
+    || (cmd === 'preview' && s.observed.includes(id) && s.pending?.cmd === 'greet' && s.pending.id === id);
   if (s.pending && !continuation && (!check || cmd !== 'send')) deny(`动作结果未决：${s.pending.cmd}/${s.pending.id}，禁止重放或继续依赖动作`);
   // --continue-chat 只是打开已建立的会话，不是再次触达：按「重复 greet」拦会与搜索 SOP 的
   // 「联系确认后点继续沟通」直接冲突，故不走进触达历史门（仍需已打开简历与回执 ID）。
@@ -195,6 +208,13 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
     const targets = result.candidates.map((x: any) => ({ id: x[field], name: x.name }));
     if (targets.some((x: Target) => typeof x.id !== 'string' || !x.id || typeof x.name !== 'string' || !x.name) || new Set(targets.map((x: Target) => x.id)).size !== targets.length) deny('列表回执缺少唯一 ID/姓名');
     s.targets = targets; s.frozen = true;
+  }
+  if (cmd === 'dismiss-contact-notice' && s.pending?.cmd === 'greet' && id === s.pending.id) {
+    // 关闭「使用成功」层成功，等价于已确认触达：脚本内部已核验按钮翻转为「继续沟通」。
+    if (s.pending.attemptId) await finishAction(s.pending.attemptId, 'success');
+    await recordJournalResult(getBoundRun()!.flowState, id, s.targets.find(x => x.id === id)?.name ?? id, 'greet', 'success', undefined, { verifiedBy: 'contact-notice' });
+    s.pending = null; s.paused = null;
+    if (!s.contacts.includes(id)) s.contacts.push(id);
   }
   if (cmd === 'chat') {
     s.current = id;

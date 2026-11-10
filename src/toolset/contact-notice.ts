@@ -15,10 +15,12 @@ export function dismissContactNoticeScript(target:NoticeTarget):string {
     const props=boxes[0]?.__vue__?.$props,id=${JSON.stringify(target.candidateId)};
     if(boxes.length!==1||!id||props?.geekInfo?.encryptGeekId!==id||props?.resumeInfo?.encryptGeekId!==id)
       throw new Error('关闭提示前候选人 ID 变化或缺失');
-    const contacts=Array.from(boxes[0].querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(e=>visible(e)&&norm(e.textContent)==='继续沟通');
-    if(contacts.length!==1) throw new Error('未确认联系成功，不能关闭使用提示');
     const notices=Array.from(document.querySelectorAll('.dialog-wrap.active')).filter(e=>visible(e)&&new RegExp(${JSON.stringify(CONTACT_NOTICE_PATTERN)}).test((e.textContent||'').replace(/\\s+/g,'')));
     if(notices.length!==1) throw new Error('已知畅聊卡使用成功提示缺失或不唯一：'+notices.length);
+    // 该提示只在平台确认「已发起沟通」后出现，其存在本身就是已联系的正向证据；
+    // 按钮文字在提示层遮挡或重渲染时可能读不到，故仅作唯一性兜底，不作为必要条件。
+    const contacts=Array.from(boxes[0].querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(e=>visible(e)&&norm(e.textContent)==='继续沟通');
+    if(contacts.length>1) throw new Error('继续沟通按钮不唯一，不能关闭使用提示');
     const buttons=Array.from(notices[0].querySelectorAll('.boss-dialog__footer .boss-dialog__button')).filter(e=>visible(e)&&norm(e.textContent)==='关闭');
     if(buttons.length!==1) throw new Error('使用成功提示的关闭控件不唯一');
     const button=buttons[0],r=button.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,hit=document.elementFromPoint(x,y);

@@ -2,6 +2,66 @@ import type { Frame, Page } from 'puppeteer-core';
 import { describeBossPaywallPopupIfPresent } from '../common/boss_paywall_popup.js';
 import { directResumeFrame } from '../common/resume_frame_locator.js';
 import { C_RESUME_IFRAME_SELECTOR } from '../common/c_resume_capture.js';
+import { sleepRandom } from '../browser/timing.js';
+
+/**
+ * 「使用成功」层（`.use-prop-chat-success`）只在平台确认「已发起沟通」后出现，
+ * 因此它是触达成功的正向信号，而不是失败。它的出现同时会遮挡简历右侧的沟通按钮，
+ * 使按钮翻转读不到，导致 5s 等待超时被误判为未决。
+ * 关闭选择器与 contact-notice 一致：`.boss-dialog__footer .boss-dialog__button` 且文本为「关闭」。
+ */
+function chatSuccessNoticeScript(click: boolean): string {
+  return `(() => {
+    const norm = v => (v || '').replace(/\\s+/g, ' ').trim();
+    const flat = el => (el.textContent || '').replace(/\\s+/g, '');
+    const visible = el => {
+      const r = el.getBoundingClientRect(), s = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && Number(s.opacity) > 0.05;
+    };
+    const panels = Array.from(document.querySelectorAll('.dialog-wrap.active'))
+      .filter(el => visible(el) && /^使用成功/.test(flat(el)) && /已为您发起沟通/.test(flat(el)));
+    if (panels.length > 1) throw new Error('使用成功弹层不唯一：' + panels.length);
+    if (!panels.length) return { present: false };
+    const root = panels[0];
+    if (!${click}) return { present: true };
+    const buttons = Array.from(root.querySelectorAll('.boss-dialog__footer .boss-dialog__button'))
+      .filter(el => visible(el) && norm(el.textContent) === '关闭');
+    if (buttons.length !== 1) throw new Error('使用成功弹层的关闭控件不唯一：' + buttons.length);
+    const button = buttons[0];
+    if (button.matches('[disabled],[aria-disabled="true"]') || getComputedStyle(button).pointerEvents === 'none')
+      throw new Error('使用成功弹层的关闭控件不可用');
+    button.click();
+    return { present: true, closed: true };
+  })()`;
+}
+
+/**
+ * 轮询等待「使用成功」层出现并就地关闭。
+ * 只有平台确认沟通已发起才会出现该层，所以命中即等于触达成功。
+ */
+async function probeAndCloseChatSuccessNotice(page: Page, timeoutMs: number): Promise<{ present: boolean; closed?: boolean }> {
+  const main = page.mainFrame();
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    let probe: { present: boolean } | null = null;
+    try {
+      probe = (await main.evaluate(chatSuccessNoticeScript(false))) as { present: boolean };
+    } catch {
+      probe = null;
+    }
+    if (probe?.present) {
+      let closed: { present: boolean; closed?: boolean } | null = null;
+      try {
+        closed = (await main.evaluate(chatSuccessNoticeScript(true))) as { present: boolean; closed?: boolean };
+      } catch {
+        closed = null;
+      }
+      return { present: true, closed: closed?.closed === true };
+    }
+    if (Date.now() >= deadline) return { present: false };
+    await sleepRandom(300, 500);
+  }
+}
 
 /** Selectors and component identity fields verified read-only on the live search page (2026-10-20). */
 function contactScript(name: string, resume: boolean, click: boolean, candidateId: string, continueChat = false): string {
@@ -35,10 +95,19 @@ function contactScript(name: string, resume: boolean, click: boolean, candidateI
         throw new Error('搜索卡片候选人身份已变化：' + name);
       root = cards[0];
     }
-    const buttons = Array.from(root.querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(el =>
-      visible(el) && /^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|搜索畅聊卡[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])$/.test(norm(el.textContent)));
+    const LABEL = /^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|搜索畅聊卡[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])$/;
+    // 热搜牛人/畅聊卡的权益提示气泡会渲染在按钮内部，使 textContent 变成
+    // 「继续沟通 该牛人为热搜牛人，需消耗3次…」，整串匹配会误判为「按钮缺失」。
+    // 故按按钮内最贴近标签的叶子文本判定。
+    const labelOf = el => {
+      const whole = norm(el.textContent);
+      if (LABEL.test(whole)) return whole;
+      const leaves = Array.from(el.querySelectorAll('*')).filter(x => !x.children.length).map(x => norm(x.textContent)).filter(t => LABEL.test(t));
+      return leaves[0] || whole;
+    };
+    const buttons = Array.from(root.querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(el => visible(el) && LABEL.test(labelOf(el)));
     if (buttons.length !== 1) throw new Error('目标沟通按钮缺失或不唯一：' + name + '；matches=' + buttons.length);
-    const button = buttons[0], text = norm(button.textContent);
+    const button = buttons[0], text = labelOf(button);
     if (${continueChat} && text !== '继续沟通') throw new Error('当前按钮不是继续沟通，停止操作');
     if (!${continueChat} && text === '继续沟通') return {name, buttonText:text, status:'already-contacted'};
     if (button.matches(':disabled,[disabled],[aria-disabled="true"]') || /disabled|forbid|ban/.test(button.className) ||
@@ -191,6 +260,11 @@ export async function greetNormalSearch(page: Page, searchFrame: Frame, name: st
     })()`, { timeout: 5_000, polling: 200 });
     return { source, name, candidateId, identityVerified:true, buttonText: '继续沟通', status: 'contact-confirmed', clicked: true };
   } catch (error) {
+    // 「使用成功」层出现即证明平台已发起沟通；它同时遮挡按钮使翻转读不到，是本次超时的真实原因。
+    // 命中时按成功返回并就地关闭该层，避免叠层挡住后续「继续沟通」。
+    const notice = await probeAndCloseChatSuccessNotice(page, 3_000);
+    if (notice.present)
+      return { source, name, candidateId, identityVerified: true, buttonText: clicked.buttonText, status: 'contact-confirmed', clicked: true, via: 'chat-success-notice', noticeClosed: notice.closed === true };
     // 首次联系可能只弹出「选择开聊模式」：这不是失败，下一步用 --contact-mode 选择后确认。
     const probe = await frame.evaluate(contactModeScript(null, false)).catch(() => null) as { present: boolean; options: string[] } | null;
     if (probe?.present)
