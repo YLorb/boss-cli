@@ -1,5 +1,16 @@
 # 功能变化日志
 
+## 2026-11-10 · fix(cli): 「使用成功」弹层识别 + greet 未决核验通道（0.6.20-dev.1 / Skill 1.0.29）
+
+- 现象：点完沟通按钮后平台弹出「使用成功，已为您发起沟通」层，按钮被遮挡、5 秒等待超时，`greet` 被判 `needs-verify`（`matches=0`）；随后 `phase.pending` 锁死整轮，除 `flow-pause/flow-resume` 外全部命令报「动作结果未决」。
+- 根因一：按钮 `textContent` 混入权益气泡「该牛人为热搜牛人，需消耗3次，您只剩1次」，整串精确匹配失配；根因二：成功弹层覆盖导致按钮翻转读不到，被当成「未确认联系」，但事实上沟通已发起。
+- 修法（`search-greet`）：新增 `chatSuccessNoticeScript` / `probeAndCloseChatSuccessNotice`，识别 `.dialog-wrap.active` 内「使用成功…已为您发起沟通」文本，命中即判 `contact-confirmed` 并就地在同一脚本内关闭；5 秒超时分支先探测该层再决定报错。
+- 修法（`search-greet`/`check`）：按钮与联系状态一律按「按钮内标签叶子文本」取值（`labelOf`），不受权益气泡污染；`STATUS_SCRIPT` 增加 `contactSuccessNotice`，`contacted` 判定改为 `contactText==='继续沟通' || contactSuccessNotice`。
+- 修法（`contact-notice`）：关闭校验从「必须存在唯一继续沟通按钮」放宽为「提示层存在即证据，按钮仅作唯一性兜底」——该提示只在平台确认已发起沟通后出现。
+- 修法（`phase_state`）：greet 未决时放行 `dismiss-contact-notice` / `chat --embedded` / `greet --continue-chat` / `preview`（限本轮已观察者）作为核验通道，`dismiss` 成功即落 `greet=success` 并清 `pending`；此类核验动作豁免 `maxConsecutiveFailures`，避免与「成功才清零」构成死锁。
+- 使用者可见变化：触达后弹「使用成功」不再被判未决；已有未决可原地核验收口，不必重开简历或重建绑定。
+- 回归：`test-phase-state` 16/16、`test-flow-lock` 21/21、`test-check-dom` 1/1。
+
 ## 2026-11-09 · feat(cli): 搜索页「选择开聊模式」弹层触达 + continue-chat 放行（0.6.20-dev.0 / Skill 1.0.29）
 
 - 现象：搜索页的沟通按钮在新号上是「搜索畅聊卡(N/M)」，点下会弹出「选择开聊模式 → 使用账号权益 / 使用畅聊卡」，而 CLI 只有 `--select-job`（选岗弹层），没有这个开聊模式弹层的选择入口，导致搜索触达在这类账号上走不下去。

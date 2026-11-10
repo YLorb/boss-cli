@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const COMPATIBILITY = Object.freeze({
-  cliVersion: '0.6.20-dev.0',
+  cliVersion: '0.6.20-dev.1',
   skillVersion: '1.0.29',
   compatibilityId: '2026-10-30-recommend-chat-v1',
 });
