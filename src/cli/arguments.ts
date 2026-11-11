@@ -60,12 +60,14 @@ export function parseOpts(argv: string[], booleanFlags: ReadonlySet<string> = ne
 
 
 import { splitJsonFlag } from './output.js';
-const BOOLEAN_FLAGS: Record<string, ReadonlySet<string>> = {
- send:new Set(['check','embedded']), preview:new Set(['open-only','reopen-on-frame-error']),
- greet:new Set(['check','confirm-contact','continue-chat']), 'probe-resume':new Set(['download']),
- 'accept-resume':new Set(['check']), 'download-resume':new Set(['check']), check:new Set(['embedded'])
-};
+import { COMMAND_SPECS } from './command_spec.js';
+
+const BOOLEAN_FLAGS = new Map(COMMAND_SPECS.map(spec => [
+  spec.name,
+  new Set(spec.formalForms?.flatMap(form => [...form.required, ...form.optional]
+    .filter(option => !option.value).map(option => option.name.slice(2)))),
+]));
 export function parseCommandArguments(argv:string[]) {
  const {args,json}=splitJsonFlag(argv.slice(1));
- return {...parseOpts(args,BOOLEAN_FLAGS[argv[0]]),json};
+ return {...parseOpts(args,BOOLEAN_FLAGS.get(argv[0])),json};
 }

@@ -144,7 +144,7 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
  }
 }
 /** Separate read-only connection: no shared-session guards or browser launch. */
-async function withReadOnlyPage<T>(fn:(page:Page)=>Promise<T>):Promise<T>{
+export async function withReadOnlyPage<T>(fn:(page:Page)=>Promise<T>):Promise<T>{
  const browser=await puppeteer.connect({browserURL:`http://127.0.0.1:${REMOTE_DEBUGGING_PORT}`,defaultViewport:null,protocolTimeout:10000});
  try {
   const pages=(await browser.pages()).filter(p=>{try{return new URL(p.url()).hostname==='www.zhipin.com';}catch{return false;}});

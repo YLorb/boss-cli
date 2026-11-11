@@ -74,7 +74,7 @@ config.cdpUrl不是CLI原生参数；CLI用端口环境变量，岗位切换脚�
 
 1. node和npm命令可用；进入正确源码目录执行npm.cmd ci、npm.cmd run build，任一步失败停止。
 2. help含所需公开入口；版本核验可用 `node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version"`，无需Git。
-3. 按[启动规范](start-and-use.md)通过boss-cli login启动并由用户完成登录，再用--check-login确认。禁止替代启动或自写CDP登录脚本。
+3. 按[启动规范](start-and-use.md)在常驻宿主运行 `boss browser-session --json`。收到 `ready` 后用 `boss login --json` 打开登录页，用户完成登录后用 `--check-login` 确认。
 4. 用真实岗位确认页面条件后才开始业务SOP；安装成功不等于真实账号全部业务已验收。
 
 网络错误直接报告。需要代理时由使用者提供受信配置，不擅自切换npm镜像、关闭TLS校验、关闭安全软件或提升系统权限。更新ZIP时解压到新目录，核验后显式切换cliDir；不要覆盖运行中的源码或删除运行数据。

@@ -39,7 +39,7 @@ boss status --json
 
 | 命令 | 默认比较标准 |
 | --- | --- |
-| chat 姓名 --check [--data-id ID] | 沟通页当前选中会话与姓名/可选ID一致，详情姓名一致 |
+| chat 姓名 --check --data-id ID --json | 沟通页当前选中会话与姓名/可选ID一致，详情姓名一致 |
 | send --name 姓名 --data-id ID --text 正文 --check | 当前目标独立会话匹配、输入框可编辑且无草稿、已加载消息没有同文；不表示服务端允许发送 |
 | accept-resume 姓名 --data-id ID --check | 当前目标会话匹配且有可用的待同意附件请求 |
 | download-resume 姓名 --data-id ID --check | 当前目标会话匹配且存在已收到附件卡片；不验证下载完成 |
@@ -48,8 +48,8 @@ boss status --json
 | greet ... --select-job 岗位 [--confirm-contact] --check | 候选人匹配且弹层已选中指定完整岗位；不代选或确认 |
 | chat ... --embedded --check | 内嵌候选人ID、姓名、岗位与编辑器关联匹配 |
 | send ... --embedded --text 正文 --check | 上述内嵌身份匹配、可编辑无草稿、已加载消息没有同文 |
-| recommend 岗位 --check-job | 当前推荐页岗位匹配，只比较 |
-| back --check-in_online_resume | 当前为独立在线简历页或存在在线简历弹层，只比较 |
+| check --page recommend --job 岗位 --json | 正式任务核对当前推荐岗位 |
+| check --state online-resume-open --json | 正式任务核对独立在线简历页或在线简历弹层 |
 | --check-login | 已登录为true、未登录为false、无法判断报错 |
 
 原条件动作改名：`recommend 岗位 --ensure-job` 在岗位不同情况下选择；`back --if-open` 在已打开简历时返回/关闭，已在列表时不动。它们是业务动作，不是检查，仍须符合本轮授权。

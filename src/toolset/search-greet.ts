@@ -184,8 +184,8 @@ async function assertAncestorFramesExposed(frame: Frame, point: { x: number; y: 
   }
 }
 
-export async function visibleResumeFrame(page: Page, host: Frame = page.mainFrame()): Promise<Frame | null> {
-  return directResumeFrame(host);
+export async function visibleResumeFrame(page: Page, host: Frame = page.mainFrame(), timeoutMs = 0): Promise<Frame | null> {
+  return directResumeFrame(host, timeoutMs);
 }
 
 /** Read the same identity used by the rendered search card. No component methods are called. */

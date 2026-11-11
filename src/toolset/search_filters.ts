@@ -2,6 +2,9 @@ import type { Frame } from 'puppeteer-core';
 import { SEARCH_STATE_SCRIPT } from './search_query.js';
 
 export type SearchFilters = {city?: string; job: string};
+type JobSelection =
+  | {status: 'selected'; job: string}
+  | {status: 'needs-confirmation'; requestedJob: string; reason: 'not-found' | 'ambiguous'; options: string[]};
 const visible = "(e => e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden')";
 const cityLabel = "document.querySelector('.city-wrap .city-label')?.textContent.trim()";
 const jobLabel = "document.querySelector('.search-current-job')?.textContent.trim()";
@@ -11,17 +14,14 @@ const cityInput = '.city-wrap .search-city-kw input';
 // Tolerate whitespace and the optional 市 suffix; a stricter predicate silently matches nothing and times out.
 const norm = "(x => (x || '').replace(/\\s+/g,'').replace(/市$/,''))";
 
-// Execute the same normalized-text predicate immediately before the one permitted option click.
-async function pickOption(frame: Frame, selector: string, label: string, job: boolean) {
-  const matches = `[...document.querySelectorAll(${JSON.stringify(selector)})].filter(${visible})
-    .filter(el => { const n = ${norm}; return n((${job ? "el.querySelector('.job-name') || el" : "el"}).textContent) === n(${JSON.stringify(label)}); })`;
+async function pickCityOption(frame: Frame, label: string) {
+  const matches = `[...document.querySelectorAll(${JSON.stringify(cityOptions)})].filter(${visible})
+    .filter(el => { const n = ${norm}; return n(el.textContent) === n(${JSON.stringify(label)}); })`;
   await frame.waitForFunction(`${matches}.length > 0`, {timeout:8000});
   await frame.evaluate(`(() => {
     const matches = ${matches};
     if (matches.length !== 1) throw Error('筛选选项未唯一匹配：' + ${JSON.stringify(label)} + ' count=' + matches.length);
-    if (${job} && matches[0].classList.contains('active')) {
-      document.querySelector('.search-job-list-C .search-current-job').click();
-    } else matches[0].click();
+    matches[0].click();
   })()`);
 }
 
@@ -62,7 +62,7 @@ export async function selectCity(frame: Frame, city: string) {
   })()`) as {name: string; label: string};
   if (n(current.name) === n(city) || n(current.label) === n(city)) return;
   await fillCityInput(frame, city);
-  await pickOption(frame, cityOptions, city, false);
+  await pickCityOption(frame, city);
   await frame.waitForFunction(`(() => {
     const s = ${SEARCH_STATE_SCRIPT};
     const n = ${norm};
@@ -79,21 +79,52 @@ export function searchFiltersMatch(filters: SearchFilters): string {
   })()`;
 }
 
-export async function selectSearchFilters(frame: Frame, filters: SearchFilters) {
-  if (filters.city !== undefined) await selectCity(frame, filters.city);
+export async function selectSearchFilters(frame: Frame, filters: SearchFilters): Promise<JobSelection> {
+  if (filters.city) await selectCity(frame, filters.city);
   // Inspect the menu even when the displayed title already matches: duplicate titles cannot identify a job.
   await frame.evaluate(`(() => {
     const controls = [...document.querySelectorAll('.search-job-list-C .search-current-job')].filter(${visible});
     if (controls.length !== 1) throw Error('搜索岗位菜单缺失或不唯一');
     if (![...document.querySelectorAll('${jobOptions}')].some(${visible})) controls[0].click();
   })()`);
-  await pickOption(frame,jobOptions,filters.job,true);
+  const visibleOptions = `[...document.querySelectorAll(${JSON.stringify(jobOptions)})].filter(${visible})`;
+  await frame.waitForFunction(`${visibleOptions}.length > 0`, {timeout:8000});
+  const selection = await frame.evaluate(`(() => {
+    const requestedJob = ${JSON.stringify(filters.job)};
+    const normalize = ${norm};
+    const key = normalize(requestedJob);
+    const rows = ${visibleOptions}.map(element => ({
+      element, label: (element.querySelector('.job-name') || element).textContent.trim()
+    }));
+    if (!rows.length) throw Error('搜索岗位选项在匹配前已消失');
+    const exact = rows.filter(row => normalize(row.label) === key);
+    const matches = exact.length ? exact : rows.filter(row => normalize(row.label).startsWith(key));
+    if (matches.length !== 1) {
+      return {
+        status:'needs-confirmation', requestedJob,
+        reason:matches.length ? 'ambiguous' : 'not-found',
+        options:(matches.length ? matches : rows).map(row => row.label)
+      };
+    }
+    const {element, label} = matches[0];
+    if (element.classList.contains('active')) {
+      const controls = [...document.querySelectorAll('.search-job-list-C .search-current-job')].filter(${visible});
+      if (controls.length !== 1) throw Error('搜索岗位菜单缺失或不唯一');
+      controls[0].click();
+    } else {
+      element.click();
+    }
+    return {status:'selected', job:label};
+  })()`) as JobSelection;
+  if (selection.status === 'needs-confirmation') return selection;
   await frame.waitForFunction(`(() => {
     const s = ${SEARCH_STATE_SCRIPT};
-    return ${jobLabel} === ${JSON.stringify(filters.job)} && !s.loading && ![...document.querySelectorAll('${jobOptions}')].some(${visible});
+    return ${jobLabel} === ${JSON.stringify(selection.job)} && !s.loading && !${visibleOptions}.length;
   })()`,{timeout:8000});
-  if (filters.city !== undefined && await frame.evaluate(cityLabel) !== filters.city) await selectCity(frame, filters.city);
-  if (!await frame.evaluate(searchFiltersMatch(filters))) throw Error('搜索城市或岗位核验失败，未提交关键词');
+  if (!await frame.evaluate(searchFiltersMatch({city:filters.city || undefined, job:selection.job}))) {
+    throw Error('选岗后的城市或岗位核验失败，未提交搜索');
+  }
+  return selection;
 }
 
 export async function readSearchSettings(frame: Frame) {

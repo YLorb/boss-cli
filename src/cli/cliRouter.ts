@@ -48,8 +48,9 @@ import { favoriteResume } from '../toolset/favorite.js';
 import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
-import { COMMAND_SPECS } from './command_spec.js';
-import { checkTaskConfig } from './task_config.js';
+import { COMMAND_SPECS, describeCommand, findCommandSpec, renderCommandHelp } from './command_spec.js';
+import { assertTaskInvocation, parseStartupArguments } from './formal_arguments.js';
+import { checkTaskConfig, taskConfigPath } from './task_config.js';
 import { initRun, activateRunBindings, getBoundRun } from './run_state.js';
 import { installOfflineTestGuard } from '../common/offline_test.js';
 import { assertPermittedPhase, isPhaseDenied, setPhase, phaseStatus, beforePhaseCommand, recordPhaseCommand, failPhaseCommand } from './phase_state.js';
@@ -64,24 +65,6 @@ import {
 } from './version.js';
 
 
-
-function envTruthy(name: string): boolean {
-  const v = (process.env[name] ?? '').trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes' || v === 'y';
-}
-
-/** 默认有头；仅当环境变量为真时启用无头（与 `connectBrowser` 读取的 `BOSS_BROWSER_HEADLESS` 一致）。 */
-function shouldRunHeadless(): boolean {
-  return envTruthy('BOSS_BROWSER_HEADLESS');
-}
-
-function configureHeadlessForCommand(cmd: string): void {
-  if (cmd === 'login') {
-    process.env.BOSS_BROWSER_HEADLESS = 'false';
-    return;
-  }
-  process.env.BOSS_BROWSER_HEADLESS = shouldRunHeadless() ? 'true' : 'false';
-}
 
 /**
  * 一次性命令结束后：detach CDP，不关浏览器窗口。
@@ -154,187 +137,15 @@ function normalizeSubcommand(cmd: string): string {
       return 'send';
     case 'list-positions':
       return 'positions';
+    case 'deepsearch':
+      return 'deep-search';
     default:
       return cmd;
   }
 }
 
 function printHelp(): void {
-  console.error(`boss-cli — Boss 直聘浏览器自动化（纯 CLI，无 Agent 运行时）
-
-用法与说明:
-  boss
-      进入交互模式；提示符 boss> ，exit / quit 退出；Ctrl+C 正常结束
-  boss help
-      显示本帮助
-  boss switch-job --list [--json]
-  boss switch-job --job <实时完整岗位文案> [--timeout-ms <1-60000>] [--json]
-      须已在沟通页；复用会话锁和页面守卫。--list 展开读取并收起菜单，非只读；--job 精确唯一选岗
-      相同岗位不点击；草稿、遮挡、重名、禁用或切换未确认即停止，不导航、不发消息
-  boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]
-      向 BOSS_OCR_URL（默认 http://ylorb.top:9002/ocr）上传本地截图并按坐标分栏重排；保留原图
-      截图后由 Agent 后台调用，评估前等待完成并优先读 textPath；失败报错，不重试、不连接浏览器
-  boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]
-      screen（默认）：decision 须带评估证据（PASS↔fit，FAIL↔not-fit）；collect-only：仅收集，不要求评估
-      一岗一账的常驻会话；stdin 每行一个 JSON 命令，stdout 每行一个 JSON 结果
-      候选人更新逐笔保存；stop 等待在途操作并退出。待恢复时提示“有信息需要恢复。”
-      recheck / reconcile 仅在用户明确授权对应范围后传 recoveryAuthorized:true；旧 reading 需要全量对账
-      stdin 命令（每行一个 JSON 对象）：
-        {"op":"show"}                                    读取当前账本全部候选人及决策状态
-        {"op":"add","job":"<岗位>","dataId":"<ID>","name":"<姓名>"}   将候选人加入账本（job 必须与启动岗位一致）
-        {"op":"decision","dataId":"<ID>","decision":"PASS|FAIL","evidence":{"verdict":"fit|not-fit","ref":"<评估回执路径>"}}
-                                                         决策；screen 模式必须 evidence.verdict 与 decision 一致（PASS↔fit、FAIL↔not-fit）
-                                                          FAIL 直接删除账本记录，不点平台“不合适”；collect-only 模式不要求 evidence
-        {"op":"mode","value":"screen|collect-only"}        切换评估模式；正式任务下必须与冻结任务配置一致
-        {"op":"round"}                                    对账本候选人执行一次附件探测轮次（仅人工明确范围使用，非正常 SOP 默认）
-        {"op":"recheck","recoveryAuthorized":true}         逐人复查附件与请求消息（每人一次，只读不下载/发送）
-        {"op":"reconcile","recoveryAuthorized":true}       全量对账恢复（遍历沟通列表补回候选人，仅读取证据）
-        {"op":"receipt","dataId":"<ID>"}                   将本轮已核验下载回执写入账本（与 collect-sync 同源，运行中会话用）
-        {"op":"stop"}                                     停止会话并原子写回账本
-  boss version | ver（或 -v / --version）
-      显示当前版本并检查 npm 是否有更新
-  boss update
-      使用 npm 安装最新版 boss-cli
-  boss version-check [--json]
-      离线校验 CLI 与实际加载的 Skill 配套版本；外部 Skill 必须设置绝对路径 BOSS_SKILL_DIR
-      不匹配返回退出码 2，业务启动被阻止；用户确认后本轮业务命令可加 --confirm-version-mismatch <令牌>
-  业务命令均支持 --json（login/list/chat/action/probe-resume/accept-resume/download-resume/send/positions/jd/recommend/search/search-more/deep-search/preview/greet/favorite/dismiss-contact-notice/back）
-      输出各命令的原始字段；JSON 模式 stdout 仅输出结果，诊断日志写 stderr
-      失败输出 {ok:false,command,error:{name,message}} 并返回非零退出码
-      jd --json 返回 Markdown 正文与缓存路径；download-resume 默认已输出 JSON
-  boss login
-      打开登录页（需要用户在浏览器中自行完成登录，这个命令会直接返回）
-  boss --check-login [--json]
-      只读检查现有浏览器中的首个 BOSS 标签页；返回true/false，无法判定时报错，不打开或跳转页面
-  boss check --page <chat|search|recommend|deep-search|online-resume|positions|login|other> [--state <状态>] [--name <姓名>] [--data-id <ID>] [--candidate-id <ID>] [--job <完整岗位>] [--text <正文>]
-  boss status [--json]
-      check 和业务 --check 严格只读，通常输出 true/false；favorite --check 返回收藏状态详情。status 输出当前页面信息。读取失败报错。
-  boss search-sidebar [--json]
-      在会话锁及页面守护下只读当前搜索侧栏文字和元素描述；不点击订阅、不导航或刷新。
-  boss list [--unread] [--chatting] [--json]
-      --chatting 选择顶部「沟通中」；--json 输出含姓名、data-id、当前沟通职位的结构化列表
-  boss chat --inspect-embedded
-  boss chat <卡片姓名> --recommend --open --candidate-id <已联系ID> --recommend-job <推荐岗位与城市> --job <聊天岗位原文>
-    仅在推荐卡片点击一次“继续聊／继续沟通”，核验同人小窗；不打招呼、不跳转，不发送。
-  boss dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位>
-    仅关闭当前搜索简历的已知畅聊卡使用成功提示；核验身份及已联系状态，点一次关闭，不点查看对话。
-  boss favorite --candidate-id <当前简历ID> [--check] [--json]
-    仅搜索／推荐页已打开简历；--check 只读状态。仅未收藏时点击一次，已收藏直接跳过；不取消收藏、不导航。
-  boss chat <实际姓名> --embedded --close --candidate-id <ID> --job <完整岗位>
-    仅关闭当前已核验的搜索／推荐页内嵌窗口；有草稿、遮挡或身份不符则停止，不刷新或重试。
-  boss chat <实际姓名> --embedded --check --candidate-id <候选人ID> --job <完整岗位>
-  boss send --embedded --name <实际姓名> --candidate-id <候选人ID> --job <完整岗位> --text <正文> [--check]
-    只处理当前搜索／推荐页主文档内嵌会话，不导航；send --embedded --check 仅读取，不输入、不发送。
-  boss chat <姓名> [--strict] [--info <已知原文>]
-      直接按完整昵称搜索，不主动切换或恢复岗位；按姓名和会话ID核验成功，重名保持搜索现场暂停；--strict 保留兼容
-  boss chat-search --clear --expect-keyword <当前完整昵称> [--json]
-      在沟通页核对旧搜索词后点击清空一次，仅复位搜索框。重名时先保存匹配项，再用已知 info 单独定位。
-  boss chat-search <完整昵称> [--info <已知原文>] [--data-id <预期会话ID>] [--job <预期完整岗位>] [--json]
-      须已在沟通页；直接搜索，唯一匹配打开并核验姓名和会话ID；BOSS自行重置筛选不算定位失败；重名保持搜索现场暂停
-      零匹配且查询已完成返回not-found；查询未完成仍超时，业务定位遇零匹配抛CandidateNotFound停止
-      匹配项含name/uniqueId/label/info/tag；info为原始workDesc，tag为exchangeDesc，缺失返回null；--info 按完整姓名和已获取的info原文精确筛选，不向页面输入info
-      BOSS_CHAT_SEARCH_TIMEOUT_MS 设置每次搜索/身份等待上限，默认20000ms，范围1000–60000；错误附阶段和只读DOM诊断，不自动重试
-      --job 比较实际岗位，--data-id 核验会话ID；已知 ID 或 info 可精确筛选同名者；不支持 --check，不发送消息
-  boss chat [姓名] --index <序号> [--unread] [--strict]
-      从当前列表 1-based 序号读取姓名、ID及岗位，再按昵称搜索定位；--unread 用于读取未读列表的序号对象
-      同时提供姓名时精确校验；以当次快照ID筛选，仍有多个匹配时暂停，不滚动查找
-      仅用于已建立联系的候选人（即在 list 里可见的会话对象）
-  boss chat <姓名> --data-id <会话ID> [--info <已知原文>]
-      先核验当前姓名、会话ID及详情姓名，一致则直接使用；不一致才搜索定位，不主动切换或恢复岗位，搜索可用已知info精确筛选；仍多匹配则暂停，无匹配即停止，无失败回退
-  boss accept-resume <姓名> --data-id <会话ID> [--check]
-      在指定会话同意对方的附件简历请求，并等待附件卡片出现；不发送文字
-  boss probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]
-      复用或昵称定位指定会话后检查附件、已发送求简历消息，不主动切岗；--download 同时下载已收到附件
-      download-resume 和 probe-resume --download 总时限 30 秒（含定位、预览、下载和核验），其他附件命令 15 秒；超时终止子进程并返回错误
-  boss download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]
-      下载指定会话已经收到的原附件，返回 JSON 文件路径、大小和 SHA-256
-      --check：只读比较当前身份及附件状态，返回 true/false，不定位、不接收或下载
-  boss action <操作> [--remark <备注>]
-      仅在当前聊天页已打开候选人详情时执行操作，并只返回 action 执行结果
-      操作: resume | not-fit | remark | agree-resume | request-attachment-resume | history | wechat
-      request-attachment-resume：工具栏「求简历」，确认后向对方发送默认话术索要附件简历（需双方各至少发过一条消息）
-      操作为 remark 时必须提供 --remark
-  boss send [--text <内容>] [-t <内容>] [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]
-      仅发送文本消息（等价于在当前会话输入框发送后回车）
-      --request-resume：发送后延迟片刻自动执行「求简历」操作
-  boss positions
-      读取当前职位列表（含开放/待开放/已关闭状态）
-  boss jd <name>
-      抓取指定职位详情并缓存到项目目录同名 .md
-  boss back [--if-open]；back --check-in_online_resume 只判断是否打开简历
-      关闭在线简历弹层；独立在线简历页仅向已核验的列表历史回退一步。检查开关在列表上不操作。
-  boss back --previous --expect-url <前一条历史的完整BOSS列表URL> [--json]
-      显式返回上一条浏览器历史，仅一步；核对前后历史ID及URL。不刷新、不重新路由、不重跑失败动作。
-      仅支持已知列表、在线简历页及权益页；登录、验证、未知页或简历弹层仍打开时停止。
-
-  boss decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]
-      锁模式（BOSS_FLOW_STATE）下记录当前打开候选人的评估结论；实际 greet 前必须已 decide fit，否则拒绝
-      unknown 报告但不阻断；back 后可继续下一位
-
-  boss flow-status [--json]
-      锁模式（BOSS_FLOW_STATE）下输出接续状态：已打开候选人的下一步、需核验（结果未知）与已完成清单
-      额外输出 watchState（ok/paused/stalled/not-started）、paused、lastProgressAt、idleMs；调用方必须先检查 paused
-  boss flow-pause --reason <原因> [--json]
-      锁模式（BOSS_FLOW_STATE）下全局暂停，拒绝一切候选人动作；原因写入停滞监测，供人工核验
-  boss flow-resume [--json]
-      解除全局暂停；若存在结果未知的未决动作，须先核验再恢复（阶段门会拦截未决重放）
-
-  boss spec-list [--json]
-      枚举 ~/.boss-cli/jobs/ 下的岗位规范文件（job spec），用于多岗位收集固定本轮清单；离线，不连浏览器
-
-  boss task-check --json
-      离线校验任务配置（job/scope/permit/stop/phases）及其引用的 permit；交叉校验 permit 的 job/entry 与任务一致
-  boss task-init --json
-      校验任务 + permit + 实际 Skill 版本，生成 runId，写入 ~/.boss-cli/runs/<runId>.json，绑定 permit/flow-state/账本/版本
-      后续命令自动加载绑定（current.json 指针），无需手工设 BOSS_RUN_PERMIT / BOSS_FLOW_STATE / BOSS_LEDGER_DIR
-
-  boss phase-status --json
-      查看当前阶段：允许动作、阻断原因、建议下一步、未决动作、暂停状态、冻结候选人范围
-  boss phase-set --phase <阶段名> --json
-      按 phases 声明顺序相邻推进；须满足该阶段 requires 前置条件且当前阶段有成功业务回执，否则拒绝；禁止跳步/倒退
-
-  boss collect-sync --data-id <会话ID> --json
-      collect 已停止时，将本轮已核验下载回执写入固定岗位账本；核验文件字节数与 SHA-256 一致才入账；离线，不连浏览器
-
-  boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
-      --ensure-job 优先精确匹配岗位名和城市，忽略薪资；精确零匹配时用原参数做一次关键词匹配。不带该选项直接按关键词匹配。多项匹配即停止
-  boss search [关键词] [--city 城市 --job 搜索岗位]
-  boss search --job 搜索岗位 [--json]
-  boss search --city 候选人城市 [--json]
-  boss search --keyword 关键词 [--json]
-  boss search --submit [--json]
-      搜索流程分「三项独立设置 → 提交」两步，按顺序执行：
-      --city <城市>      独立设置城市筛选（须已在搜索页）；回执 submitted=false
-      --job <岗位>       独立设置岗位筛选；选岗若改写城市则恢复该步骤前已选城市
-      --keyword <关键词> 独立设置关键词（最多 20 字符）
-      --submit           仅点击一次搜索提交；须三项独立设置完成后单独执行，不与设置选项混用
-      search <关键词> --city <城市> --job <岗位>  同时指定筛选条件并搜索（须已在常规搜索页，输入关键词后点击一次，不刷新）
-      search <关键词>   进入搜索页读取当前结果；带关键词时提交一次，等待本次响应成功并核对页面候选人 ID/查询标识；失败不重试
-      任一步失败保存回执并停止，不能继续提交；页面可能因筛选自动加载，CLI 不刷新页面
-  boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]
-      仅当前常规搜索页，逐次向下滚动并核验下一页响应；关键词／岗位保持不变，按候选人ID去重，不联系。
-      人数上限包含起始列表、限制返回池；平台单页可能额外加载。每轮响应及核验共用超时，默认10000ms。
-      达上限、成功空响应或成功响应无新增ID即结束；无响应、请求失败或页面变化直接报错，不刷新、不重试。
-  boss preview <姓名> [--candidate-id <ID>] [--open-only] [--reopen-on-frame-error]
-    --reopen-on-frame-error：仅搜索页+candidate-id；Frame打开失败时校验条件并关闭同人预览、重开一次
-      在线简历预览：截图到底后保持打开，等待 Agent 结果再决定沟通或退出；须当前已在「推荐」(/web/chat/recommend)、「深度搜索」(/web/chat/aiform) 或「常规搜索」(/web/chat/search) 且列表已加载；不会自动跳转
-      --candidate-id 支持推荐及常规搜索：姓名和 ID 联合唯一核验；无 ID 时重名暂停；深度搜索不支持该参数
-      --open-only 仅搜索页：打开并核验候选人 ID，保持展开，不截图、不沟通；已打开同一人时复用
-      注意：平台对在线简历每日可查看次数有限，请按需使用、谨慎查看
-  boss greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--contact-mode <开聊模式>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]
-      须在推荐、深度搜索或常规搜索页；常规搜索支持当前在线简历，不自动跳转
-      点击目标的“打招呼/立即沟通”；--check 只读核对推荐列表或搜索在线简历的身份及按钮；搜索页不支持 --job
-      --select-job 仅选择联系岗位；--confirm-contact 确认已选岗位；--continue-chat 配合回执 ID 打开已联系会话
-      --contact-mode 仅搜索页：点「搜索畅聊卡」后弹出的「选择开聊模式」中选项，如“使用账号权益”“使用畅聊卡”；须与成功回执同一 --candidate-id
-      chat <姓名> --check 只读返回身份匹配 true/false；读取详情用 status
-      可选 --job 先在岗位下拉中模糊匹配；同岗位不重复选择（与 recommend 共用同一套选择逻辑）
-      会消耗打招呼次数且单次成本较高，请谨慎使用
-  boss deep-search [岗位关键字] [--job <岗位关键字>] [--core <核心要求>] [--bonus <加分项>] [--clear-core] [--clear-bonus] [--match]
-      进入「深度搜索」页并输出当前表单、剩余匹配次数和按钮状态；--core/--bonus 可重复，并按传入列表同步对应分组；--clear-* 清空对应分组
-      只有显式提供 --match 时才会点击「立即匹配」并消耗今日匹配次数；--match 输出列表顶部最新 20 条
-  
-  !!鉴于boss的风控机制存在更新，且本cli的功能在逐步完善中，若遇到部分操作问题，请先检查版本更新
-`);
+  console.error(renderCommandHelp());
 }
 
 /** 解析 `--key value` / `--key=value` / 布尔 `--flag` */
@@ -502,8 +313,17 @@ async function withFlowJournal<T>(
 export async function executeCommand(argv: string[]): Promise<string> {
   installOfflineTestGuard();
   if (process.env.BOSS_RUN_ID) await activateRunBindings();
+  return executeBoundCommand(argv, validateTaskCommand(argv));
+}
+
+function validateTaskCommand(argv: string[]): string {
   if (!argv.length) die('命令不能为空');
   const cmd = normalizeSubcommand(argv[0]);
+  assertTaskInvocation(argv, cmd, Boolean(getBoundRun()), Boolean(taskConfigPath()));
+  return cmd;
+}
+
+async function executeBoundCommand(argv: string[], cmd: string): Promise<string> {
   await assertPermittedCommand(cmd, argv);
   await assertPermittedPhase(cmd, argv);
   await beforePhaseCommand(cmd, argv);
@@ -652,7 +472,6 @@ async function executeCommandBody(argv: string[]): Promise<string> {
     }
     return json ? JSON.stringify({ dir: JOBS_DIR, jobs: specs }) : (specs.map(s => `${s.job || '(缺 job 字段)'}\t${s.file}`).join('\n') || '(空)');
   }
-  configureHeadlessForCommand(cmd);
   if (cmd === 'switch-job') return runSwitchJob(parseSwitchJobArgs(tail), json);
 
   if (cmd === '--check-login') {
@@ -902,7 +721,7 @@ async function executeCommandBody(argv: string[]): Promise<string> {
     return implListPositionsWithOptions({ detail: true, name: detailName, json });
   }
 
-  if (cmd === 'deep-search' || cmd === 'deepsearch') {
+  if (cmd === 'deep-search') {
     return implBossSearch({ ...parseDeepSearchArgs(tail), json });
   }
 
@@ -911,24 +730,24 @@ async function executeCommandBody(argv: string[]): Promise<string> {
   if (cmd === 'search') {
     const { rest, opts, flags } = parseOpts(tail,new Set(['submit']));
     if ([...flags].some(f=>f!=='submit') || Object.keys(opts).some(key=>!['city','job','keyword'].includes(key))) {
-      die('❌ 用法: search [关键词] [--city 城市 --job 岗位]');
+      die('❌ 搜索参数无效。用法见 boss commands search --json');
     }
     const keyword = rest.join(' ').trim();
     if(flags.has('submit')) {
-      if(keyword||Object.keys(opts).length)die('search --submit 不与设置选项混用');
+      if(rest.length||Object.keys(opts).length)die('search --submit 不与设置选项混用');
       return implSearchControl({action:'submit'},json);
     }
     const keys=Object.keys(opts);
-    if(!keyword&&keys.length===1) {
+    if(!rest.length&&keys.length===1) {
       const action=keys[0] as 'city'|'job'|'keyword';
       const value=opts[action]?.trim();
-      if(!value || action==='keyword'&&value.length>20)die('独立设置需要非空值，关键词最多20字符');
+      if(value===undefined || (action==='job'&&!value) || (action==='keyword'&&value.length>20))die('岗位名称不能为空，关键词最多20字符');
       return implSearchControl({action,value},json);
     }
     if (Object.keys(opts).length) {
       if(opts.keyword!==undefined)die('--keyword 须独立使用');
-      if (!keyword || !opts.city?.trim() || !opts.job?.trim()) die('筛选搜索须同时提供城市、岗位和关键词');
-      return implNormalSearch(keyword,json,{city:opts.city.trim(),job:opts.job.trim()});
+      if (!opts.job?.trim()) die('筛选搜索须提供岗位名称');
+      return implNormalSearch(keyword,json,{city:opts.city?.trim(),job:opts.job.trim()});
     }
     return implNormalSearch(keyword || undefined, json);
   }
@@ -1074,35 +893,47 @@ export async function runOneCommand(argv: string[]): Promise<void> {
 }
 
 async function executeManagedCommand(argv: string[]): Promise<string> {
+  const startup = parseStartupArguments(argv);
   if (argv[0] === 'commands') {
-    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss commands [--json]');
-    return JSON.stringify({ ok: true, commands: COMMAND_SPECS });
+    const name = startup!.positional[0];
+    if (name !== undefined) {
+      const spec = findCommandSpec(name);
+      if (!spec) die('命令未注册，请用 boss commands --json 查询正式命令名');
+      return JSON.stringify({ ok: true, command: describeCommand(spec) });
+    }
+    return JSON.stringify({ ok: true, commands: COMMAND_SPECS.map(describeCommand) });
+  }
+  if (argv[0] === 'browser-session') {
+    await requireSkillCompatibility();
+    const { runBrowserSession } = await import('./browser-session.js');
+    return runBrowserSession(printStdout);
+  }
+  if (argv[0] === 'preflight') {
+    const { runPreflight } = await import('./preflight.js');
+    const result = await runPreflight();
+    if (result.status === 'failed') process.exitCode = 2;
+    return JSON.stringify(result);
   }
   if (argv[0] === 'version-check') {
-    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss version-check [--json]；通过 BOSS_SKILL_DIR 指定实际加载的 Skill');
     const report = await checkSkillCompatibility();
     if (!report.compatible) process.exitCode = 2;
     return JSON.stringify(report);
   }
   if (argv[0] === 'task-check') {
-    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-check [--json]；通过 BOSS_TASK_CONFIG 指向任务配置文件');
     const report = await checkTaskConfig();
     return JSON.stringify({ ok: true, ...report });
   }
   if (argv[0] === 'task-init') {
-    const rest = argv.slice(1);
-    const keepObserved = rest.filter(arg => arg === '--keep-observed').length;
-    if (keepObserved > 1 || rest.some(arg => arg !== '--json' && arg !== '--keep-observed')) die('用法: boss task-init [--json] [--keep-observed]；--keep-observed 续用上一轮同岗位已观察的简历与本地材料');
-    await requireSkillCompatibility();
-    return JSON.stringify({ ok: true, ...await initRun(undefined, { keepObserved: keepObserved === 1 }) });
+    const run = await initRun(undefined, { keepObserved: startup!.options.has('--keep-observed') });
+    return JSON.stringify({ ok: true, ...run, phase: run.task.phases?.[0]?.name ?? 'task' });
   }
-  await activateRunBindings();
-  if (argv[0] !== 'update') {
-    const parsed = splitVersionConfirmation(argv);
-    await requireSkillCompatibility(parsed.confirmation);
-    argv = parsed.argv;
-  }
-  return isAttachmentCommand(argv) ? runCommandProcess(argv) : executeCommand(argv);
+  const run = await activateRunBindings();
+  const parsed = argv[0] === 'update' ? { argv, confirmation: undefined } : splitVersionConfirmation(argv);
+  const cmd = validateTaskCommand(parsed.argv);
+  if (cmd !== 'update' && (!run || parsed.confirmation)) await requireSkillCompatibility(parsed.confirmation);
+  return isAttachmentCommand(parsed.argv)
+    ? runCommandProcess(parsed.argv)
+    : executeBoundCommand(parsed.argv, cmd);
 }
 
 async function runInteractiveLoop(): Promise<void> {
@@ -1158,15 +989,15 @@ async function runInteractiveLoop(): Promise<void> {
 export async function runCli(argv: string[]): Promise<void> {
   installOfflineTestGuard();
   if (argv[0] === 'collect') {
-    await activateRunBindings();
+    const run = await activateRunBindings();
     const parsed = splitVersionConfirmation(argv);
-    await requireSkillCompatibility(parsed.confirmation);
     argv = parsed.argv;
+    validateTaskCommand(argv);
+    if (!run || parsed.confirmation) await requireSkillCompatibility(parsed.confirmation);
     const { rest, opts, flags } = parseOpts(argv.slice(1));
     if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir', 'mode'].includes(key))) {
       die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]');
     }
-    const run = getBoundRun();
     if (run && (run.scope !== 'collect' || run.job !== opts.job.trim())) die('collect 的岗位/入口与运行任务不匹配');
     const mode = (opts.mode ?? run?.task.mode ?? 'screen') as 'screen' | 'collect-only';
     if (run && mode !== (run.task.mode ?? 'screen')) die('collect --mode 与任务配置不匹配');
@@ -1204,13 +1035,13 @@ export async function runCli(argv: string[]): Promise<void> {
     return;
   }
 
-  if (!argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['ocr', 'update', 'version-check', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
-    await printPackageUpdateNoticeIfDue();
-  }
-
   if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') {
     printHelp();
     return;
+  }
+
+  if (!findCommandSpec(argv[0]!)?.startupForm && !taskConfigPath() && !argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['ocr', 'update', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
+    await printPackageUpdateNoticeIfDue();
   }
 
   try {

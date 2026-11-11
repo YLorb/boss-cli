@@ -25,8 +25,6 @@ export const REMOTE_DEBUGGING_PORT: number = (() => {
 })();
 
 let spawnedChromeChild: ChildProcess | null = null;
-/** 最近一次 `connectBrowser` 是否以无头方式启动（`browser.process()` 在 connect 模式下不可用，供 login 等逻辑判断）。 */
-let lastChromeLaunchHeadless = false;
 
 export function clearSpawnedChromeProcessRef(): void {
   // Release launch-log pipes so a detached browser cannot keep the CLI alive.
@@ -36,34 +34,41 @@ export function clearSpawnedChromeProcessRef(): void {
   spawnedChromeChild = null;
 }
 
-/** 最近一次启动是否为无头（仅本进程内、与当前会话一致时有效）。 */
-export function wasLastChromeLaunchHeadless(): boolean {
-  return lastChromeLaunchHeadless;
-}
-
 /**
  * 探测固定调试端口上是否已有在跑的 Chrome：直接命中 `/json/version` 拿当前
  * `webSocketDebuggerUrl`，避免依赖 `DevToolsActivePort` 这种二级状态文件
  * （可能被陈旧/清理/路径 UUID 漂移影响）。命中即可复用，未命中表示需要 spawn。
  */
-async function probeRemoteDebuggingWsEndpoint(
+function debuggingEndpoint(value: string, port: number): string {
+  const endpoint = new URL(value);
+  if (endpoint.protocol !== 'ws:' || endpoint.hostname !== '127.0.0.1' ||
+      (endpoint.port || '80') !== String(port) || endpoint.username || endpoint.password ||
+      !endpoint.pathname.startsWith('/devtools/browser/')) {
+    throw new Error('CDP 地址与本机调试端口不符');
+  }
+  return endpoint.href;
+}
+
+export async function probeRemoteDebuggingWsEndpoint(
   port: number,
   timeoutMs: number,
 ): Promise<string | undefined> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/json/version`, {
-      signal: ctrl.signal,
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: 'error',
     });
-    if (!res.ok) return undefined;
-    const data = (await res.json()) as { webSocketDebuggerUrl?: string };
-    const ws = data.webSocketDebuggerUrl;
-    return typeof ws === 'string' && ws.length > 0 ? ws : undefined;
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timer);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const { webSocketDebuggerUrl } = await response.json() as { webSocketDebuggerUrl?: string };
+    if (!webSocketDebuggerUrl) throw new Error('响应缺少 webSocketDebuggerUrl');
+    return debuggingEndpoint(webSocketDebuggerUrl, port);
+  } catch (error) {
+    const cause = error instanceof Error && error.cause instanceof Error
+      ? error.cause as NodeJS.ErrnoException
+      : undefined;
+    if (cause?.code === 'ECONNREFUSED') return undefined;
+    const detail = cause?.message ?? (error instanceof Error ? error.message : String(error));
+    throw new Error(`无法核验 Chrome 调试端口 ${port}：${detail}`, { cause: error });
   }
 }
 
@@ -250,7 +255,30 @@ function launchViewportFromEnv(): { width: number; height: number } | null {
   return defaultViewportFromEnv();
 }
 
-export async function connectBrowser(options: ConnectBrowserOptions = {}): Promise<Browser> {
+export type BrowserConnection = {
+  browser: Browser;
+  endpoint: string;
+  pid: number | null;
+  reused: boolean;
+  userDataDir: string;
+  profileDirectory: string;
+};
+
+type VerifyBrowserReuse = (endpoint: string, userDataDir: string, profileDirectory: string) => Promise<number>;
+
+export async function connectBrowser(): Promise<Browser> {
+  const endpoint = await probeRemoteDebuggingWsEndpoint(REMOTE_DEBUGGING_PORT, 800);
+  if (!endpoint) {
+    throw new Error(`Chrome 会话未就绪：port=${REMOTE_DEBUGGING_PORT}。请先在常驻宿主运行 boss browser-session --json 并等待 ready`);
+  }
+  return puppeteer.connect({ browserWSEndpoint: endpoint, defaultViewport: launchViewportFromEnv() });
+}
+
+/** Browser startup belongs to the browser-session command. */
+export async function connectBrowserWithMetadata(
+  options: ConnectBrowserOptions,
+  verifyReuse: VerifyBrowserReuse,
+): Promise<BrowserConnection> {
   const executablePath =
     options.executablePath?.trim() ||
     process.env.CHROME_PATH?.trim() ||
@@ -263,6 +291,9 @@ export async function connectBrowser(options: ConnectBrowserOptions = {}): Promi
   }
   const userDataDir =
     options.userDataDir?.trim() || envUserData || BROWSER_USER_DATA_DIR;
+  if (!path.isAbsolute(userDataDir)) {
+    throw new Error('Chrome 常驻需要固定的绝对用户数据目录');
+  }
 
   const profileDirectory =
     options.profileDirectory?.trim() || process.env.BOSS_BROWSER_PROFILE_DIRECTORY?.trim();
@@ -278,7 +309,6 @@ export async function connectBrowser(options: ConnectBrowserOptions = {}): Promi
   const disableGpu = process.env.BOSS_BROWSER_DISABLE_GPU === 'true';
 
   clearSpawnedChromeProcessRef();
-  lastChromeLaunchHeadless = !!headless;
 
   /**
    * 优先直连固定调试端口上的已有实例：boss-cli 使用独立 user-data-dir，
@@ -286,10 +316,13 @@ export async function connectBrowser(options: ConnectBrowserOptions = {}): Promi
    */
   const existingWsUrl = await probeRemoteDebuggingWsEndpoint(REMOTE_DEBUGGING_PORT, 800);
   if (existingWsUrl) {
-    return await puppeteer.connect({
+    const profile = profileDirectory || 'Default';
+    const pid = await verifyReuse(existingWsUrl, userDataDir, profile);
+    const browser = await puppeteer.connect({
       browserWSEndpoint: existingWsUrl,
-      defaultViewport: launchViewportFromEnv(),
+      defaultViewport: null,
     });
+    return { browser, endpoint: existingWsUrl, pid, reused: true, userDataDir, profileDirectory: profile };
   }
 
   // 默认保留 WebAssembly：`typeof WebAssembly === 'undefined'` 本身就是强自动化指纹。
@@ -360,10 +393,14 @@ export async function connectBrowser(options: ConnectBrowserOptions = {}): Promi
   }
 
   try {
-    return await puppeteer.connect({
-      browserWSEndpoint: wsUrl,
-      defaultViewport: launchViewportFromEnv(),
+    const browser = await puppeteer.connect({
+      browserWSEndpoint: debuggingEndpoint(wsUrl, REMOTE_DEBUGGING_PORT),
+      defaultViewport: null,
     });
+    return {
+      browser, endpoint: new URL(wsUrl).href, pid: proc.pid ?? null, reused: false,
+      userDataDir, profileDirectory: profileDirectory || 'Default',
+    };
   } catch (e) {
     try {
       proc.kill();

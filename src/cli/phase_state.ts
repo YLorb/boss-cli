@@ -185,6 +185,7 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
   if (!phaseStatePath() || !getBoundRun() || ['phase-set', 'phase-status'].includes(cmd)) return;
   const s = await state(), t = await task(); let result: any;
   try { result = JSON.parse(output); } catch (error) { deny(`命令 ${cmd} 回执不是 JSON，保留未决状态：${String(error)}`); }
+  if (cmd === 'search' && result?.status === 'needs-confirmation' && result.submitted === false) return;
   const id = targetId(argv, s);
   if (cmd === 'check' && result === true && sameJobKey(option(argv, '--job'), t.job)) s.jobVerified = true;
   if (cmd === 'flow-pause') s.paused = option(argv, '--reason')!;
@@ -226,7 +227,11 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
       if (!s.contacts.includes(id)) s.contacts.push(id);
     }
   }
-  if (cmd === 'preview' || (cmd === 'action' && resolveAction(argv) === 'resume')) {
+  if (cmd === 'preview' && hasFlag(argv, '--open-only')) {
+    if (result.status !== 'open' || result.candidateId !== id || result.identityVerified !== true ||
+        result.screenshot !== false || result.closed !== false) deny('只打开简历回执缺少本人的身份或打开状态');
+    s.current = id;
+  } else if (cmd === 'preview' || (cmd === 'action' && resolveAction(argv) === 'resume')) {
     if (typeof result.path !== 'string' || !result.path) deny('截图回执缺少 path');
     s.current = id; s.material[id] = { image: result.path }; if (!s.observed.includes(id)) s.observed.push(id);
   }

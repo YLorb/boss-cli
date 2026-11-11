@@ -19,7 +19,7 @@ export async function openSearchResumeOnly(page: Page, target: string, expectedC
 async function openSearchResumeAttempt(page: Page, target: string, expectedCandidateId?: string) {
   const search = await assertNormalSearchPageReadyForPreview(page);
   const candidateId = await readSearchCandidateId(search, target, expectedCandidateId);
-  let resume = await visibleResumeFrame(page);
+  let resume = await visibleResumeFrame(page, page.mainFrame(), 6_000);
   const reused = !!resume;
   if (!resume) {
     if (!(await openNormalSearchResumePreview(search, target, candidateId))) throw new Error(`未能打开目标在线简历：${target}`);
@@ -28,7 +28,7 @@ async function openSearchResumeAttempt(page: Page, target: string, expectedCandi
       if(paywall)throw new Error(paywall);
       throw new ResumeFrameOpenError('未出现目标在线简历iframe');
     }
-    resume = await visibleResumeFrame(page);
+    resume = await visibleResumeFrame(page, page.mainFrame(), 6_000);
     if (!resume) throw new ResumeFrameOpenError('目标在线简历iframe不可见');
   }
   try {await resume.waitForFunction(`(() => {

@@ -15,7 +15,7 @@ Node.js/npm缺失时，先按[环境配置的授权安装流程](environment.md#
 
 ## 本工作树开发版本
 
-CLI 0.6.20-dev.2 配套 Skill 1.0.29，兼容标识 `2026-10-30-recommend-chat-v1`，新增推荐页继续聊及内嵌发送。尚未发布对应标签或 npm 包；从包含本次改动的源码构建并同步整个 Skill 后执行 version-check。下方 v0.6.11 下载链接属于已有发布版，不包含本次新增流程。
+本地 CLI 0.6.20-dev.9 配套 Skill 1.0.32，兼容标识为 `2026-10-30-recommend-chat-v1`。从包含本次改动的源码重新构建，同步整个 Skill 目录后执行 `boss version-check --json`。下方 v0.6.11 链接指向历史发布版。
 
 ## 已有发布版本：v0.6.11
 

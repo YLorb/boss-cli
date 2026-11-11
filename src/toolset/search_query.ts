@@ -29,7 +29,7 @@ export function responseCards(payload:any):SearchQueryEvidence['cards'] {
 export function searchMatchesEvidenceScript(e:SearchQueryEvidence):string {
  return `(() => {
   const s=${SEARCH_STATE_SCRIPT}, expected=${JSON.stringify(e.cards)};
-  return !s.loading && s.initializing===false && s.keyword===${JSON.stringify(e.keyword)} && s.params.keywords===${JSON.stringify(e.keyword)} &&
+  return !s.loading && s.initializing===false && s.keyword===${JSON.stringify(e.keyword)} && (s.params.keywords ?? '')===${JSON.stringify(e.keyword)} &&
    s.params.jobId===${JSON.stringify(e.jobId)} && s.params.page===1 &&
    JSON.stringify(s.rendered)===JSON.stringify(expected) && JSON.stringify(s.cards)===JSON.stringify(expected);
  })()`;
@@ -49,7 +49,7 @@ export async function submitSearchQuery(frame:Frame,keyword:string,submit:()=>Pr
   const u=new URL(req.url());
   if(req.frame()!==frame||u.pathname!==endpoint)return;
   if(cityName && u.searchParams.get('city')!==String(initial.params.city))return;
-  if(u.searchParams.get('keywords')!==keyword||(u.searchParams.get('jobId')||'')!==initial.params.jobId||u.searchParams.get('page')!=='1')return;
+  if((u.searchParams.get('keywords')??'')!==keyword||(u.searchParams.get('jobId')||'')!==initial.params.jobId||u.searchParams.get('page')!=='1')return;
   requestCount++;pending.add(req);
   if(requestCount>1)finish({error:new Error('同次搜索出现多个匹配请求，停止，不能确认结果归属')});
  };

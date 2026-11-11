@@ -83,7 +83,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         job = options.json ? await readCurrentRecommendJobLabel(frame) : '';
         jobLine = '当前岗位：当前推荐列表';
         verifiedCandidateId = await readRecommendCandidateId(frame,target,options.candidateId);
-        const resume = await visibleResumeFrame(page,frame);
+        const resume = await visibleResumeFrame(page,frame,6_000);
         if(resume) {
           if(resume.parentFrame()!==frame) throw new Error('推荐简历 iframe 不属于当前推荐页，停止预览');
           await assertRecommendResumeIdentity(frame,verifiedCandidateId);
@@ -118,10 +118,7 @@ export async function runPreview(options: PreviewOptions): Promise<string> {
         }
         throw new Error('点击后未出现在线简历 iframe（c-resume）。');
       }
-      const ready = await waitForVisibleCResumeIframeReady(page,6000,resumeHost);
-      if (!ready) {
-        throw new Error('在线简历 iframe 已出现，但内容未在预期时间内渲染完成。');
-      }
+      await waitForVisibleCResumeIframeReady(page, 6_000, resumeHost);
       if(isBossChatRecommendUrl(url)) {
         const frame=await assertRecommendPageReadyForPreview(page);
         await readRecommendCandidateId(frame,target,verifiedCandidateId);

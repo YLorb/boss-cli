@@ -38,7 +38,7 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 
 - `preview` 失败（未实际打开）不落锁，Worker 可重试或按 SOP 继续；
 - `greet --check`、`--select-job`、`--confirm-contact`、`--continue-chat` 是只读检查或触达后续步骤，不参与锁；
-- `back --previous`、`back --check-in_online_resume` 是历史返回/只读检查，不解锁。
+- `back --previous`、`check --state online-resume-open --json` 分别用于历史返回和只读检查，不解锁。
 
 ## 评估先于触达（decide）
 
@@ -74,7 +74,7 @@ BOSS_FLOW_STATE=<本轮状态文件绝对路径>
 
 ## 必须暂停与停滞监测
 
-- `boss flow-pause --reason <原因>` 记录 round 级暂停；`boss flow-resume` 人工确认后恢复。
+- `boss flow-pause --reason <原因> --json` 记录 round 级暂停；`boss flow-resume --json` 人工确认后恢复。
 - 自动暂停：OCR 服务失败、在线简历连续 3 次打开失败、greet 付费/风控受阻。
 - 已暂停时，preview/greet/back/decide 全部拒绝（报「必须暂停：原因」）。
 - `flow-status` 额外输出 `paused`、`lastProgressAt`、`idleMs`、`watchState`；`watchState ∈ ok/paused/stalled/not-started`（状态文件缺失为 not-started），idle 超过阈值（默认 2 分钟，`BOSS_FLOW_STALL_MS` 可配，已接入）判为 stalled。

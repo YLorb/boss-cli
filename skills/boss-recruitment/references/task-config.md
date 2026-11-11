@@ -6,7 +6,7 @@ scope: "task-config"
 
 # 正式任务
 
-自然语言由宿主 Agent 整理为本地任务 JSON，CLI 负责校验。`BOSS_TASK_CONFIG` 指向绝对路径，先执行 `boss task-check --json`，再执行 `boss task-init --json`。只对缺项、业务范围或授权有实质歧义时询问用户；不增加每轮重复确认。
+自然语言由宿主 Agent 整理为本地任务 JSON，CLI 负责校验。`BOSS_TASK_CONFIG` 指向绝对路径，先执行 `boss preflight --json`，通过后使用 `next.argv` 调用同一 CLI 初始化。已设置 `BOSS_TASK_CONFIG` 且没有运行绑定时，业务命令返回 `TASK_INIT_REQUIRED`；先按回执执行预检。`task-check` 可独立进行离线配置诊断。只对缺项、业务范围或授权有实质歧义时询问用户；不增加每轮重复确认。
 
 ```json
 {
@@ -33,7 +33,7 @@ scope: "task-config"
 
 ## task-init 的结果
 
-运行记录 schemaVersion=2，保存任务快照、任务/permit 内容哈希、实际 CLI/Skill 版本与路径、固定账本目录，并为本轮创建独立 flow/phase 文件。新任务替换本进程旧绑定，不能继承旧权限。
+初始化回执包含 `runId` 和初始 `phase`。运行记录 schemaVersion=2，保存任务快照、任务/permit 内容哈希、实际 CLI/Skill 版本与路径、固定账本目录，并为本轮创建独立 flow/phase 文件。新任务替换本进程旧绑定，不能继承旧权限。
 
 后续公开 CLI 自动加载当前运行指针；需要固定指定运行时可设置 BOSS_RUN_ID。显式环境变量和绑定冲突则报错，不能覆盖绑定。task-init 不消费旧运行绑定，因此可以明确创建新任务；新任务不能代替旧未决动作的核验。
 
@@ -43,7 +43,7 @@ scope: "task-config"
 
 **版本漂移**：`cliVersion` 只作构建号，与已绑定运行不一致时默认**就地续绑**（写回运行记录并追加 `versionHistory` 审计项），观察/材料/未决全部保留；`skillDir`、`skillVersion`、`compatibilityId` 属契约身份，任一不一致仍必须重新 `task-init`。需要旧语义的严格校验时设 `BOSS_STRICT_VERSION_BIND=1`。
 
-所有正式业务命令使用 --json。BOSS_APP_HOME/BOSS_RUNS_DIR 是显式数据/测试隔离目录，必须使用固定绝对路径；不要在正常轮次间切换账户数据目录。
+正式任务按 `boss commands <命令名> --json` 返回的 `formalUsage` 传参。使用公开命令名、长选项及独立参数值，业务命令加 `--json`，常驻 `collect` 按逐行 JSON 协议执行。BOSS_APP_HOME/BOSS_RUNS_DIR 是显式数据/测试隔离目录，必须使用固定绝对路径；不要在正常轮次间切换账户数据目录。
 
 正式 collect 必须与绑定的 job、mode、ledgerDir 一致；stdin也受相同前置条件约束。联系/消息回执按岗位持久保存，未知结果不能因新建 run 而重放。
 

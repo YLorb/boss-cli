@@ -1,4 +1,4 @@
 interface:
   display_name: "BOSS 招聘流程"
   short_description: "按用户标准执行BOSS推荐、搜索与未读简历收集，核验身份并维护账本"
-  default_prompt: "使用 $boss-recruitment，按我提供的岗位、评估标准和授权范围执行本轮招聘流程。"
+  default_prompt: "使用 $boss-recruitment，优先复用已有 Chrome 后台任务。需要启动时，使用宿主后台任务运行公开的 browser-session --json，收到 ready 后按我提供的岗位、评估标准和授权范围执行。"

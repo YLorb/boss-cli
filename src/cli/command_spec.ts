@@ -1,28 +1,102 @@
 // 命令注册表：boss-cli 全部公开命令的机器可读用法真源。
 // --help、boss commands --json、以及 Skill 文档均由本表生成/校验，禁止手抄。
 // 每条命令：名称、用法模板、参数说明、前置条件、副作用、适用页面。
+export const PREFLIGHT_ARGV = ['preflight', '--json'] as const;
+export const TASK_INIT_ARGV = ['task-init', '--json'] as const;
+
 export type CommandParam = { flag: string; desc: string };
+export type ValueSpec = {
+  label: string;
+  choices?: readonly string[];
+  integer?: readonly [number, number];
+  allowEmpty?: boolean;
+  absolutePath?: boolean;
+  maxLength?: number;
+};
+export type CommandOption = {
+  name: string;
+  value?: ValueSpec;
+  repeatable?: boolean;
+  conflictsWith?: string;
+  requires?: string;
+};
+export type CommandForm = {
+  id: string;
+  positional?: ValueSpec;
+  optionalCommandName?: boolean;
+  required: readonly CommandOption[];
+  optional: readonly CommandOption[];
+  minOptions?: number;
+  pages?: string;
+};
 export type CommandSpec = {
   name: string;
-  usage: string;
+  usage?: string;
   params: CommandParam[];
   requires: string;
   sideEffects: string;
   pages: string;
+  stdin?: CommandParam[];
+  formalForms?: CommandForm[];
+  startupForm?: CommandForm;
 };
+
+const flag = (name: string, conflictsWith?: string): CommandOption => ({ name, conflictsWith });
+const value = (name: string, label: string, rules: Omit<ValueSpec, 'label'> = {}): CommandOption =>
+  ({ name, value: { label, ...rules } });
+const form = (
+  id: string,
+  required: CommandOption[] = [],
+  optional: CommandOption[] = [],
+  positional?: string | ValueSpec,
+  pages?: string,
+): CommandForm => ({
+  id, required, optional, pages,
+  positional: typeof positional === 'string' ? { label: positional } : positional,
+});
+
+const name = value('--name', '姓名');
+const dataId = value('--data-id', '会话ID');
+const candidateId = value('--candidate-id', '候选人ID');
+const job = value('--job', '完整岗位');
+const text = value('--text', '正文');
+const info = value('--info', '已知原文');
+const outputDir = value('--output-dir', '输出目录');
+const check = flag('--check');
+const json = flag('--json');
+const timeout = (min: number, max: number) =>
+  value('--timeout-ms', '毫秒', { integer: [min, max] });
+const attachmentTarget = [dataId];
+const embeddedTarget = [flag('--embedded'), candidateId, job];
+const deepSearchOptions = [
+  value('--job', '岗位关键字'),
+  { ...value('--core', '核心要求'), repeatable: true, conflictsWith: '--clear-core' },
+  { ...value('--bonus', '加分项'), repeatable: true, conflictsWith: '--clear-bonus' },
+  flag('--clear-core'), flag('--clear-bonus'), flag('--match'),
+];
 
 export const COMMAND_SPECS: CommandSpec[] = [
   // ── 登录与会话 ──
   {
+    name: 'browser-session',
+    startupForm: form('start-browser-session', [json]),
+    params: [],
+    requires: '配套的 CLI 与 Skill；固定 Chrome 专用配置目录与调试端口',
+    sideEffects: '启动或核验复用 Chrome；断开 CDP 后常驻并逐行报告 ready/alive/stopped',
+    pages: '不导航；首次登录另用 login',
+  },
+  {
     name: 'login',
+    formalForms: [form('open-login')],
     usage: 'login [--json]',
     params: [{ flag: '--json', desc: '返回 {url,status:awaiting-manual-login}；不代表登录成功' }],
-    requires: '无（会启动或复用 Chrome）',
+    requires: '已由常驻宿主运行 browser-session --json 并返回 ready，Chrome 窗口可见',
     sideEffects: '打开登录页；命令同步结束，不等待/不轮询登录结果',
     pages: '登录页 /web/user',
   },
   {
     name: '--check-login',
+    formalForms: [form('check-login')],
     usage: '--check-login [--json]',
     params: [{ flag: '--json', desc: '返回 true/false' }],
     requires: '已有可连接 Chrome 且存在 BOSS 标签页',
@@ -32,6 +106,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 只读检查 ──
   {
     name: 'status',
+    formalForms: [form('read-status')],
     usage: 'status [--json]',
     params: [{ flag: '--json', desc: '结构化返回当前页面信息' }],
     requires: '唯一 BOSS 标签页',
@@ -40,6 +115,17 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'check',
+    formalForms: [{
+      ...form('compare', [], [
+        value('--page', '页面类型', { choices: ['chat', 'search', 'recommend', 'deep-search', 'online-resume', 'positions', 'login', 'other'] }),
+        value('--overlay', '弹层', { choices: ['online-resume', 'none'] }),
+        value('--state', '状态'), name,
+        { ...dataId, requires: '--name', conflictsWith: '--candidate-id' },
+        { ...candidateId, requires: '--name' }, job,
+        value('--keyword', '关键词', { allowEmpty: true }), text, flag('--embedded'),
+      ]),
+      minOptions: 1,
+    }],
     usage: 'check --page <page> [--overlay <ov>] [--state <state>] [--name <姓名>] [--data-id <ID>] [--candidate-id <ID>] [--job <岗位>] [--keyword <kw>] [--text <正文>] [--embedded]',
     params: [
       { flag: '--page', desc: 'chat|search|recommend|deep-search|online-resume|positions|login|other' },
@@ -53,6 +139,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'search-sidebar',
+    formalForms: [form('read-sidebar')],
     usage: 'search-sidebar [--json]',
     params: [{ flag: '--json', desc: '结构化返回侧栏文字与元素' }],
     requires: '当前常规搜索页',
@@ -62,6 +149,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 列表与定位 ──
   {
     name: 'list',
+    formalForms: [form('list-conversations', [], [flag('--unread'), flag('--chatting')])],
     usage: 'list [--unread] [--chatting] [--json]',
     params: [
       { flag: '--unread', desc: '只读未读列表' },
@@ -73,7 +161,17 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'chat',
-    usage: 'chat <姓名> [--strict] [--info <原文>] [--data-id <会话ID>] [--index <序号> --unread] | chat --recommend --open --candidate-id <ID> --recommend-job <岗位> --job <岗位原文> | chat --embedded (--check|--close) --candidate-id <ID> --job <岗位> | chat --inspect-embedded',
+    formalForms: [form('open-conversation', [dataId], [info], '姓名', '沟通页'),
+      form('check-conversation', [check, dataId], [], '姓名', '沟通页'),
+      form('open-recommend-chat', [flag('--recommend'), flag('--open'), candidateId, value('--recommend-job', '岗位与城市'), job], [], '卡片姓名', '推荐页'),
+      form('check-embedded', [...embeddedTarget, check], [], '实际姓名', '推荐或搜索页'),
+      form('close-embedded', [...embeddedTarget, flag('--close')], [], '实际姓名', '推荐或搜索页')],
+    usage: 'chat <姓名> [--strict] [--info <原文>] [--data-id <会话ID>] [--json] | ' +
+      'chat [姓名] --index <序号> [--unread] [--strict] [--json] | ' +
+      'chat <姓名> --check [--data-id <会话ID>] [--json] | ' +
+      'chat <卡片姓名> --recommend --open --candidate-id <ID> --recommend-job <岗位与城市> --job <聊天岗位原文> [--json] | ' +
+      'chat <实际姓名> --embedded (--check|--close) --candidate-id <ID> --job <聊天岗位原文> [--json] | ' +
+      'chat --inspect-embedded [--json]',
     params: [
       { flag: '--strict', desc: '兼容保留，姓名始终精确匹配' },
       { flag: '--info', desc: '已知 workDesc 原文，精确筛选同名者' },
@@ -88,6 +186,8 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'chat-search',
+    formalForms: [form('locate-conversation', [], [info, dataId, job], '完整昵称'),
+      form('clear-chat-search', [flag('--clear'), value('--expect-keyword', '当前完整昵称')])],
     usage: 'chat-search <完整昵称> [--info <原文>] [--data-id <预期ID>] [--job <预期岗位>] [--json] | chat-search --clear --expect-keyword <昵称>',
     params: [
       { flag: '--info', desc: '按完整姓名+info 原文精确筛选' },
@@ -101,6 +201,8 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'switch-job',
+    formalForms: [form('list-jobs', [flag('--list')], [timeout(1, 60_000)]),
+      form('switch-job', [job], [timeout(1, 60_000)])],
     usage: 'switch-job --list [--json] | switch-job --job <实时完整岗位文案> [--timeout-ms <1-60000>] [--json]',
     params: [
       { flag: '--list', desc: '展开下拉读取完整文案与 unavailable，再收起（非只读）' },
@@ -113,19 +215,31 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 搜索与推荐 ──
   {
     name: 'search',
-    usage: 'search [关键词] [--city 城市 --job 岗位] | search --city <城市> | search --job <岗位> | search --keyword <关键词> | search --submit',
+    formalForms: [form('read-search'),
+      form('set-city', [value('--city', '城市', { allowEmpty: true })]),
+      form('set-job', [job]),
+      form('set-keyword', [value('--keyword', '关键词', { allowEmpty: true, maxLength: 20 })]),
+      form('submit-search', [flag('--submit')]),
+      form('search-current-filters', [], [], '关键词'),
+      form('search-explicit-filters', [job], [value('--city', '城市', { allowEmpty: true })], { label: '关键词', allowEmpty: true, maxLength: 20 }, '常规搜索页'),
+      form('search-explicit-filters-no-keyword', [value('--city', '城市', { allowEmpty: true }), job], [], undefined, '常规搜索页')],
+    usage: 'search [关键词] | search <关键词或空串> --job <岗位> [--city <城市或空串>] | search --city <城市或空串> --job <岗位> | search --city <城市或空串> | search --job <岗位> | search --keyword <关键词或空串> | search --submit',
     params: [
-      { flag: '--city', desc: '独立设置城市筛选' },
-      { flag: '--job', desc: '独立设置岗位筛选；会清空 keyword，顺序不能颠倒' },
-      { flag: '--keyword', desc: '独立设置关键词（≤20 字符）' },
+      { flag: '--city', desc: '指定城市时设置筛选，省略或留空沿用页面城市' },
+      { flag: '--job', desc: '唯一完整名称优先，其次唯一前缀。未能唯一匹配时返回待确认' },
+      { flag: '--keyword', desc: '独立设置关键词（≤20 字符），空串清空输入框' },
       { flag: '--submit', desc: '仅点击一次搜索提交，不与设置混用' },
     ],
-    requires: '常规搜索页；三项独立设置完成后再 submit',
-    sideEffects: '设置筛选/提交搜索；失败保存回执并停止',
+    requires: '常规搜索页；按城市（可省略）、岗位、关键词（可为空）、提交的顺序操作',
+    sideEffects: '设置筛选或点击一次搜索。岗位待确认时本轮任务保持可继续',
     pages: '搜索页 /web/chat/search',
   },
   {
     name: 'search-more',
+    formalForms: [form('expand-search', [
+      value('--max-scrolls', '滚动次数', { integer: [1, 20] }),
+      value('--max-candidates', '人数', { integer: [1, 500] }),
+    ], [timeout(1000, 15_000)])],
     usage: 'search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]',
     params: [
       { flag: '--max-scrolls', desc: '最大滚动轮数' },
@@ -137,6 +251,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'deep-search',
+    formalForms: [form('deep-search', [], deepSearchOptions)],
     usage: 'deep-search [岗位关键字] [--job <岗位>] [--core <要求>] [--bonus <加分>] [--clear-core] [--clear-bonus] [--match]',
     params: [
       { flag: '--core/--bonus', desc: '可重复；同步对应分组' },
@@ -148,6 +263,8 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'recommend',
+    formalForms: [form('read-recommendations'),
+      form('recommend-for-job', [flag('--ensure-job')], [], '岗位与城市')],
     usage: 'recommend [岗位完整名称] [--ensure-job | --check-job]',
     params: [
       { flag: '--ensure-job', desc: '优先精确匹配岗位名+城市；零匹配再用关键词' },
@@ -160,10 +277,14 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 候选人动作 ──
   {
     name: 'preview',
-    usage: 'preview <姓名> [--candidate-id <ID>] [--open-only] [--reopen-on-frame-error] [--json]',
+    formalForms: [form('capture-resume', [candidateId], [], '姓名', '推荐或常规搜索页'),
+      form('open-resume', [candidateId, flag('--open-only')], [flag('--reopen-on-frame-error')], '姓名', '常规搜索页'),
+      form('capture-with-authorized-reopen', [candidateId, flag('--reopen-on-frame-error')], [], '姓名', '常规搜索页')],
+    usage: 'preview <姓名> [--candidate-id <ID>] [--json] | ' +
+      'preview <姓名> --candidate-id <ID> [--open-only] [--reopen-on-frame-error] [--json]（仅常规搜索页）',
     params: [
       { flag: '--candidate-id', desc: '卡片候选人ID（geekId）；锁模式下必填' },
-      { flag: '--open-only', desc: '仅打开并核验ID，保持展开，不截图' },
+      { flag: '--open-only', desc: '仅常规搜索页；打开并核验身份，保持展开，不截图' },
       { flag: '--reopen-on-frame-error', desc: '仅搜索页；Frame失败时关闭同人预览重开一次' },
     ],
     requires: '推荐/深度搜索/常规搜索页且列表已加载',
@@ -172,6 +293,11 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'greet',
+    formalForms: [form('greet-candidate', [candidateId], [check, job], '姓名'),
+      form('select-contact-job', [candidateId, value('--select-job', '联系岗位')], [check], '姓名'),
+      form('confirm-contact', [candidateId, value('--select-job', '联系岗位'), flag('--confirm-contact')], [check], '姓名'),
+      form('select-contact-mode', [candidateId, value('--contact-mode', '开聊模式')], [check], '姓名', '常规搜索页'),
+      form('continue-chat', [candidateId, flag('--continue-chat')], [check], '姓名')],
     usage: 'greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--contact-mode <开聊模式>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]',
     params: [
       { flag: '--candidate-id', desc: '卡片ID；锁模式联系动作必填' },
@@ -187,6 +313,8 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'send',
+    formalForms: [form('send-conversation', [name, dataId, text], [check], undefined, '沟通页'),
+      form('send-embedded', [...embeddedTarget, name, text], [check], undefined, '推荐或搜索页')],
     usage: 'send [--text <内容> | -t <内容>] [--name <姓名> --data-id <会话ID>] [--request-resume] [--check] | send --embedded --name <姓名> --candidate-id <ID> --job <岗位> --text <正文> [--check]',
     params: [
       { flag: '--text/-t', desc: '消息正文' },
@@ -200,7 +328,8 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'action',
-    usage: 'action <操作> [--remark <备注>]',
+    formalForms: [form('capture-chat-resume', [], [], { label: '操作', choices: ['resume'] })],
+    usage: 'action <resume|not-fit|remark|agree-resume|request-attachment-resume|history|wechat> [--remark <备注>] [--json]',
     params: [
       { flag: '操作', desc: 'resume|not-fit|remark|agree-resume|request-attachment-resume|history|wechat' },
       { flag: '--remark', desc: '操作为 remark 时必填' },
@@ -211,6 +340,9 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'back',
+    formalForms: [form('close-resume'),
+      form('close-resume-if-open', [flag('--if-open')]),
+      form('go-back-one', [flag('--previous'), value('--expect-url', '上一条已核验URL')])],
     usage: 'back [--if-open] | back --check-in_online_resume | back --previous --expect-url <URL>',
     params: [
       { flag: '--if-open', desc: '关闭在线简历弹层' },
@@ -223,6 +355,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'favorite',
+    formalForms: [form('favorite-resume', [candidateId], [check])],
     usage: 'favorite --candidate-id <当前简历ID> [--check] [--json]',
     params: [{ flag: '--check', desc: '只读收藏状态' }],
     requires: '搜索/推荐页已打开简历',
@@ -231,6 +364,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'dismiss-contact-notice',
+    formalForms: [form('dismiss-contact-notice', [candidateId, job], [], '姓名')],
     usage: 'dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位>',
     params: [
       { flag: '--candidate-id', desc: '已联系候选人卡片ID' },
@@ -243,6 +377,8 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 附件 ──
   {
     name: 'probe-resume',
+    formalForms: [form('probe-attachment', attachmentTarget, [], '姓名'),
+      form('probe-and-download', [...attachmentTarget, flag('--download')], [outputDir], '姓名')],
     usage: 'probe-resume <姓名> --data-id <会话ID> [--download] [--output-dir <目录>] [--json]',
     params: [
       { flag: '--download', desc: '同时下载已收到附件（总时限30s）' },
@@ -254,6 +390,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'accept-resume',
+    formalForms: [form('accept-attachment', attachmentTarget, [check], '姓名')],
     usage: 'accept-resume <姓名> --data-id <会话ID> [--check]',
     params: [{ flag: '--check', desc: '只读比较身份与附件状态' }],
     requires: '指定会话有附件请求',
@@ -262,6 +399,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'download-resume',
+    formalForms: [form('download-attachment', attachmentTarget, [check, outputDir], '姓名')],
     usage: 'download-resume <姓名> --data-id <会话ID> [--output-dir <目录>] [--check]',
     params: [{ flag: '--output-dir', desc: '输出目录' }, { flag: '--check', desc: '只读' }],
     requires: '指定会话已收到附件',
@@ -271,6 +409,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 收集与账本 ──
   {
     name: 'collect',
+    formalForms: [form('collect', [job], [value('--ledger-dir', '账本目录'), value('--mode', '模式', { choices: ['screen', 'collect-only'] })])],
     usage: 'collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]',
     params: [
       { flag: '--job', desc: '账本岗位键（完整岗位名+城市，去薪资）' },
@@ -279,10 +418,23 @@ export const COMMAND_SPECS: CommandSpec[] = [
     ],
     requires: '无（常驻会话，stdin 每行一个 JSON 命令）',
     sideEffects: '打开岗位账本；stdin op：show/add/decision/mode/round/recheck/reconcile/receipt/stop',
-    pages: '无（会话进程，不操作页面）',
+    pages: '启动不操作页面；round/recheck/reconcile 会读取沟通页',
+    stdin: [
+      { flag: '{"op":"show"}', desc: '读取账本' },
+      { flag: '{"op":"add","job":"<岗位>","dataId":"<ID>","name":"<姓名>"}', desc: '加入本岗位候选人' },
+      { flag: '{"op":"decision","dataId":"<ID>","decision":"PASS|FAIL","evidence":{"verdict":"fit|not-fit","ref":"<回执路径>"}}',
+        desc: 'screen 必须提供对应 verdict（PASS↔fit、FAIL↔not-fit），ref 可选；collect-only 可省略 evidence；FAIL 移除账本记录' },
+      { flag: '{"op":"mode","value":"screen|collect-only"}', desc: '正式任务须与冻结模式一致' },
+      { flag: '{"op":"round"}', desc: '仅在明确授权范围内进行一次探测轮次' },
+      { flag: '{"op":"recheck","recoveryAuthorized":true}', desc: '须取得明确授权，逐人核验待复查回执' },
+      { flag: '{"op":"reconcile","recoveryAuthorized":true}', desc: '须取得明确授权，全量对账' },
+      { flag: '{"op":"receipt","dataId":"<ID>"}', desc: '将本轮核验过的下载回执写入活动账本' },
+      { flag: '{"op":"stop"}', desc: '停止会话，等待回执和退出' },
+    ],
   },
   {
     name: 'collect-sync',
+    formalForms: [form('sync-attachment', attachmentTarget)],
     usage: 'collect-sync --data-id <会话ID> --json',
     params: [{ flag: '--data-id', desc: '已下载会话ID' }],
     requires: 'collect 已停止；正式收集任务绑定',
@@ -292,6 +444,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 流程护栏 ──
   {
     name: 'decide',
+    formalForms: [form('record-verdict', [candidateId, value('--verdict', '结论', { choices: ['fit', 'not-fit', 'unknown'] })])],
     usage: 'decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]',
     params: [{ flag: '--verdict', desc: 'fit|not-fit|unknown' }],
     requires: '锁模式（BOSS_FLOW_STATE）且候选人已打开',
@@ -300,6 +453,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'flow-status',
+    formalForms: [form('read-flow')],
     usage: 'flow-status [--json]',
     params: [],
     requires: '锁模式',
@@ -308,6 +462,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'flow-pause',
+    formalForms: [form('pause-flow', [value('--reason', '原因')])],
     usage: 'flow-pause --reason <原因> [--json]',
     params: [{ flag: '--reason', desc: '暂停原因' }],
     requires: '锁模式',
@@ -316,6 +471,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'flow-resume',
+    formalForms: [form('resume-flow')],
     usage: 'flow-resume [--json]',
     params: [],
     requires: '锁模式；未决动作须先核验',
@@ -324,6 +480,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'phase-set',
+    formalForms: [form('set-phase', [value('--phase', '阶段名')])],
     usage: 'phase-set --phase <阶段名> [--json]',
     params: [{ flag: '--phase', desc: '任务配置 phases 中声明的阶段名' }],
     requires: '正式任务绑定；当前阶段有成功回执',
@@ -332,6 +489,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'phase-status',
+    formalForms: [form('read-phase')],
     usage: 'phase-status [--json]',
     params: [],
     requires: '正式任务绑定',
@@ -340,6 +498,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'spec-list',
+    formalForms: [form('list-specs')],
     usage: 'spec-list [--json]',
     params: [],
     requires: '无',
@@ -347,17 +506,63 @@ export const COMMAND_SPECS: CommandSpec[] = [
     pages: '无',
   },
   {
-    name: 'task-check',
-    usage: 'task-check [--json]',
+    name: 'commands',
+    startupForm: { ...form('read-command-catalog', [], [json]), optionalCommandName: true },
     params: [],
+    requires: '无',
+    sideEffects: '无；读取当前安装的全部或单条命令用法',
+    pages: '无（离线）',
+  },
+  {
+    name: 'help',
+    usage: 'help',
+    params: [],
+    requires: '无',
+    sideEffects: '无；显示同一命令目录的文本版',
+    pages: '无（离线）',
+  },
+  {
+    name: 'version',
+    usage: 'version',
+    params: [],
+    requires: '无',
+    sideEffects: '读取本机版本并检查更新',
+    pages: '无',
+  },
+  {
+    name: 'version-check',
+    startupForm: form('check-version', [], [json]),
+    params: [{ flag: 'BOSS_SKILL_DIR', desc: '外部 Skill 的实际绝对路径' }],
+    requires: '能读取实际安装的 Skill',
+    sideEffects: '无；报告版本与兼容性',
+    pages: '无（离线）',
+  },
+  {
+    name: 'preflight',
+    startupForm: form('run-preflight', [json]),
+    params: [
+      { flag: 'BOSS_SKILL_DIR', desc: '实际加载的外部 Skill 绝对目录' },
+      { flag: 'BOSS_TASK_CONFIG', desc: '本轮任务配置文件绝对路径' },
+    ],
+    requires: '配套的 CLI/Skill、合法任务与 permit、已登录的唯一 BOSS 标签页',
+    sideEffects: '只读；返回 passed 或 failed 及首个阻塞原因',
+    pages: 'BOSS 招聘工作台；collect 要求沟通页',
+  },
+  {
+    name: 'task-check',
+    startupForm: form('check-task', [], [json]),
+    params: [{ flag: 'BOSS_TASK_CONFIG', desc: '任务配置文件的绝对路径' }],
     requires: 'BOSS_TASK_CONFIG 指向任务配置',
     sideEffects: '无（离线校验）',
     pages: '无',
   },
   {
     name: 'task-init',
-    usage: 'task-init [--json] [--keep-observed]',
-    params: [{ flag: '--keep-observed', desc: '续用上一轮同岗位已观察的简历与本地材料' }],
+    startupForm: form('initialize-task', [], [json, flag('--keep-observed')]),
+    params: [
+      { flag: 'BOSS_TASK_CONFIG', desc: '任务配置文件的绝对路径' },
+      { flag: '--keep-observed', desc: '续用上一轮同岗位已观察的简历与本地材料' },
+    ],
     requires: 'BOSS_TASK_CONFIG；版本匹配',
     sideEffects: '生成 runId，写入运行绑定',
     pages: '无',
@@ -365,6 +570,9 @@ export const COMMAND_SPECS: CommandSpec[] = [
   // ── 其它 ──
   {
     name: 'ocr',
+    formalForms: [form('ocr-resume', [], [
+      value('--layout', '版式', { choices: ['auto', 'boss-online-resume'] }), timeout(1000, 120_000),
+    ], { label: 'PNG绝对路径', absolutePath: true })],
     usage: 'ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]',
     params: [
       { flag: '--layout', desc: 'auto|boss-online-resume' },
@@ -376,6 +584,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'positions',
+    formalForms: [form('list-positions')],
     usage: 'positions',
     params: [],
     requires: '职位管理页',
@@ -384,6 +593,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   },
   {
     name: 'jd',
+    formalForms: [form('read-job-description', [], [], '岗位名称')],
     usage: 'jd <name>',
     params: [],
     requires: '职位管理页',
@@ -395,4 +605,57 @@ export const COMMAND_SPECS: CommandSpec[] = [
 /** 按名称查单条命令；未注册返回 null。 */
 export function findCommandSpec(name: string): CommandSpec | null {
   return COMMAND_SPECS.find((c) => c.name === name) ?? null;
+}
+
+export function requiredFormalOptions(spec: CommandSpec, form: CommandForm): readonly CommandOption[] {
+  return spec.name === 'collect' ? form.required : [...form.required, json];
+}
+
+function renderUsage(name: string, form: CommandForm, required: readonly CommandOption[]): string {
+  function renderValue(value: ValueSpec): string {
+    if (value.choices?.length === 1) return value.choices[0]!;
+    if (value.choices) return `<${value.choices.join('|')}>`;
+    if (value.integer) return `<${value.integer.join('-')}>`;
+    return `<${value.label}>`;
+  }
+  function renderOption(option: CommandOption): string {
+    return option.value ? `${option.name} ${renderValue(option.value)}` : option.name;
+  }
+  return [
+    name,
+    ...(form.positional ? [renderValue(form.positional)] : []),
+    ...(form.optionalCommandName ? ['[命令名]'] : []),
+    ...required.map(renderOption),
+    ...form.optional.map(option => `[${renderOption(option)}${option.repeatable ? ' …' : ''}]`),
+  ].join(' ');
+}
+
+export function commandUsage(spec: CommandSpec): string | undefined {
+  return spec.startupForm ? renderUsage(spec.name, spec.startupForm, spec.startupForm.required) : spec.usage;
+}
+
+export function formalUsage(spec: CommandSpec): string[] | undefined {
+  return spec.formalForms?.map(form => renderUsage(spec.name, form, requiredFormalOptions(spec, form)));
+}
+
+export function describeCommand(spec: CommandSpec) {
+  return {
+    ...spec,
+    usage: commandUsage(spec),
+    formalForms: spec.formalForms?.map(form => ({ ...form, required: requiredFormalOptions(spec, form) })),
+    formalUsage: formalUsage(spec),
+  };
+}
+
+export function renderCommandHelp(): string {
+  const entries = COMMAND_SPECS.map(spec => [
+    `  boss ${commandUsage(spec)}`,
+    ...(formalUsage(spec) ?? []).map(usage => `    正式任务：boss ${usage}`),
+    `    前置条件：${spec.requires}`,
+    `    行为：${spec.sideEffects}`,
+    `    页面：${spec.pages}`,
+    ...spec.params.map(param => `    ${param.flag}  ${param.desc}`),
+    ...(spec.stdin ?? []).map(param => `    stdin ${param.flag}  ${param.desc}`),
+  ].join('\n'));
+  return ['boss-cli', '命令规格见 boss commands <命令名> --json，完整目录见 boss commands --json。', ...entries].join('\n\n');
 }

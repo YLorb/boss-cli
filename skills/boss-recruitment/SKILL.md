@@ -2,36 +2,43 @@
 name: boss-recruitment
 description: 使用本机 boss-cli 执行 BOSS直聘简历收集、推荐或搜索寻访，按使用者提供的 JD 和标准评估，并在授权范围内沟通、接收简历及维护岗位账本；也用于安装和排查这些流程。
 metadata:
-  version: "1.0.29"
-  updated: "2026-11-10"
+  version: "1.0.32"
+  updated: "2026-11-11"
   language: "zh-CN"
-  cli-version: "0.6.20-dev.2"
+  cli-version: "0.6.20-dev.9"
   cli-compatibility: "2026-10-30-recommend-chat-v1"
-  cli-baseline: "0.6.20-dev.2-working-tree"
+  cli-baseline: "0.6.20-dev.9-working-tree"
 ---
 
 # BOSS 招聘流程
 
-这是本机 CLI 的操作规范，不是独立浏览器驱动。执行需要可运行 shell 的 Agent、Node.js、Chrome 和使用者自己的 BOSS 登录态。仅能对话的 GPT 无法直接执行。不要因加载本 Skill 自动开始操作。
+在 WorkBuddy 中使用宿主的 shell 调用配套的本机 `boss` CLI。WorkBuddy 负责按本 Skill 的流程编排任务，CLI 负责预检、浏览器操作、身份核验和账本。单独导入 Skill 后，按[安装与兼容性](references/install.md)确认本机 CLI 可执行并核对版本。实际执行还需要 Node.js、Chrome 和使用者自己的 BOSS 登录态。收到用户任务后再开始操作。
 
 每轮开始操作前必须读取本 Skill 的 [AGENTS.md](AGENTS.md)，遵守其中的上下文保留与同一候选人 OCR 汇总评估约束；不假定宿主会自动加载该文件。
+
+## 工具调用
+
+- 首次使用某条业务命令或忘记参数时，先执行 `boss commands <命令名> --json`。启动命令读取 `usage`，正式任务读取 `formalUsage`。参数错误且回执提供 `next.argv` 时，将该数组作为参数传给同一 CLI，查询后按返回规格修正。
+- 使用[简历解析脚本](references/resume-analysis.md)处理已有的 OCR 回执和解析结果。读取 BOSS 页面和候选人信息统一使用公开 CLI。
 
 ## 明确的离线模拟任务
 
 使用者明确指定本地模拟入口和合成对象时，所有命令（包括版本、任务和状态检查）均使用该入口；不调用真实 `boss`、Chrome、登录、安装或环境诊断脚本。不将真实页面的环境准备步骤用于合成夹具。入口不支持某个必需命令时，保存原始错误并停止，不修改夹具、Skill或测试工具补齐。此规则仅适用于明确的离线模拟，不改变真实 BOSS 的唯一 CLI 入口约束。
 
-## 启动前版本校验（强制）
+## Chrome 常驻与启动预检
 
-每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.20-dev.2 与 Skill 1.0.29 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
+需要启动或托管 Chrome 时，优先用宿主的后台任务入口运行 `boss browser-session --json`。等待 `ready` 回执并保留宿主任务 ID。同一浏览器后台任务跨招聘轮次复用，单轮结束不停止它。后台任务失败时保存原始回执并暂停页面操作。只有浏览器已启动且首次登录或已确认未登录时，才调用 `boss login --json`，交由用户扫码。
+
+每轮正式任务先设置 `BOSS_SKILL_DIR` 为实际加载的 Skill 绝对目录，并设置 `BOSS_TASK_CONFIG` 为本轮任务配置的绝对路径，然后执行 `boss preflight --json`。它校验配套版本、任务、permit 和已有浏览器的登录态及页面。返回 `passed` 后使用回执的 `next.argv`（`["task-init","--json"]`）调用同一 CLI；返回 `failed` 时按 `reason.code` 和原始原因停止受影响步骤。首次安装和离线版本诊断使用 `boss version-check --json`。版本不匹配时展示实际版本、期望版本和路径，等待用户明确确认处理方式。正式任务初始化要求配套版本。
 
 ## SOP 执行约束（必读）
 
-正式任务先按[任务配置](references/task-config.md)写出本轮要求，执行 `task-check --json`、`task-init --json`，再读取 `phase-status --json` 选择合法动作。绑定自动启用权限、阶段和逐人闭环；不要更换绑定路径、编辑状态文件或新建空账本。固定岗位账本跨对话保留，每轮 flow/phase 独立，未决联系/消息跨轮防重放。不同宿主须具备本机执行及文件访问能力，安装 Skill 不代表该宿主已实际验收。
+正式任务先按[任务配置](references/task-config.md)写出本轮要求，执行 `preflight --json` 和 `task-init --json`，以初始化回执确认运行与初始阶段。需要核对已存在运行的状态时读取 `phase-status --json`。绑定自动启用权限、阶段和逐人闭环；不要更换绑定路径、编辑状态文件或新建空账本。固定岗位账本跨对话保留，每轮 flow/phase 独立，未决联系/消息跨轮防重放。不同宿主须具备本机执行及文件访问能力，安装 Skill 不代表该宿主已实际验收。
 
 **除使用者明确提出特殊要求外，Agent 必须严格按对应 SOP 执行；SOP 是执行约定，不是可自行取舍的建议。**
 
 - **未授权即不做（强制）**：使用者没有明确说明并授权的事项一律不做。不得自行设计替代流程、自行改变或扩大对象范围、自行选择“最小可用路径”、自行把 SOP 的多个步骤合并成批量脚本一次跑完、自行增加未获准的业务动作（发送、下载、入账、上传、改状态）。使用者只给出目标、范围或结果时，动作仍以对应 SOP 已列明的步骤为限；SOP 未覆盖的部分视为未授权，必须停止并报告。
-- **收集轮次的账本主线（强制）**：任何以收集或筛选简历为目标的轮次，不论起始对象来自未读列表、时间窗口、指定名单、按岗位筛选、推荐或搜索转入，都必须为本轮涉及的每个岗位启动 `collect`，按[账本与恢复](references/ledger-and-recovery.md)核对 `started`／`job`／`file`／`recoveryRequired`，逐人 `add`／`decision`，结束时 `stop` 并确认进程退出；外部下载或发送结果按“外部结果合并”写回。使用者对起始快照来源、时间范围、消息口径或输出目录的修改只覆盖该步骤本身，不取消 `collect` 账本。
+- **收集轮次的账本主线（强制）**：任何以收集或筛选简历为目标的轮次，不论起始对象来自未读列表、时间窗口、指定名单、按岗位筛选、推荐或搜索转入，都必须为本轮涉及的每个岗位启动 `collect`，按[账本与恢复](references/ledger-and-recovery.md)核对 `started`／`job`／`file`／`recoveryRequired`，按[收集 SOP](references/collect-sop.md)先做小卡片预筛，预筛跳过者记入本轮回执，其余逐人 `add`／`decision`。结束时 `stop` 并确认进程退出；外部下载或发送结果按“外部结果合并”写回。使用者对起始快照来源、时间范围、消息口径或输出目录的修改只覆盖该步骤本身，不取消 `collect` 账本。
 - **每轮重新加载**：上下文压缩、任务中断或使用者改变口径后进入新一轮时，必须重新读取本轮入口对应的 SOP、共用规则与账本说明，不凭上一轮记忆或摘要继续。
 - **入口不匹配的处理**：任务口径与 SOP 的 `read_when`／`scope` 不完全一致时，先判断是否只是个别步骤被使用者的特殊要求覆盖，其余步骤继续有效；若确无任一 SOP 覆盖该模式，停止并报告，不得自行改走替代路径。
 
@@ -52,7 +59,7 @@ metadata:
 
 首次使用先只读检查环境。Chrome作为推荐浏览器，Agent不得下载或安装；缺少可用浏览器时告知用户自行准备。Node.js/npm缺失或版本不满足时，必须先告知检测结果、拟安装版本／来源／目录及PATH修改，取得用户明确同意后，Agent才可自行下载、安装和配置；安装Skill本身不代表同意安装环境。详细步骤见环境配置。
 
-从当前对话及本轮配置读取：入口（收集／推荐／搜索）、目标岗位完整名称及 JD、评估标准、可选否决条件及未知信息处理方式、观察上限、触达门槛、获准动作和输出目录。搜索还需要关键词；发消息需要确认的话术。缺失必需输入才询问，不重复索取已提供内容。并将 JD、评估标准、否决条件、观察上限、触达门槛与获准动作写入对应岗位的规范文件（见 [岗位规范文件](references/job-spec.md)），以该文件为唯一依据，不粘贴进上下文。
+从当前对话及本轮配置读取：入口（收集／推荐／搜索）、目标岗位完整名称及 JD、评估标准、可选否决条件及未知信息处理方式、观察上限、触达门槛、获准动作和输出目录。搜索城市和关键词均可省略，按[搜索 SOP](references/search-sop.md)处理。发消息需要确认的话术。缺失必需输入才询问，不重复索取已提供内容。并将 JD、评估标准、否决条件、观察上限、触达门槛与获准动作写入对应岗位的规范文件（见 [岗位规范文件](references/job-spec.md)），以该文件为唯一依据，不粘贴进上下文。
 
 **筛选条件由使用者提供。** 不把示例岗位、60分、学校／竞赛条件或公司介绍变成所有使用者的默认规则。学校等准入条件与技术评分分开；简历未展示不等于不会。不根据姓名猜身份或补足经历。
 
@@ -67,13 +74,13 @@ metadata:
 | 状态转换前、check/status、发送预检 | [只读检查规范](references/check-status.md)，必读；旧版check曾执行动作，不可混用 |
 | 真实页面操作或工具缺口 | [工具使用边界](references/tool-boundary.md)，必读 |
 | 本轮动作白名单审批（deny-by-default） | [命令白名单审批](references/run-permit.md)，启用按流配置 |
-| 本轮任务结构、范围与停止条件 | [统一任务配置](references/task-config.md)，启动前 task-check 校验 |
+| 本轮任务结构、范围与停止条件 | [统一任务配置](references/task-config.md)，启动前 preflight 校验 |
 | 按阶段推进、阶段切换与越界拒绝 | [阶段校验](references/phase-state.md)，phase-set/phase-status |
 | 首次安装、下载、环境或版本问题 | [安装与兼容性](references/install.md) |
 | Node.js、Chrome、PATH、CDP和目录配置 | [环境配置](references/environment.md)；不要求安装Git |
 | 确定工作目录、保存位置或启动collect | [路径与账本路径核验](references/paths.md)，正式运行前必读 |
 | 启动、登录、配置、调用模板 | [启动与使用](references/start-and-use.md) |
-| 确定任一命令的参数、前置条件、副作用 | 运行 `boss commands --json`（唯一权威用法源）；或 `boss help` 读可读版 |
+| 确定任一命令的参数、前置条件、副作用 | 运行 `boss commands <命令名> --json`，启动命令读取 `usage`，正式任务读取 `formalUsage`。完整目录用 `boss commands --json`。参数错误时按回执中的查询指令查用法。 |
 | 简历收集（未读、时间窗口、指定名单、按岗位筛选等任何起始范围） | [收集 SOP](references/collect-sop.md)；起始快照来源可由使用者指定范围替代，但账本、身份核验、逐人核验、意图先落盘与 stop 合并对所有收集轮次通用 |
 | 按 spec 目录逐岗自动收集所有简历 | [多岗位收集编排](references/multi-job-collection.md) |
 | 沟通页读取／切换岗位 | [岗位切换边界](references/switch-job.md)，公开 switch-job 与状态核验 |

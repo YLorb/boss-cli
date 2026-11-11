@@ -17,7 +17,7 @@ function sandbox(){
 /** panels: 每项描述一个 .resume-middle-wrap；layer 对应它所属的 .dialog-wrap 类名。 */
 function fixture({panels=[{frames:[{src:'/web/frame/c-resume/x',tag:'only'}],layer:'active'}],
   content='ready',wrongParent=false,failure=null}={}){
-  let queries=0,disposed=0;
+  let queries=0,disposed=0,attachments=0;
   const ctx=sandbox();
   const make=({width=100,height=100,src=null,tag=null,children=[],layer=null}={})=>{
     const node=new ctx.HTMLElement();
@@ -42,7 +42,8 @@ function fixture({panels=[{frames:[{src:'/web/frame/c-resume/x',tag:'only'}],lay
     const dispose=async()=>{disposed++;};
     return {dispose,asElement:()=>node?{dispose,contentFrame:async()=>{
       if(failure)throw failure;
-      return content==='null'?null:{detached:content==='detached',tag:node.__tag,parentFrame:()=>wrongParent?{}:host};
+      attachments++;
+      return content==='null'||(content==='late'&&attachments===1)?null:{detached:content==='detached',tag:node.__tag,parentFrame:()=>wrongParent?{}:host};
     }}:null};
   }};
   return {host,counts:()=>({queries,disposed})};
@@ -66,15 +67,13 @@ for(const options of [
   assert.deepEqual(f.counts(),{queries:1,disposed:1});
 });
 
-// 关键回归：叠层残留会让两个面板同时挂着简历且几何一致，只能靠 dialog-wrap 的层级状态取舍。
-test('stacked duplicate resumes resolve to the active layer instead of failing',async()=>{
+test('different dialog classes cannot resolve two live resumes',async()=>{
   const f=fixture({panels:[
     {frames:[{src:'/web/frame/c-resume/x',tag:'stale'}],layer:'dialog-wrap deactive'},
     {frames:[{src:'/web/frame/c-resume/x',tag:'current'}],layer:'dialog-wrap active'},
   ]});
-  const frame=await directResumeFrame(f.host);
-  assert.equal(frame.tag,'current');
-  assert.deepEqual(f.counts(),{queries:1,disposed:1});
+  await assert.rejects(directResumeFrame(f.host),/不唯一/);
+  assert.deepEqual(f.counts(),{queries:1,disposed:0});
 });
 
 test('two live resumes both in active layers is ambiguous and stops',async()=>{
@@ -95,11 +94,10 @@ test('two live resumes without any dialog layer are ambiguous and stop',async()=
   assert.equal(f.counts().queries,1);
 });
 
-test('several live iframes inside one panel fall back to the last one',async()=>{
+test('several live iframes inside one panel are ambiguous',async()=>{
   const f=fixture({panels:[{frames:[{src:'/web/frame/c-resume/x',tag:'first'},{src:'/web/frame/c-resume/x',tag:'last'}],layer:'active'}]});
-  const frame=await directResumeFrame(f.host);
-  assert.equal(frame.tag,'last');
-  assert.deepEqual(f.counts(),{queries:1,disposed:1});
+  await assert.rejects(directResumeFrame(f.host),/不唯一/);
+  assert.equal(f.counts().queries,1);
 });
 
 for(const content of ['null','detached']){
@@ -121,3 +119,10 @@ for(const message of ['frame got detached','Execution context was destroyed']){
     assert.deepEqual(f.counts(),{queries:1,disposed:1});
   });
 }
+
+test('late attachment of the same element waits without looking up a different panel', async () => {
+  const f = fixture({ content: 'late' });
+  const result = await directResumeFrame(f.host, 500);
+  assert.equal(result.tag, 'only');
+  assert.deepEqual(f.counts(), { queries: 1, disposed: 1 });
+});

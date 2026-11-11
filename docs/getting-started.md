@@ -25,7 +25,7 @@
 
 代码位置：`https://github.com/YLorb/boss-cli`（**你可以从这里的 dev 分支获取到最新的版本或者补丁版本**）
 
-当前版本：CLI `0.6.20-dev.2`，配套 Skill `1.0.29`
+当前版本：CLI `0.6.20-dev.9`，配套 Skill `1.0.32`
 
 ---
 
@@ -114,7 +114,7 @@ boss-cli/
 
 | 命令 | 作用 |
 |---|---|
-| `boss version-check --json` | 启动前版本校验（强制） |
+| `boss preflight --json` | 正式任务只读预检，含版本、配置、登录与页面 |
 | `boss task-check / task-init` | 写任务配置、初始化本轮 |
 | `boss phase-status --json` | 读取当前阶段状态 |
 | `boss collect / recommend / search` | 三种寻访入口 |
@@ -137,11 +137,11 @@ boss-cli/
 export BOSS_BROWSER_REMOTE_DEBUGGING_PORT=53470
 export BOSS_SKILL_DIR=/path/to/skills/boss-recruitment
 
-# 1. 启动前版本校验（每次必做）
-node dist/cli/index.js version-check --json
+# 1. 核验本轮任务配置与已有 Chrome
+export BOSS_TASK_CONFIG=/path/to/task.json
+node dist/cli/index.js preflight --json
 
-# 2. 初始化本轮任务
-node dist/cli/index.js task-check --json
+# 2. 仅在预检返回 passed 后初始化本轮任务
 node dist/cli/index.js task-init --json
 
 # 3. 搜索：设城市 + 岗位 + 关键词，提交

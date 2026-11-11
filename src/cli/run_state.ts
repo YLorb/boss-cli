@@ -69,7 +69,6 @@ async function carryOverObservation(job: string): Promise<CarriedObservation> {
 export async function initRun(at = new Date(), options: { keepObserved?: boolean } = {}): Promise<RunState> {
   const { task, permit, permitFile } = await checkTaskConfig();
   const taskFile = taskConfigPath()!;
-  if (!isAbsolute(taskFile)) throw new Error('BOSS_TASK_CONFIG 必须是绝对路径。');
   const compat = await checkSkillCompatibility();
   if (!compat.compatible || !compat.actual.skillVersion || !compat.actual.compatibilityId) throw new Error(`版本不匹配，无法初始化运行实例：${JSON.stringify(compat.actual)}`);
   const runId = generateRunId(task.job, at);

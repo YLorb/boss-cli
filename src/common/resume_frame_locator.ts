@@ -1,4 +1,5 @@
 import type { ElementHandle, Frame } from 'puppeteer-core';
+import { sleepRandom } from '../browser/timing.js';
 import { VISIBLE_BOX_FN, LIVE_RESUME_FRAME_FN } from './resume_dom_predicates.js';
 
 export class ResumeFrameOpenError extends Error {}
@@ -34,34 +35,35 @@ export async function directResumeHandle(host: Frame): Promise<ElementHandle<Ele
     if(!panels.length)return null;
     // 只有「面板里真的挂着可见简历 iframe」才算候选：失败残留下来的空面板不能参与判定，
     // 否则一次打开失败就会让后续每一次 preview 都误报「面板不唯一」。
-    const live=[];
-    for(const panel of panels){
-      const frames=[...panel.querySelectorAll('iframe[src*="c-resume"]')].filter(isResumeFrame);
-      if(frames.length)live.push({panel,frame:frames[frames.length-1]});
-    }
-    if(!live.length)return null;
-    if(live.length>1){
-      // 叠层时只有最上层弹窗是 active，其余是历史失败留下的 deactive 层；
-      // 两者的几何完全一致，只能靠所属 .dialog-wrap 的层级状态区分。
-      const active=live.filter(x=>{
-        const layer=x.panel.closest('.dialog-wrap');
-        return layer&&layer.classList.contains('active')&&!layer.classList.contains('deactive');
-      });
-      if(active.length===1)return active[0].frame;
-      throw Error('在线简历面板不唯一（同时存在 '+live.length+' 份可见简历），停止操作以免截错人');
-    }
-    return live[0].frame;  })()`);
+    const live=panels.flatMap(panel=>[...panel.querySelectorAll('iframe[src*="c-resume"]')].filter(isResumeFrame));
+    if(live.length>1)throw Error('在线简历面板或 iframe 不唯一（可见简历 '+live.length+' 份）');
+    return live[0] ?? null;  })()`);
   const element=handle.asElement() as ElementHandle<Element> | null;
   if(!element){await handle.dispose();await traceDiag(host);}
   return element;
 }
 
-export async function directResumeFrame(host: Frame): Promise<Frame | null> {
+/** Wait for the content frame of the same element without reopening or selecting a different iframe. */
+export async function waitForFrameAttachment(handle: ElementHandle<Element>, deadline: number): Promise<Frame | null> {
+  let frame = await handle.contentFrame();
+  while (!frame) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) return null;
+    const waitMs = Math.min(100, remaining);
+    await sleepRandom(waitMs, waitMs);
+    frame = await handle.contentFrame();
+  }
+  return frame;
+}
+
+export async function directResumeFrame(host: Frame, timeoutMs = 0): Promise<Frame | null> {
   const handle=await directResumeHandle(host);
   if(!handle)return null;
   try {
-    const frame=await handle.contentFrame();
-    if(!frame || frame.detached)throw new ResumeFrameOpenError('目标简历Frame尚未就绪或已失效');
+    const started = Date.now();
+    const frame = await waitForFrameAttachment(handle, started + timeoutMs);
+    if (!frame) throw new ResumeFrameOpenError(`目标简历Frame尚未挂接：frame=c-resume stage=attachment elapsedMs=${Date.now() - started}`);
+    if (frame.detached) throw new ResumeFrameOpenError('目标简历Frame已失效');
     if(frame.parentFrame()!==host)throw Error('目标简历Frame不属于已核验宿主');
     return frame;
   } catch(error) {

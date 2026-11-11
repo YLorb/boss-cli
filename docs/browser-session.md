@@ -1,5 +1,7 @@
 # 浏览器连接与会话管理
 
+WorkBuddy 启动入口为 `boss browser-session --json`。就绪后该后台任务不持有 CDP 连接，使用同一调试端点的 HTTP 存活回执跟踪 Chrome。Windows 本机可运行 `node scripts/test-browser-session-lifecycle.mjs`，使用独立端口和目录观察断开 CDP 后至少 120 秒。
+
 ## 架构概览
 
 ```
@@ -14,33 +16,11 @@ src/common/
 
 ## 连接流程
 
-### 1. connectBrowser() — `src/browser/cdp_browser.ts`
+### 1. 启动与连接
 
-```
-connectBrowser()
-  │
-  ├── 第1步：HTTP 探测固定调试端口（800ms 超时）
-  │    └── GET http://127.0.0.1:53470/json/version
-  │         200 → puppeteer.connect(webSocketDebuggerUrl)        ← 复用已有 Chrome
-  │         非 200 / 不通 → 继续第2步
-  │
-  ├── 第2步：spawn 新 Chrome 进程
-  │    ├── 启动参数：
-  │    │   --remote-debugging-port=53470       ← 固定端口，跨命令复用
-  │    │   --disable-infobars
-  │    │   --js-flags=--noexpose_wasm          ← 默认禁 WebAssembly
-  │    │   --user-data-dir=~/.boss-cli/.cache/browser-data
-  │    ├── 等 stdout 出现 "DevTools listening on ws://..."
-  │    └── puppeteer.connect(wsUrl)
-  │
-  └── 返回 Browser 句柄
-```
-
-**关键设计**：
-- `spawn` + `connect` 而非 `puppeteer.launch()`，避免 Node 退出时浏览器被 kill
-- `proc.unref()` 让 Node 进程不因 Chrome 子进程存活而阻塞退出
-- 端口 53470 是 boss-cli 独立 user-data-dir 上的稳定占用，可用 `BOSS_BROWSER_REMOTE_DEBUGGING_PORT` 覆盖；不再依赖 `DevToolsActivePort` 这种二级状态文件
-- 第2步若进程在拿到 stdout 之前就以代码 0 退出，说明 user-data-dir 被另一只「无远程调试端口」的 Chrome 占用，单例锁触发 spawn 把命令行交还给它后立即退出 —— 此时直接抛错，不再做兜底
+- 在支持跨轮次存活的宿主运行公开命令 `boss browser-session --json`。端口明确未监听时启动 Chrome，已有会话通过专用配置目录回执核验。收到 `ready` 后保持该宿主任务运行。
+- automation 每轮调用 `preflight --json`，再由业务命令连接同一端口。端点不可用时报告失败，启动职责归常驻任务。
+- Chrome 的生命周期取决于启动它的宿主。多层子进程、`detached` 和 `unref()` 无法保证 Chrome 跨宿主回收存活。若后台任务随每轮 automation 回收，应在用户独立桌面会话或宿主提供的持久服务里启动常驻任务。
 
 ### 2. ensureBrowserSession() — `src/browser/browser_session.ts`
 
@@ -56,7 +36,7 @@ ensureBrowserSession()
   │
   └── browserRef 断开
        └── establishSession()
-            ├── 关闭旧 browser 连接
+            ├── 断开旧 browser 连接
             ├── connectBrowser()
             ├── 等待首个 page target 就绪（不把 browser_ui 当作页面），再枚举现有标签
             ├── pickOrCreatePage(browser)
@@ -112,27 +92,13 @@ withBossSessionPage(callback)
 
 ## 跨命令复用
 
-```
-boss chat 张三
-  → 探测 127.0.0.1:53470/json/version → 不通
-  → spawn Chrome（--remote-debugging-port=53470）
-  → 等 stdout: DevTools listening on ws://127.0.0.1:53470/devtools/browser/<uuid>
-  → puppeteer.connect(wsUrl)
+常驻宿主启动一次 `browser-session --json` 并保留其任务 ID。首次登录使用 `login --json`。每轮 automation 通过 `preflight --json` 核验已存在的会话，后续业务命令共用同一端口和专用用户数据目录。业务命令结束时释放其连接，保留常驻任务。
 
-boss list
-  → 探测 127.0.0.1:53470/json/version → 200，拿到 webSocketDebuggerUrl
-  → puppeteer.connect(已有 Chrome)        ← 不 spawn 新进程
-  → pickOrCreatePage → 复用 zhipin 页面
-  → page.goto(chat/index) → 导航
+## Windows 桌面测试启动器
 
-boss chat 李四
-  → 同上，继续复用
-```
+在资源管理器双击仓库根目录的 [start-test-cdp.cmd](../start-test-cdp.cmd)。脚本使用本地构建和仓库配套 Skill，通过公开的 `browser-session --json` 启动可见 Chrome。测试端口为 `127.0.0.1:53471`，测试配置及运行目录位于 `output/test-cdp/`。启动器只启动浏览器会话，无页面导航步骤。
 
-同一 `userDataDir` 的所有命令共享：
-- 同一 Chrome 进程
-- 同一登录态（cookies/localStorage）
-- 同一 `--remote-debugging-port=53470`
+窗口输出 `ready` 后保持打开，后续 `alive` 回执用于观察测试 Chrome 是否持续存活。跨两次 automation 测试时，核对回执的 PID 和端口，并把测试轮次的 `BOSS_BROWSER_REMOTE_DEBUGGING_PORT` 设为 `53471`。结束时关闭测试 Chrome 窗口，常驻命令检测到端口退出后结束。
 
 ## 调试注意事项
 
@@ -142,7 +108,7 @@ boss chat 李四
 
 退出后的 22:16:49、22:16:57、22:17:15（北京时间）检查均显示监听 PID 22300，启动时间为 22:16:37，启动参数包含该独立目录和 `--remote-debugging-port=53471`，`/json/version` 返回同一个有效 CDP WebSocket 地址。Chrome 154.0.8037.98、Node 22.17.0、Windows；说明此环境下 CLI 退出后 Chrome/CDP 至少持续存活至最后一次检查，不保证所有启动环境的行为。
 
-本地证据保存在 `output/todo-chrome-lifecycle/{stdout.log,stderr.log,snapshots.json}`（忽略提交）。复现时使用未占用端口及独立目录，通过公开 login 命令启动，命令退出后以监听 PID、进程创建时间、参数和 `/json/version` 联合核验；仅有窗口不能证明 CDP 存活。实验观察结束后仅清理该独立测试进程。
+本地证据保存在 `output/todo-chrome-lifecycle/{stdout.log,stderr.log,snapshots.json}`（忽略提交）。复现时使用未占用端口及独立目录，通过公开 browser-session 命令启动，以监听 PID、进程创建时间、参数和 `/json/version` 联合核验；仅有窗口不能证明 CDP 存活。实验观察结束后仅清理该独立测试进程。
 
 Boss 主包中存在反 DevTools / 反篡改逻辑，可能通过 `console.log` / `console.table` 副作用、`console.clear()`、快捷键拦截、打印大对象耗时、原生对象完整性检查等方式判断 DevTools 是否打开。
 

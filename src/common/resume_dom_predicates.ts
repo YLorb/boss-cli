@@ -41,10 +41,11 @@ export const LIVE_RESUME_FRAME_FN = `(el) => {
   return src.indexOf('c-resume') >= 0;
 }`;
 
-/** 从当前文档中取“真正在展示”的那份在线简历 iframe；多次失败会叠加残留，取 DOM 最后一个。 */
+/** 从当前文档中取“真正在展示”的那份在线简历 iframe；可见简历不唯一时停止。 */
 export const LIVE_RESUME_FRAME_PICK = `(() => {
   const live = ${LIVE_RESUME_FRAME_FN};
   const all = Array.from(document.querySelectorAll('iframe[src*="c-resume"]'));
   const good = all.filter(live);
-  return good.length ? good[good.length - 1] : null;
+  if(good.length>1)throw Error('在线简历 iframe 不唯一：可见简历 '+good.length+' 份');
+  return good[0] ?? null;
 })()`;

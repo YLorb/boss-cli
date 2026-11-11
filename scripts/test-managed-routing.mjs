@@ -1,14 +1,15 @@
 import {test,mock} from 'node:test';
 import assert from 'node:assert/strict';
-import {join} from 'node:path';
+import {join,resolve} from 'node:path';
 import {writeFile} from 'node:fs/promises';
 import {fixture} from './testing/managed-fixture.mjs';
 const {initRun,getBoundRun}=await import('../dist/cli/run_state.js');
 const calls=[];
+const screenshot = resolve('screenshot.png');
 const names=['implChatAction','implChatSearch','implClearChatSearch','implLogin','implListCandidates','implListUnreadCandidates','implOpenChatByIndex','implListPositions','implListPositionsWithOptions','implNormalSearch','implSearchControl','implOpenChat','implOpenTargetChat','implAcceptTargetResume','implDownloadTargetResume','implRecommend','implPreview','implRecommendGreet','implSetBaiduCredentials','implBossSearch','implSendMessage'];
 mock.module('../dist/toolset/index.js',{namedExports:Object.fromEntries(names.map(name=>[name,async options=>{
  calls.push({name,options});
- if(name==='implPreview')return JSON.stringify({path:'screenshot.png',candidateId:options.candidateId});
+ if(name==='implPreview')return JSON.stringify({path:screenshot,candidateId:options.candidateId});
  if(name==='implRecommendGreet')return JSON.stringify({status:'contact-confirmed',candidateId:options.candidateId});
  if(name==='implSendMessage')return JSON.stringify({status:'message-visible',text:options.text});
  throw Error('UNSUPPORTED_OFFLINE_TOOL:'+name);
@@ -29,7 +30,7 @@ test('router rejects unknown identity before mocked tool',async()=>{
 test('router requires OCR then decision then contact before sending',async()=>{
  await setup();await executeCommand(['check','--job','测试岗位','--json']);await executeCommand(preview);
  await assert.rejects(()=>executeCommand(['decide','--candidate-id','id-1','--verdict','fit','--json']),/材料/);
- await executeCommand(['ocr','screenshot.png','--json']);await executeCommand(['decide','--candidate-id','id-1','--verdict','fit','--json']);
+ await executeCommand(['ocr',screenshot,'--json']);await executeCommand(['decide','--candidate-id','id-1','--verdict','fit','--json']);
  await executeCommand(['greet','模拟甲','--candidate-id','id-1','--json']);
  await executeCommand(['send','--name','模拟甲','--data-id','id-1','--text','已收到简历。','--json']);
  assert.equal(calls.filter(x=>x.name==='implSendMessage').length,1);
@@ -58,8 +59,8 @@ test('relative, missing and different-job spec references are rejected',async()=
 test('duplicate option values and literal --check cannot bypass message authorization',async()=>{
  await setup({job:'解析岗位',scope:'collect',mode:'collect-only'});await executeCommand(['check','--job','解析岗位','--json']);
  const base=['send','--name','模拟甲','--data-id','id-1'];
- await assert.rejects(()=>executeCommand([...base,'--text','已收到简历。','--text','未经授权正文','--json']),/话术不一致/);
- await assert.rejects(()=>executeCommand([...base,'--text','未经授权正文','--json','--','--check']),/话术不一致/);
- await assert.rejects(()=>executeCommand([...base,'--data-id','other','--text','已收到简历。','--json']),/冻结范围/);
+ await assert.rejects(()=>executeCommand([...base,'--text','已收到简历。','--text','未经授权正文','--json']),/不可重复/);
+ await assert.rejects(()=>executeCommand([...base,'--text','未经授权正文','--json','--','--check']),/不支持参数/);
+ await assert.rejects(()=>executeCommand([...base,'--data-id','other','--text','已收到简历。','--json']),/不可重复/);
  assert.equal(calls.filter(x=>x.name==='implSendMessage').length,0);
 });
