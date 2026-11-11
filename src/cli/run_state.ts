@@ -9,6 +9,8 @@ export type RunState = {
   schemaVersion: 2; runId: string; createdAt: string; taskFile: string; taskHash: string; task: TaskConfig;
   job: string; scope: TaskConfig['scope']; permit: string; permitHash: string; flowState: string; phaseState: string | null; ledgerDir: string;
   cliVersion: string; skillVersion: string; skillDir: string; compatibilityId: string; stop: TaskConfig['stop'];
+  /** cliVersion 就地续绑的审计轨迹；只记录构建号变化，不覆盖身份字段。 */
+  versionHistory?: Array<{ at: string; from: string; to: string }>;
 };
 export const CURRENT_RUN_FILE = join(RUNS_DIR, 'current.json');
 const RUN_ID = /^[a-f0-9]{12}-\d{8}-\d{6}$/;
@@ -41,17 +43,41 @@ function applyBindings(run: RunState): void {
   for (const [key, value] of Object.entries(bindings(run))) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
   boundRun = run;
 }
-export async function initRun(at = new Date()): Promise<RunState> {
+/** 上一轮同岗位运行里已观察过的简历（id + 本地材料），用于 task-init --keep-observed 续用。 */
+type CarriedObservation = { observed: string[]; material: Record<string, { image?: string; textPath?: string }> };
+const EMPTY_CARRIED: CarriedObservation = Object.freeze({ observed: [], material: {} }) as CarriedObservation;
+
+async function carryOverObservation(job: string): Promise<CarriedObservation> {
+  try {
+    const previousId = JSON.parse(await readFile(CURRENT_RUN_FILE, 'utf8')).runId;
+    if (typeof previousId !== 'string' || !RUN_ID.test(previousId)) return EMPTY_CARRIED;
+    const previous = await jsonFile(runStateFile(previousId)) as RunState;
+    if (previous.job !== job || !previous.phaseState) return EMPTY_CARRIED;
+    const phase = await jsonFile(previous.phaseState) as { observed?: unknown; material?: unknown };
+    const observed = Array.isArray(phase.observed) ? phase.observed.filter((x): x is string => typeof x === 'string' && !!x) : [];
+    const raw = phase.material && typeof phase.material === 'object' && !Array.isArray(phase.material) ? phase.material as Record<string, { image?: string; textPath?: string }> : {};
+    const material: Record<string, { image?: string; textPath?: string }> = {};
+    for (const id of observed) if (raw[id] && typeof raw[id] === 'object') material[id] = { ...raw[id] };
+    console.error(`--keep-observed：从 ${previousId} 续用 ${observed.length} 条已观察记录（材料 ${Object.keys(material).length} 条）`);
+    return { observed, material };
+  } catch (error) {
+    console.error(`--keep-observed：上一轮状态不可用，按空起重来（${String(error)}）`);
+    return EMPTY_CARRIED;
+  }
+}
+
+export async function initRun(at = new Date(), options: { keepObserved?: boolean } = {}): Promise<RunState> {
   const { task, permit, permitFile } = await checkTaskConfig();
   const taskFile = taskConfigPath()!;
   if (!isAbsolute(taskFile)) throw new Error('BOSS_TASK_CONFIG 必须是绝对路径。');
   const compat = await checkSkillCompatibility();
   if (!compat.compatible || !compat.actual.skillVersion || !compat.actual.compatibilityId) throw new Error(`版本不匹配，无法初始化运行实例：${JSON.stringify(compat.actual)}`);
   const runId = generateRunId(task.job, at);
+  const carried = options.keepObserved ? await carryOverObservation(task.job) : EMPTY_CARRIED;
   const run: RunState = { schemaVersion: 2, runId, createdAt: at.toISOString(), taskFile, taskHash: digest(task), task, job: task.job, scope: task.scope, permit: permitFile, permitHash: digest(permit), flowState: defaultFlowStateFile(runId), phaseState: join(RUNS_DIR, `${runId}.phase.json`), ledgerDir: task.ledgerDir ?? join(APP_HOME, 'ledgers'), cliVersion: compat.actual.cliVersion, skillVersion: compat.actual.skillVersion, skillDir: compat.skillDir, compatibilityId: compat.actual.compatibilityId, stop: task.stop };
   await mkdir(RUNS_DIR, { recursive: true });
   try { await atomicJson(runStateFile(runId), run, true); } catch (error) { throw new Error(`运行实例创建失败（同岗位同秒不可重复）：${runId}；${String(error)}`); }
-  await atomicJson(run.phaseState!, { version: 2, phase: task.phases?.[0].name ?? 'task', at: at.toISOString(), runId, jobVerified: false, targets: task.targets ?? [], frozen: task.targets !== undefined, current: null, material: {}, decisions: {}, downloaded: [], downloads:{}, sent: [], contacts: [], observed: [], pending: null, safeRetries: {}, successes: 0, failures: 0, paused: null });
+  await atomicJson(run.phaseState!, { version: 2, phase: task.phases?.[0].name ?? 'task', at: at.toISOString(), runId, jobVerified: false, targets: task.targets ?? [], frozen: task.targets !== undefined, current: null, material: carried.material, decisions: {}, downloaded: [], downloads:{}, sent: [], contacts: [], observed: carried.observed, pending: null, safeRetries: {}, successes: 0, failures: 0, paused: null });
   await atomicJson(CURRENT_RUN_FILE, { runId, at: at.toISOString() });
   applyBindings(run);
   return run;
@@ -73,7 +99,24 @@ export async function activateRunBindings(): Promise<RunState | null> {
   if (run.flowState !== defaultFlowStateFile(id) || run.phaseState !== join(RUNS_DIR, `${id}.phase.json`) || run.ledgerDir !== (task.ledgerDir ?? join(APP_HOME, 'ledgers')) || generateRunId(task.job, new Date(run.createdAt)) !== id) throw new Error(`运行记录路径/身份错绑：${id}`);
   if (digest(await jsonFile(run.permit)) !== run.permitHash) throw new Error(`permit 已改变：${run.permit}；请明确重新 task-init。`);
   const compat = await checkSkillCompatibility();
-  if (!compat.compatible || compat.skillDir !== run.skillDir || compat.actual.cliVersion !== run.cliVersion || compat.actual.skillVersion !== run.skillVersion || compat.actual.compatibilityId !== run.compatibilityId) throw new Error(`运行版本绑定不匹配：${id}`);
+  if (!compat.compatible) throw new Error(`运行版本绑定不匹配：${id}；Skill/CLI 自检未通过（${JSON.stringify(compat.actual)}）`);
+  // 身份字段（Skill 目录 / Skill 版本 / 兼容协议）不一致 = 换了契约或换了安装位置，必须重新 task-init。
+  const identityDrift: string[] = [];
+  if (compat.skillDir !== run.skillDir) identityDrift.push(`skillDir 记录=${run.skillDir} 实际=${compat.skillDir}`);
+  if (compat.actual.skillVersion !== run.skillVersion) identityDrift.push(`skillVersion 记录=${run.skillVersion} 实际=${compat.actual.skillVersion}`);
+  if (compat.actual.compatibilityId !== run.compatibilityId) identityDrift.push(`compatibilityId 记录=${run.compatibilityId} 实际=${compat.actual.compatibilityId}`);
+  if (identityDrift.length > 0) throw new Error(`运行版本绑定不匹配：${id}；${identityDrift.join('，')}；请明确重新 task-init。`);
+  // 构建号（cliVersion）只是元数据：开发后缀每次 +1 不该作废整轮观察/材料。默认就地续绑并留审计轨迹，
+  // 需要严格语义时设 BOSS_STRICT_VERSION_BIND=1 恢复旧行为。
+  if (compat.actual.cliVersion !== run.cliVersion) {
+    if (process.env.BOSS_STRICT_VERSION_BIND === '1') throw new Error(`运行版本绑定不匹配：${id}；cliVersion 记录=${run.cliVersion} 实际=${compat.actual.cliVersion}（BOSS_STRICT_VERSION_BIND=1 严格模式）`);
+    const history = Array.isArray(run.versionHistory) ? run.versionHistory : [];
+    history.push({ at: new Date().toISOString(), from: run.cliVersion, to: compat.actual.cliVersion });
+    run.cliVersion = compat.actual.cliVersion;
+    run.versionHistory = history;
+    await atomicJson(runStateFile(id), run);
+    console.error(`警告：CLI 版本漂移，已将运行 ${id} 就地续绑到 ${compat.actual.cliVersion}（观察/材料/未决保留）；严格模式设 BOSS_STRICT_VERSION_BIND=1`);
+  }
   for (const [key, expected] of Object.entries(bindings(run))) {
     const actual=process.env[key]?.trim();
     const normalize=(s:string)=>process.platform==='win32'?resolve(s).toLowerCase():resolve(s);

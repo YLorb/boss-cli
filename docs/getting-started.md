@@ -25,7 +25,7 @@
 
 代码位置：`https://github.com/YLorb/boss-cli`（**你可以从这里的 dev 分支获取到最新的版本或者补丁版本**）
 
-当前版本：CLI `0.6.20-dev.1`，配套 Skill `1.0.29`
+当前版本：CLI `0.6.20-dev.2`，配套 Skill `1.0.29`
 
 ---
 

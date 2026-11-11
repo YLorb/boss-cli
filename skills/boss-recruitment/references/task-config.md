@@ -39,6 +39,10 @@ scope: "task-config"
 
 指针损坏、指向丢失记录、任务/permit 改变、Skill错配一律停止。只有从未初始化且没有当前指针时保留手工命令模式。旧 schemaVersion=1 不自动迁移，明确重新初始化；保留历史账本与证据。
 
+**`--keep-observed`（可选）**：只续用「上一轮同岗位运行」的 `observed`（已开过的简历 id）与 `material`（对应的截图/OCR 文本路径），其余字段仍从零开始。它不续用 `decisions`/`contacts`/`sent`/`downloaded`——评估结论、触达与下载回执必须按新任务重新取得，防重放仍由 flow journal 与岗位账本负责。上一轮状态不可读时降级为空起重来并打印原因，不阻断初始化。用途：改任务配置或重建运行时，不必把同一个人的简历再读一遍。
+
+**版本漂移**：`cliVersion` 只作构建号，与已绑定运行不一致时默认**就地续绑**（写回运行记录并追加 `versionHistory` 审计项），观察/材料/未决全部保留；`skillDir`、`skillVersion`、`compatibilityId` 属契约身份，任一不一致仍必须重新 `task-init`。需要旧语义的严格校验时设 `BOSS_STRICT_VERSION_BIND=1`。
+
 所有正式业务命令使用 --json。BOSS_APP_HOME/BOSS_RUNS_DIR 是显式数据/测试隔离目录，必须使用固定绝对路径；不要在正常轮次间切换账户数据目录。
 
 正式 collect 必须与绑定的 job、mode、ledgerDir 一致；stdin也受相同前置条件约束。联系/消息回执按岗位持久保存，未知结果不能因新建 run 而重放。

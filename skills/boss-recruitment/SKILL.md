@@ -5,9 +5,9 @@ metadata:
   version: "1.0.29"
   updated: "2026-11-10"
   language: "zh-CN"
-  cli-version: "0.6.20-dev.1"
+  cli-version: "0.6.20-dev.2"
   cli-compatibility: "2026-10-30-recommend-chat-v1"
-  cli-baseline: "0.6.20-dev.1-working-tree"
+  cli-baseline: "0.6.20-dev.2-working-tree"
 ---
 
 # BOSS 招聘流程
@@ -22,7 +22,7 @@ metadata:
 
 ## 启动前版本校验（强制）
 
-每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.20-dev.1 与 Skill 1.0.29 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
+每轮启动前，将 `BOSS_SKILL_DIR` 设置为本次实际加载的 Skill 绝对目录，先运行 `boss version-check --json`。CLI 0.6.20-dev.2 与 Skill 1.0.29 使用独立版本号，按声明的配套关系校验，不要求两个数字相等。不匹配时必须展示实际版本、期望版本和路径，停止并等待用户明确确认；历史业务授权、自动执行或不反复确认的要求不能代替本次版本确认。确认后仅本轮可在业务命令中附带返回的 `--confirm-version-mismatch <confirmationToken>`，不得自动附带、持久化到配置或通过修改版本字段消除告警。文件或版本改变后必须重新校验和确认。无法读取 Skill 时直接停止，不切换为内置 Skill。具体见[启动与使用](references/start-and-use.md)。
 
 ## SOP 执行约束（必读）
 

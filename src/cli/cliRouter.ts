@@ -1054,9 +1054,11 @@ async function executeManagedCommand(argv: string[]): Promise<string> {
     return JSON.stringify({ ok: true, ...report });
   }
   if (argv[0] === 'task-init') {
-    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss task-init [--json]');
+    const rest = argv.slice(1);
+    const keepObserved = rest.filter(arg => arg === '--keep-observed').length;
+    if (keepObserved > 1 || rest.some(arg => arg !== '--json' && arg !== '--keep-observed')) die('用法: boss task-init [--json] [--keep-observed]；--keep-observed 续用上一轮同岗位已观察的简历与本地材料');
     await requireSkillCompatibility();
-    return JSON.stringify({ ok: true, ...await initRun() });
+    return JSON.stringify({ ok: true, ...await initRun(undefined, { keepObserved: keepObserved === 1 }) });
   }
   await activateRunBindings();
   if (argv[0] !== 'update') {

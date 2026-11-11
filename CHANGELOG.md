@@ -1,5 +1,14 @@
 # 功能变化日志
 
+## 2026-11-11 · feat(cli): 版本漂移就地续绑 + task-init --keep-observed（0.6.20-dev.2 / Skill 1.0.29）
+
+- 现象：只要构建号变化（哪怕只改文档、`dev.0 → dev.1`），所有既有运行立刻报「运行版本绑定不匹配」，`status`/`--check-login` 一律不可用；唯一出路是 `task-init`，而它会清空 `observed` 与 `material`，同一份简历被迫重读（昨天陆** 开了 3 次、黄** 开了 2 次）。
+- 根因：`activateRunBindings` 把 `cliVersion` 与 `skillDir`/`skillVersion`/`compatibilityId` 放在同一个硬失败条件里，构建元数据被当成契约身份。
+- 修法（`run_state`）：拆成两类。`skillDir`、`skillVersion`、`compatibilityId` 不一致仍视为换了契约，直接报错并要求 `task-init`；`cliVersion` 不一致默认**就地续绑**——写回运行记录、追加 `versionHistory` 审计项、保留观察/材料/未决，并在 stderr 打印一次警告。设 `BOSS_STRICT_VERSION_BIND=1` 可恢复旧的严格语义。
+- 修法（`task-init`）：新增 `--keep-observed`。只从「上一轮同岗位运行」续用 `observed` + `material`，不续用 `decisions`/`contacts`/`sent`/`downloaded`——评估结论、触达、下载回执仍须新任务重新取得，防重放继续由 flow journal 与岗位账本负责。上一轮状态不可读时降级为空起并打印原因，不阻断初始化。
+- 使用者可见变化：改任务配置、升构建号后不必再为同一份简历付第二次阅读成本；需要阅后即弃的干净轮次时，不加 `--keep-observed` 即可。
+- 回归：`test-phase-state` 16/16、`test-flow-lock` 21/21、`test-check-dom` 1/1。
+
 ## 2026-11-10 · fix(cli): 「使用成功」弹层识别 + greet 未决核验通道（0.6.20-dev.1 / Skill 1.0.29）
 
 - 现象：点完沟通按钮后平台弹出「使用成功，已为您发起沟通」层，按钮被遮挡、5 秒等待超时，`greet` 被判 `needs-verify`（`matches=0`）；随后 `phase.pending` 锁死整轮，除 `flow-pause/flow-resume` 外全部命令报「动作结果未决」。
