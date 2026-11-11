@@ -92,7 +92,7 @@ boss-cli/
 ├── skills/boss-recruitment/   # Skill（Agent 操作规范 + 命令手册）
 │   ├── AGENTS.md              # Agent 每轮强制先读的上下文/执行边界
 │   ├── SKILL.md               # Skill 入口（版本校验、SOP 约束）
-│   └── references/            # 分主题手册：collect-sop / search-sop / cli-reference / install ...
+│   └── references/            # 分主题手册：collect-sop / search-sop / install ...
 ├── scripts/        # 测试脚本（test-*.mjs）
 ├── docs/           # 项目文档（问题排查、URL 对照、开发日志等）
 ├── dist/           # 编译产物（tsc 输出）
@@ -124,7 +124,7 @@ boss-cli/
 | `boss greet / chat / send` | 打招呼、开会话、发消息 |
 | `boss flow-resume / flow-status` | 解除暂停、看流程锁 |
 
-完整命令与页面 URL 对照见 `skills/boss-recruitment/references/cli-reference.md` 和 `docs/boss-url-map.md`。
+完整命令与页面 URL 对照见 `boss commands --json` 和 `docs/boss-url-map.md`。
 
 ---
 
@@ -232,7 +232,7 @@ node dist/cli/index.js chat --embedded --close --candidate-id "89fc..." --json
 | 想了解什么 | 看哪份 |
 |---|---|
 | 启动与版本校验细节 | `skills/boss-recruitment/references/start-and-use.md` |
-| 各命令完整用法 | `skills/boss-recruitment/references/invocation-guide.md` + `cli-reference.md` |
+| 各命令完整用法 | `boss commands --json`（唯一权威用法源） |
 | 收集 / 推荐 / 搜索 SOP | `references/collect-sop.md` / `recommend-sop.md` / `search-sop.md` |
 | 安装细节 | `references/install.md` |
 | 环境准备 | `references/environment.md` |

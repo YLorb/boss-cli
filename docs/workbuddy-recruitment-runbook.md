@@ -2,7 +2,7 @@
 
 WorkBuddy 自动收集的完整执行指南见 [WorkBuddy 操作 boss-cli 自动收集简历指南](workbuddy-auto-resume-guide.md)，包含本机路径、模式选择、OCR 一次分析、计时、账本及可复制启动提示词。以下历史行为摘要保留日期，当前使用以指南和实际 Skill 为准。
 
-当前公开调用统一见[逐项调用手册](../skills/boss-recruitment/references/invocation-guide.md)：包含登录、状态检查、岗位切换、列表、昵称定位、消息、附件、推荐／搜索／深度搜索、预览、联系、内嵌会话及账本的参数、前置条件、结果和停止规则。
+当前公开调用统一见 `boss commands --json`（唯一权威用法源）：包含登录、状态检查、岗位切换、列表、昵称定位、消息、附件、推荐／搜索／深度搜索、预览、联系、内嵌会话及账本的参数、前置条件、结果和停止规则。
 
 执行对应业务前，从[boss-recruitment Skill](../skills/boss-recruitment/SKILL.md)按任务读取SOP。页面要求以[URL与命令规范](boss-url-map.md)为准；账本协议见[账本与恢复](../skills/boss-recruitment/references/ledger-and-recovery.md)。
 

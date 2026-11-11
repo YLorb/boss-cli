@@ -93,7 +93,7 @@ SOP 是固定执行顺序和验收条件。WorkBuddy 每轮读取实际 Skill �
 | ledger-and-recovery.md | 正式账本与恢复 | 路径核验 → started → 操作与回执 → stop → 落盘确认 |
 | non-contact-continuation.md | 明确允许单人出错后继续 | 记录错误 → 判断是否局部 → 核验列表和下一人 → 跳过失败对象 |
 
-共同读取 tool-boundary.md、check-status.md 和 common-rules.md。具体调用参数查 invocation-guide.md；路径和页面限制查 paths.md 与 docs/boss-url-map.md。
+共同读取 tool-boundary.md、check-status.md 和 common-rules.md。具体调用参数查 `boss commands --json`；路径和页面限制查 paths.md 与 docs/boss-url-map.md。
 
 ### 推荐或搜索的标准循环
 
@@ -365,4 +365,4 @@ run-001/
 
 定时运行应在人工监督的小批量试运行通过后设置。固定 JD、入口、人数、允许动作和记录目录，并确认 WorkBuddy 不会重叠运行任务。同一 BOSS 浏览器只允许一个业务操作者，HR 人工操作也应错开。安装 Skill 或保存提示词不会自动创建定时任务。
 
-本指南之外，准确参数和页面条件以交付包的公开 help、Skill 的 invocation-guide.md 和 docs/boss-url-map.md 为准；旧聊天或历史日志不能覆盖当前明确规则。
+本指南之外，准确参数和页面条件以交付包的公开 `boss commands --json`、`boss help` 和 docs/boss-url-map.md 为准；旧聊天或历史日志不能覆盖当前明确规则。

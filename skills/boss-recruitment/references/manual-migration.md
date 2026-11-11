@@ -12,7 +12,7 @@ scope: "provenance-and-limitations"
 | 旧手册内容 | 本包位置或处理 |
 | --- | --- |
 | 登录、环境、启动 | install、start-and-use |
-| 指令和页面要求 | cli-reference |
+| 指令和页面要求 | `boss commands --json`（唯一权威用法源） |
 | 收集、推荐、搜索 | 三份独立SOP |
 | 账本七字段、回执和恢复 | ledger-and-recovery |
 | 消息1／2／3 | messages.example.json，必须按使用者确认内容执行 |

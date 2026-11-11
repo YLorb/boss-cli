@@ -23,7 +23,7 @@ CLI 0.6.11 配套 Skill 1.0.20，兼容标识为 `2026-10-30-resume-analysis-v1`
 
 使用下文的 `v0.6.11` 标签源码，安装依赖并构建；源码归档不包含 dist 或 node_modules。构建后运行 `node .\dist\cli\index.js version-check --json`，确认 `compatible=true`。全局 `boss` 若链接到此源码目录，重新构建后即使用新版本；其他安装须单独核验。
 
-完整 Skill 位于源码的 `skills/boss-recruitment/`，包括操作前必读的 `AGENTS.md`。不要沿用旧版独立 Skill。端口配置、各命令参数及前置条件见[逐项调用手册](invocation-guide.md)。下节旧版快照仅供历史复现。
+完整 Skill 位于源码的 `skills/boss-recruitment/`，包括操作前必读的 `AGENTS.md`。不要沿用旧版独立 Skill。端口配置、各命令参数及前置条件见 `boss commands --json`（或 `boss help`）。下节旧版快照仅供历史复现。
 
 ## 历史路径一：2026-10-22源码快照
 

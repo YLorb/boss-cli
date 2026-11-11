@@ -4,7 +4,7 @@
 
 - **项目地址（唯一源码仓库）**：`https://github.com/YLorb/boss-cli`。源码从该仓库的 tag 或固定提交获取；**不从 npm 拉包、不写 npm 地址**。安装、下载与构建步骤见 [安装与兼容性](references/install.md)。
 - **版本校验（强制，保持「报告差异 + 停止确认」）**：每轮启动前设置 `BOSS_SKILL_DIR` 后运行 `boss version-check --json`。CLI 与 Skill 用独立版本号，按配套关系校验；不匹配时**报告实际版本、期望版本与路径并停止等待用户确认**，不自动升级、不取最新、不静默消除告警。详见 [SKILL.md「启动前版本校验」](SKILL.md) 与 [安装与兼容性](references/install.md)。
-- **命令用法／命令指南**：逐项命令、参数、前置条件、结果与副作用见 [逐项调用手册](references/invocation-guide.md)；命令与 URL 对照见 [命令参考](references/cli-reference.md)；按任务入口选择对应 SOP（收集／推荐／搜索等）见 [SKILL.md「按任务加载」表](SKILL.md)。
+- **命令用法／命令指南**：命令的唯一权威用法源是 `boss commands --json`（结构化返回每条命令的 usage、params、requires、sideEffects、pages，含 collect stdin 协议），由 `src/cli/command_spec.ts` 生成，禁止手抄；也可用 `boss help` 查看可读版。按任务入口选择对应 SOP（收集／推荐／搜索等）见 [SKILL.md「按任务加载」表](SKILL.md)。
 - **问题与解决方法**：已知故障的现象、根因、修法见 [多岗位收集故障手册](../../docs/multijob-collect-troubleshooting-2026-11-09.md)；CLI 能力缺口与迁移边界见 [迁移与验收边界](references/manual-migration.md)；每轮出错先按 [错误分级与继续条件](references/non-contact-continuation.md) 判断停止当前对象还是结束本轮。
 
 ## 执行边界（强制，优先于本文件其余内容）

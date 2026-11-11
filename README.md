@@ -269,7 +269,7 @@ Cloudflare Workers Builds 配置：
 
 ## 本地招聘调用说明
 
-当前调用语法、参数、前置条件、返回结果与停止规则见[逐项调用手册](skills/boss-recruitment/references/invocation-guide.md)。岗位名、城市、薪资与会话岗位的区分，以及collect常驻stdin协议均在手册中明确。
+当前调用语法、参数、前置条件、返回结果与停止规则见 `boss commands --json`（唯一权威用法源，或 `boss help`）。岗位名、城市、薪资与会话岗位的区分，以及collect常驻stdin协议均在命令用法源中明确。
 
 ### 在线简历文字提取
 

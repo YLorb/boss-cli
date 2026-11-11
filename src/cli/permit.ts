@@ -16,7 +16,7 @@ export type PermitDoc = {
 /** 只读安全/诊断命令，永不吞掉副作用动作，无需在 permit 中声明。 */
 export const ALWAYS_ALLOWED = new Set([
   'status', 'check', 'search-sidebar', '--check-login', 'flow-status', 'spec-list', 'task-check', 'task-init', 'phase-set', 'phase-status',
-  'help', 'version', 'version-check',
+  'help', 'version', 'version-check', 'commands',
 ]);
 
 export class PermitDeniedError extends Error {

@@ -48,6 +48,7 @@ import { favoriteResume } from '../toolset/favorite.js';
 import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
 import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
+import { COMMAND_SPECS } from './command_spec.js';
 import { checkTaskConfig } from './task_config.js';
 import { initRun, activateRunBindings, getBoundRun } from './run_state.js';
 import { installOfflineTestGuard } from '../common/offline_test.js';
@@ -178,6 +179,18 @@ function printHelp(): void {
       一岗一账的常驻会话；stdin 每行一个 JSON 命令，stdout 每行一个 JSON 结果
       候选人更新逐笔保存；stop 等待在途操作并退出。待恢复时提示“有信息需要恢复。”
       recheck / reconcile 仅在用户明确授权对应范围后传 recoveryAuthorized:true；旧 reading 需要全量对账
+      stdin 命令（每行一个 JSON 对象）：
+        {"op":"show"}                                    读取当前账本全部候选人及决策状态
+        {"op":"add","job":"<岗位>","dataId":"<ID>","name":"<姓名>"}   将候选人加入账本（job 必须与启动岗位一致）
+        {"op":"decision","dataId":"<ID>","decision":"PASS|FAIL","evidence":{"verdict":"fit|not-fit","ref":"<评估回执路径>"}}
+                                                         决策；screen 模式必须 evidence.verdict 与 decision 一致（PASS↔fit、FAIL↔not-fit）
+                                                          FAIL 直接删除账本记录，不点平台“不合适”；collect-only 模式不要求 evidence
+        {"op":"mode","value":"screen|collect-only"}        切换评估模式；正式任务下必须与冻结任务配置一致
+        {"op":"round"}                                    对账本候选人执行一次附件探测轮次（仅人工明确范围使用，非正常 SOP 默认）
+        {"op":"recheck","recoveryAuthorized":true}         逐人复查附件与请求消息（每人一次，只读不下载/发送）
+        {"op":"reconcile","recoveryAuthorized":true}       全量对账恢复（遍历沟通列表补回候选人，仅读取证据）
+        {"op":"receipt","dataId":"<ID>"}                   将本轮已核验下载回执写入账本（与 collect-sync 同源，运行中会话用）
+        {"op":"stop"}                                     停止会话并原子写回账本
   boss version | ver（或 -v / --version）
       显示当前版本并检查 npm 是否有更新
   boss update
@@ -256,18 +269,32 @@ function printHelp(): void {
 
   boss decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]
       锁模式（BOSS_FLOW_STATE）下记录当前打开候选人的评估结论；实际 greet 前必须已 decide fit，否则拒绝
-
-  boss spec-list [--json]
-  boss task-check --json / boss task-init --json
-      校验任务、权限、岗位规范和配套版本，创建正式运行绑定
-  boss phase-status --json / boss phase-set --phase <阶段名> --json
-      查看合法动作/阻断原因；满足前置条件后相邻推进
-  boss collect-sync --data-id <会话ID> --json
-      collect已停止时，将本轮已核验下载回执写入固定岗位账本
-      枚举 ~/.boss-cli/jobs/ 下的岗位规范文件（job spec），用于多岗位收集固定本轮清单
+      unknown 报告但不阻断；back 后可继续下一位
 
   boss flow-status [--json]
       锁模式（BOSS_FLOW_STATE）下输出接续状态：已打开候选人的下一步、需核验（结果未知）与已完成清单
+      额外输出 watchState（ok/paused/stalled/not-started）、paused、lastProgressAt、idleMs；调用方必须先检查 paused
+  boss flow-pause --reason <原因> [--json]
+      锁模式（BOSS_FLOW_STATE）下全局暂停，拒绝一切候选人动作；原因写入停滞监测，供人工核验
+  boss flow-resume [--json]
+      解除全局暂停；若存在结果未知的未决动作，须先核验再恢复（阶段门会拦截未决重放）
+
+  boss spec-list [--json]
+      枚举 ~/.boss-cli/jobs/ 下的岗位规范文件（job spec），用于多岗位收集固定本轮清单；离线，不连浏览器
+
+  boss task-check --json
+      离线校验任务配置（job/scope/permit/stop/phases）及其引用的 permit；交叉校验 permit 的 job/entry 与任务一致
+  boss task-init --json
+      校验任务 + permit + 实际 Skill 版本，生成 runId，写入 ~/.boss-cli/runs/<runId>.json，绑定 permit/flow-state/账本/版本
+      后续命令自动加载绑定（current.json 指针），无需手工设 BOSS_RUN_PERMIT / BOSS_FLOW_STATE / BOSS_LEDGER_DIR
+
+  boss phase-status --json
+      查看当前阶段：允许动作、阻断原因、建议下一步、未决动作、暂停状态、冻结候选人范围
+  boss phase-set --phase <阶段名> --json
+      按 phases 声明顺序相邻推进；须满足该阶段 requires 前置条件且当前阶段有成功业务回执，否则拒绝；禁止跳步/倒退
+
+  boss collect-sync --data-id <会话ID> --json
+      collect 已停止时，将本轮已核验下载回执写入固定岗位账本；核验文件字节数与 SHA-256 一致才入账；离线，不连浏览器
 
   boss recommend [岗位关键字] [--ensure-job]；--check-job 只比较当前岗位
       --ensure-job 优先精确匹配岗位名和城市，忽略薪资；精确零匹配时用原参数做一次关键词匹配。不带该选项直接按关键词匹配。多项匹配即停止
@@ -276,9 +303,14 @@ function printHelp(): void {
   boss search --city 候选人城市 [--json]
   boss search --keyword 关键词 [--json]
   boss search --submit [--json]
-      须已在搜索页，三项独立设置完成后再 --submit。设置回执 submitted=false；选岗复核并保留已选城市。提交仅点击一次搜索
-      同时指定城市与岗位时须已在常规搜索页。设置筛选条件，输入关键词并点击一次搜索，不刷新
-      进入「搜索」页并读取当前结果；带关键词时提交一次，等待本次响应成功并核对页面候选人 ID/查询标识；失败不重试
+      搜索流程分「三项独立设置 → 提交」两步，按顺序执行：
+      --city <城市>      独立设置城市筛选（须已在搜索页）；回执 submitted=false
+      --job <岗位>       独立设置岗位筛选；选岗若改写城市则恢复该步骤前已选城市
+      --keyword <关键词> 独立设置关键词（最多 20 字符）
+      --submit           仅点击一次搜索提交；须三项独立设置完成后单独执行，不与设置选项混用
+      search <关键词> --city <城市> --job <岗位>  同时指定筛选条件并搜索（须已在常规搜索页，输入关键词后点击一次，不刷新）
+      search <关键词>   进入搜索页读取当前结果；带关键词时提交一次，等待本次响应成功并核对页面候选人 ID/查询标识；失败不重试
+      任一步失败保存回执并停止，不能继续提交；页面可能因筛选自动加载，CLI 不刷新页面
   boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]
       仅当前常规搜索页，逐次向下滚动并核验下一页响应；关键词／岗位保持不变，按候选人ID去重，不联系。
       人数上限包含起始列表、限制返回池；平台单页可能额外加载。每轮响应及核验共用超时，默认10000ms。
@@ -1042,6 +1074,10 @@ export async function runOneCommand(argv: string[]): Promise<void> {
 }
 
 async function executeManagedCommand(argv: string[]): Promise<string> {
+  if (argv[0] === 'commands') {
+    if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss commands [--json]');
+    return JSON.stringify({ ok: true, commands: COMMAND_SPECS });
+  }
   if (argv[0] === 'version-check') {
     if (argv.slice(1).some(arg => arg !== '--json') || argv.length > 2) die('用法: boss version-check [--json]；通过 BOSS_SKILL_DIR 指定实际加载的 Skill');
     const report = await checkSkillCompatibility();

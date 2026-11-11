@@ -73,8 +73,7 @@ metadata:
 | Node.js、Chrome、PATH、CDP和目录配置 | [环境配置](references/environment.md)；不要求安装Git |
 | 确定工作目录、保存位置或启动collect | [路径与账本路径核验](references/paths.md)，正式运行前必读 |
 | 启动、登录、配置、调用模板 | [启动与使用](references/start-and-use.md) |
-| 逐项核对公开调用、参数、结果及副作用 | [逐项调用手册](references/invocation-guide.md)，所有入口及collect stdin协议 |
-| 确定命令参数、示例、页面要求 | [命令与 URL 对照](references/cli-reference.md)；只读所需命令小节 |
+| 确定任一命令的参数、前置条件、副作用 | 运行 `boss commands --json`（唯一权威用法源）；或 `boss help` 读可读版 |
 | 简历收集（未读、时间窗口、指定名单、按岗位筛选等任何起始范围） | [收集 SOP](references/collect-sop.md)；起始快照来源可由使用者指定范围替代，但账本、身份核验、逐人核验、意图先落盘与 stop 合并对所有收集轮次通用 |
 | 按 spec 目录逐岗自动收集所有简历 | [多岗位收集编排](references/multi-job-collection.md) |
 | 沟通页读取／切换岗位 | [岗位切换边界](references/switch-job.md)，公开 switch-job 与状态核验 |
