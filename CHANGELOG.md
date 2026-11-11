@@ -1,5 +1,11 @@
 # 功能变化日志
 
+## 2026-11-11 · feat(cli): 命令用法单一真源（boss commands --json）
+
+- 新增 `src/cli/command_spec.ts`：37 条公开命令的全结构化注册表（name/usage/params/requires/sideEffects/pages），作为命令用法唯一真源。
+- 新增 `boss commands --json` 输出该注册表；`--help` 与文档引用统一指向它，消除手抄漂移。
+- 移除过期文档 `references/invocation-guide.md`、`references/cli-reference.md`，并将 AGENTS.md、SKILL.md 及全部 docs/README 引用改为 `boss commands --json`。
+
 ## 2026-11-11 · feat(cli): 版本漂移就地续绑 + task-init --keep-observed（0.6.20-dev.2 / Skill 1.0.29）
 
 - 现象：只要构建号变化（哪怕只改文档、`dev.0 → dev.1`），所有既有运行立刻报「运行版本绑定不匹配」，`status`/`--check-login` 一律不可用；唯一出路是 `task-init`，而它会清空 `observed` 与 `material`，同一份简历被迫重读（昨天陆** 开了 3 次、黄** 开了 2 次）。

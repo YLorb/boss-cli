@@ -42,7 +42,7 @@ node .\dist\cli\index.js version-check --json
 不匹配时将结果展示给用户，**等待用户明确确认后**，才可在本轮命令末尾附加 `--confirm-version-mismatch <返回令牌>`；不得自行确认、写入长期默认参数或从旧任务沿用授权。令牌绑定 CLI 版本、Skill 路径和完整正文，任一改变都会失效。确认仅解除版本门槛，不解除会话锁、身份校验或其他守护。CLI 校验令牌，执行 Agent 负责取得并记录用户确认。优先同步配套版本；确认不意味着兼容性已验证。
 
 
-各入口的完整语法、参数语义、返回判断和顺序，见[逐项调用手册](../skills/boss-recruitment/references/invocation-guide.md)。
+各入口的完整语法、参数语义、返回判断和顺序，见 `boss commands --json`（唯一权威用法源）。
 
 本文件记录 boss-cli 已知页面 URL、对应命令和当前位置要求。修改页面导航、命令入口或报错文案前，先对照这里，避免把某个命令改成隐式跳转或多路径兜底。
 

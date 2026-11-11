@@ -138,4 +138,4 @@ SOP 就是固定操作顺序。先选本轮入口，再给 WorkBuddy 明确的�
 - 中途暂停：可能是等待你的输入或授权
 - 错误停止频繁：目前已经极少遇到这样的状态
 
-进一步查阅：[搜索 SOP](../skills/boss-recruitment/references/search-sop.md) · [推荐 SOP](../skills/boss-recruitment/references/recommend-sop.md) · [未读收集 SOP](../skills/boss-recruitment/references/collect-sop.md) · [命令手册](../skills/boss-recruitment/references/invocation-guide.md)。
+进一步查阅：[搜索 SOP](../skills/boss-recruitment/references/search-sop.md) · [推荐 SOP](../skills/boss-recruitment/references/recommend-sop.md) · [未读收集 SOP](../skills/boss-recruitment/references/collect-sop.md) · [命令用法](运行 `boss commands --json`)。
