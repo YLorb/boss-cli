@@ -2,7 +2,7 @@ import type { ElementHandle, Frame, Page } from 'puppeteer-core';
 import { sleepRandom } from '../browser/timing.js';
 import { captureResumeByWheel } from './resume_scroll_capture.js';
 import { traceResumeCapture } from './resume_capture_trace.js';
-import { directResumeHandle } from './resume_frame_locator.js';
+import { directResumeHandle, ResumeFrameOpenError } from './resume_frame_locator.js';
 import { closeChatResumeByBlankClick } from './resume_chat_close.js';
 import { LIVE_RESUME_FRAME_FN, LIVE_RESUME_FRAME_PICK } from './resume_dom_predicates.js';
 
@@ -59,11 +59,8 @@ const VISIBLE_C_RESUME_IN_FRAME_SCRIPT = `(() => {
 })()`;
 
 export async function frameHasVisibleCResumeIframe(frame: Frame): Promise<boolean> {
-  try {
-    return (await frame.evaluate(VISIBLE_C_RESUME_IN_FRAME_SCRIPT)) as boolean;
-  } catch {
-    return false;
-  }
+  if (frame.detached) return false;
+  return await frame.evaluate(VISIBLE_C_RESUME_IN_FRAME_SCRIPT) as boolean;
 }
 
 /** 截图文件名安全段（在线简历 / 推荐预览共用） */
@@ -100,67 +97,62 @@ export async function closeCResumePanel(page: Page): Promise<void> {
  */
 export async function findVisibleCResumeIframeHandle(page: Page, host?: Frame): Promise<ElementHandle<Element> | null> {
   if(host)return directResumeHandle(host);
-  for (const frame of page.frames()) {
-    try {
-      if (!(await frameHasVisibleCResumeIframe(frame))) {
-        continue;
-      }
-      // 必须取“活跃弹层内”的 live iframe：残留弹层(deactive)里的 iframe 仍可见，
-      // 用 frame.$ 取第一个匹配会量到已关闭弹层的尺寸。
-      // 取“真正在展示”的那份 iframe：失败重试会叠加残留弹层，按 DOM 顺序取最后一个通过几何判据的。
+  let found: ElementHandle<Element> | null = null;
+  try {
+    for (const frame of page.frames()) {
+      if (!(await frameHasVisibleCResumeIframe(frame))) continue;
       const handle = await frame.evaluateHandle(LIVE_RESUME_FRAME_PICK);
-      const h = handle.asElement() as ElementHandle<Element> | null;
-      if (!h) { await handle.dispose(); continue; }
-      return h;
-    } catch {
-      /* detached */
+      const iframe = handle.asElement() as ElementHandle<Element> | null;
+      if (!iframe || found) await handle.dispose();
+      if (!iframe) continue;
+      if (found) throw new ResumeFrameOpenError('在线简历 iframe 不唯一：多个宿主存在可见简历');
+      found = iframe;
     }
+    return found;
+  } catch (error) {
+    await found?.dispose();
+    throw error;
   }
-  return null;
 }
 
 export async function waitForVisibleCResumeIframeReady(
   page: Page,
   timeoutMs = 6_000,
   host?: Frame,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+): Promise<void> {
+  const started = Date.now();
+  const deadline = started + timeoutMs;
+  let stage = 'element';
   while (Date.now() < deadline) {
-    const iframe = await findVisibleCResumeIframeHandle(page,host);
-    if (!iframe) {
-      await sleepRandom(100, 180);
-      continue;
-    }
-    try {
-      const box = await iframe.boundingBox();
-      const contentFrame = await iframe.contentFrame();
-      if (box && box.width > 8 && box.height > 8) {
-        if (!contentFrame) {
-          if(host)throw Error('目标简历Frame未就绪');
-          return true;
-        }
-        try {
-          const ready = (await contentFrame.evaluate(`(() => {
-            const body = document.body;
-            const doc = document.documentElement;
-            const readyStateOk = document.readyState === "complete" || document.readyState === "interactive";
-            const contentHeight = Math.max(body?.scrollHeight || 0, doc?.scrollHeight || 0);
-            return readyStateOk && contentHeight > 100;
-          })()`)) as boolean;
-          if (ready) {
-            return true;
+    stage = 'element';
+    const iframe = await findVisibleCResumeIframeHandle(page, host);
+    if (iframe) {
+      try {
+        const box = await iframe.boundingBox();
+        if (box && box.width > 8 && box.height > 8) {
+          stage = 'attachment';
+          const content = await iframe.contentFrame();
+          if (content) {
+            if (content.detached || (host && content.parentFrame() !== host)) {
+              throw new ResumeFrameOpenError('简历 Frame 已失效或不属于已核验宿主');
+            }
+            stage = 'render';
+            const ready = await content.evaluate(`(() => {
+              const ready = document.readyState === 'complete' || document.readyState === 'interactive';
+              const height = Math.max(document.body?.scrollHeight || 0, document.documentElement?.scrollHeight || 0);
+              return ready && height > 100;
+            })()`);
+            if (ready) return;
           }
-        } catch (error) {
-          if(host)throw error;
-          return true;
         }
+      } finally {
+        await iframe.dispose();
       }
-    } finally {
-      await iframe.dispose();
     }
-    await sleepRandom(100, 180);
+    const waitMs = Math.min(100, deadline - Date.now());
+    if (waitMs > 0) await sleepRandom(waitMs, waitMs);
   }
-  return false;
+  throw new ResumeFrameOpenError(`在线简历 iframe 未就绪：frame=c-resume stage=${stage} elapsedMs=${Date.now() - started}`);
 }
 
 /**
@@ -173,7 +165,7 @@ export async function captureCResumeIframeToFile(
 ): Promise<boolean> {
   const {host,afterCapture}=options;
   if (!['keep-open', 'close-chat-blank'].includes(afterCapture)) throw new Error('必须指定截图后的页面处理方式');
-  if (!(await waitForVisibleCResumeIframeReady(page, 2_000,host))) throw new Error('在线简历未就绪');
+  await waitForVisibleCResumeIframeReady(page, 2_000, host);
   const iframe = await findVisibleCResumeIframeHandle(page,host);
   if (!iframe) throw new Error('未找到可见在线简历 iframe');
   let captureError: unknown = null;

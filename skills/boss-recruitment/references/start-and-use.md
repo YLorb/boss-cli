@@ -25,7 +25,13 @@ $env:BOSS_BROWSER_REMOTE_DEBUGGING_PORT = '53470'
 node .\dist\cli\index.js --check-login --json
 ```
 
+## 正式任务预检
+
+使用已核验安装的 `boss preflight --json`。该命令使用同一进程校验版本和任务配置，只读取已存在的唯一 BOSS 标签页。返回 `passed` 后运行 `boss task-init --json`；返回 `failed` 时读取 `reason.code` 和 `reason.message`。只有确定需要登录时才进入下节，完成后重新执行预检。
+
 ## Chrome启动与登录（强制入口）
+
+用宿主正式支持的后台任务模式执行 `boss browser-session --json`。等待 `ready`，保存宿主任务 ID、端口与专用目录。命令会在释放浏览器会话锁、断开 CDP 后继续检查同一调试端点。此后按轮运行 `preflight`，正常收尾仅结束招聘轮次。存活回执证明浏览器可连接，登录以预检或登录核验为准。
 
 Agent必须使用boss-cli提供的入口完成浏览器启动与登录流程，不得自行启动Chrome或用其他工具代替：
 
@@ -33,7 +39,7 @@ Agent必须使用boss-cli提供的入口完成浏览器启动与登录流程，�
 node .\dist\cli\index.js login --json
 ```
 
-首次启动或已确认未登录时使用此命令；CLI负责启动／复用Chrome、配置CDP及打开登录页。已由check-login确认登录时直接复用，不反复login。check-login本身不启动浏览器；连接失败必须区分尚未启动和其他错误，不将所有错误解释为需要重启。
+首次登录或已确认未登录时，先确认独立的 `browser-session` 后台任务已返回 `ready` 且 Chrome 可见，再用 `login` 打开登录页。每次 automation 触发只复用已有会话。已由 check-login 确认登录时直接进入预检。端口未就绪时报告常驻任务状态，连接失败保留原始错误。
 
 扫码、验证码由用户在CLI打开的浏览器中完成。随后执行 `node .\dist\cli\index.js --check-login --json`，只有明确已登录才继续。login返回不等于已登录，无法判断或异常不能当成功；浏览器账号和招聘岗位由使用者确认。
 

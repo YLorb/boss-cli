@@ -120,10 +120,10 @@ export async function runRecommendGreet(options: GreetOptions): Promise<string> 
       const initialFrame = await assertRecommendPageReady(page, '打招呼');
       if(await visibleResumeFrame(page,initialFrame))throw new Error('推荐打招呼须先返回列表，停止；不点击被简历覆盖的卡片');
       const candidateId=await readRecommendCandidateId(initialFrame,t,options.candidateId);
-      const {label:selectedJob,frame} = await selectRecommendJob(initialFrame, kw);
+      const {label:selectedJob,frame,beforeFingerprint} = await selectRecommendJob(initialFrame, kw);
       await readRecommendCandidateId(frame,t,candidateId);
       const jobLine = selectedJob ? `当前岗位：${selectedJob}` : '当前岗位：默认';
-      const before = await readRecommendList(frame);
+      const before = await readRecommendList(frame, beforeFingerprint);
       const greetResult = await clickGreet(frame, t, candidateId);
       await assertNoGreetPaywallPopup(page);
       await sleepRandom(380, 1000);

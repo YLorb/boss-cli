@@ -1,5 +1,47 @@
 # 功能变化日志
 
+## 2026-11-12 · 本地构建 0.6.20-dev-8（Skill 1.0.32）
+
+- 搜索触达就绪检查兼容「畅聊卡 3/6」。开聊模式弹层识别「使用账号权益」「使用畅聊卡」，弹层缺失时明确报错。
+
+## 2026-11-11 · 0.6.20-dev.9（Skill 1.0.32）
+
+- 常规搜索按规范化后的完整岗位名匹配，选岗后复核岗位与指定城市。未能唯一匹配时保留待人工确认回执。
+- Chrome 仅由公开 `browser-session --json` 启动。登录和业务命令连接已有会话，端口未就绪时返回启动指引。常驻任务的生命周期由宿主负责。
+- 仓库根目录提供可双击的 `start-test-cdp.cmd`，使用独立端口与配置目录启动测试 Chrome。
+
+## 2026-11-11 · 0.6.20-dev.8 本地构建（Skill 1.0.31）
+
+- 收集筛选先读同人小卡片。学历或院校任一项明确不符合已确认的 JD 硬性条件时，保存本轮跳过回执并处理下一人。
+
+## 2026-11-11 · 0.6.20-dev.7 本地构建
+
+- 同步 CLI 版本与 Skill 1.0.30 的配套声明。本地构建包含下列推荐切岗与常规搜索更新。
+
+## 2026-11-11 · 推荐切岗候选人指纹核验
+
+- 推荐切岗后等待目标岗位及前三张候选人卡片的有序 ID 指纹变化，读取列表时复核。前三张保持不变或列表持续为空时按切岗确认超时处理。
+
+## 2026-11-11 · 常规搜索岗位简称与空条件提交
+
+- 搜索岗位先匹配唯一完整名称，再匹配唯一前缀。无唯一结果时返回待人工确认和可选项，保留任务状态。
+- 城市省略或留空时沿用页面值，关键词允许留空。依次设置城市、岗位和关键词后点击一次搜索，并校验响应与列表。
+
+## 2026-11-11 · chore(local): 重建本地补丁层 + 构建号改 dev-7（0.6.20-dev-7，未上游）
+
+> 本条目记录的是**本地分支独有改动**，上游 `ylorb/dev@25b5968` 不含这些代码，版本号也仍是 `0.6.20-dev.2`。代码内所有改动点均以 `Local patch 0.6.20-dev-7` 注释标记，便于后续与上游 diff 时逐处甄别。
+
+- 背景：上游 2 个提交（`boss commands --json` 单一真源）合入时，本地 6 个文件的未提交修复被覆盖丢失；按使用者要求重新叠加，并统一加注释标记、构建号改为 `dev-7`（使用者口径："版本号应该是 dev-7"）以便版本可辨。
+- 岗位身份只看岗位名（`jobTitleKey`，新函数）：`phase_state` / `check` / `search_filters` / `switch-job` / `recommend_job` 五处统一。城市与薪资降为展示数据；同名岗位命中多个候选时**一律报「多选」并转人工重置**，不自动挑选。
+- 修 `check --job` 恒 false：上游只对推荐页做归一化，搜索页与沟通页用逐字比较（且 embedded 分支直接 `job===c.job`），搜索/沟通两处永远核验不过。
+- 修「岗位切不过去 / 8s 超时」：选完岗位后上游用「岗位名 + 城市 + 薪资」完整标签严格比较 `searchFiltersMatch`，必然超时——这是真因，非点击失败。
+- 修搜索页畅聊卡触达 `matches=0`：按钮文案正则扩到 `(搜索)?畅聊卡（n/m | n/m）`，实测 DOM 为「畅聊卡 3/6」；`check.ts` 的 `CONTACT_LABEL` 同步。
+- 修深池卡片判不可见：卡片身份匹配不再要求 `visible(el)`，命中唯一卡片后先 `scrollIntoView` 再判按钮；点击前也把按钮滚入视口再取坐标（简历右侧操作区常在视口外）。
+- 修无 ID 卡片卡死全轮冻结：列表快照中缺 ID/姓名的卡片改为**跳过并打印 stderr 提示**，其余照常冻结；仅当全部为空或 ID 重复才 deny。
+- 版本：`package.json` 与 `src/cli/skill_compatibility.ts` → `0.6.20-dev-7`；Skill 元数据 `cli-version` / `cli-baseline` 同步；`install.md`、`boss-url-map.md`、`getting-started.md`、`workbuddy快速开始.md` 的版本描述同步。Skill 版本保持 `1.0.29`，兼容标识保持 `2026-10-30-recommend-chat-v1`，故旧 run 绑定不因构建号变化而失配（`run_state` 已支持版本漂移就地续绑）。
+- 回归：`test:switch-job` 3/3、`test:phase-state` 16/16、`test:check-dom` 1/1、`test:check` 1/1，`tsc` 无报错；`version-check` compatible（cli 0.6.20-dev-7 / skill 1.0.29 / id 2026-10-30-recommend-chat-v1）。
+- 标注：`src/cli/phase_state.ts`(2) `src/cli/skill_compatibility.ts`(1) `src/toolset/check.ts`(4) `src/toolset/recommend_job.ts`(1) `src/toolset/search-greet.ts`(3) `src/toolset/search_filters.ts`(2) `src/toolset/switch-job.ts`(6) `scripts/test-switch-job.mjs`(1)，共 20 处 `Local patch 0.6.20-dev-7` 注释。
+
 ## 2026-11-11 · feat(cli): 命令用法单一真源（boss commands --json）
 
 - 新增 `src/cli/command_spec.ts`：37 条公开命令的全结构化注册表（name/usage/params/requires/sideEffects/pages），作为命令用法唯一真源。

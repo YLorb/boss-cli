@@ -15,7 +15,7 @@ mock.module('../dist/common/c_resume_capture.js', { namedExports: {
   closeCResumePanel: async () => { closes++; if (!stuck) panel = false; },
 } });
 const { backFromOnlineResume } = await import('../dist/toolset/back.js');
-const { selectRecommendJob: selectJob } = await import('../dist/toolset/recommend.js');
+const { selectRecommendJob: selectJob, readRecommendList } = await import('../dist/toolset/recommend.js');
 const selectRecommendJob = async (...args) => (await selectJob(...args)).label;
 const {recommendJobKey,recommendJobQuery}=await import('../dist/toolset/recommend_job.js');
 const {matchesStatus}=await import('../dist/toolset/check.js');
@@ -65,6 +65,7 @@ test('job-click frame replacement is confirmed read-only; navigation boundaries 
     {name:'iframe navigation destroys click response',events:['framenavigated']},
     {name:'iframe detachment destroys click response',events:['framedetached']},
     {name:'iframe navigation followed by replacement',events:['framenavigated','framedetached']},
+    {name:'replacement frame attaches after the element is visible',events:['framedetached'],lateAttachment:true},
     {name:'top navigation during click',events:['top'],error:/顶层页面导航/},
     {name:'top navigation during confirmation',events:['framedetached'],confirmNavigation:true,error:/顶层页面导航/},
     {name:'iframe navigation before click',before:'framenavigated',error:/推荐 iframe 导航/},
@@ -75,13 +76,13 @@ test('job-click frame replacement is confirmed read-only; navigation boundaries 
   ]) await t.test(scenario.name,async()=>{
     const page=new EventEmitter(),main={},updated={parentFrame:()=>main,evaluate:async()=>scenario.label??'目标岗位'};
     page.mainFrame=()=>main;
-    let reads=0,waits=0,clicks=0,confirmations=0,disposed=0;
+    let reads=0,waits=0,clicks=0,confirmations=0,disposed=0,attachments=0;
     const frame={page:()=>page,evaluate:async()=>{
       switch(++reads){
         case 1:return '当前岗位';
         case 2:return true; // Open dropdown.
         case 3:return true; // Set job query.
-        case 4:return {ok:true,label:'目标岗位',changed:true};
+        case 4:return {ok:true,label:'目标岗位',changed:true,beforeFingerprint:'["old-1","old-2","old-3"]'};
         case 5:
           clicks++;
           for(const event of scenario.events??[])page.emit(event==='top'?'framenavigated':event,event==='top'?main:frame);
@@ -95,12 +96,13 @@ test('job-click frame replacement is confirmed read-only; navigation boundaries 
       confirmations++;
       if(scenario.confirmNavigation)page.emit('framenavigated',main);
       if(scenario.timeout)throw Error('SIM_CONFIRM_TIMEOUT');
-      return {asElement:()=>({contentFrame:async()=>updated}),dispose:async()=>{disposed++;}};
+      return {asElement:()=>({contentFrame:async()=>++attachments===1&&scenario.lateAttachment?null:updated}),dispose:async()=>{disposed++;}};
     };
     if(scenario.error)await assert.rejects(selectJob(frame,'目标岗位',true),scenario.error);
     else{
       const result=await selectJob(frame,'目标岗位',true);
       assert.equal(result.label,'目标岗位');assert.equal(result.frame,updated);
+      assert.equal(attachments, scenario.lateAttachment ? 2 : 1);
     }
     assert.equal(clicks,scenario.before?0:1,'selection must never be replayed');
     assert.equal(confirmations,scenario.before||scenario.events?.includes('top')||scenario.clickError?0:1);
@@ -112,6 +114,9 @@ test('job-click frame replacement is confirmed read-only; navigation boundaries 
 
 test('different jobs select once; partial current-job matches only close dropdown; exact duplicates fail', async () => {
   let label='旧岗位', clicks=0, selected=0, open=false;
+  const oldIds = ['old-1', 'old-2', 'old-3', 'old-4'];
+  let ids = oldIds;
+  const cards = () => ids.map(id => ({querySelector: () => null, getAttribute: key => key === 'data-geekid' ? id : null}));
   class HTMLElement {
     constructor(text='') { this.textContent=text; }
     getBoundingClientRect(){return {width:100,height:100};}
@@ -130,7 +135,7 @@ test('different jobs select once; partial current-job matches only close dropdow
   let rows=[row('行政专员助理'),row('行政专员')];
   const context={HTMLElement,HTMLInputElement,Event:class {},getComputedStyle:()=>({display:'block',visibility:'visible'}),document:{
     querySelector:sel=>sel.includes('ui-dropmenu-label')?host:sel==='.job-selecter-options'?dropdown:sel.includes('chat-job-search')?input:new HTMLElement(),
-    querySelectorAll:()=>rows,
+    querySelectorAll:sel=>sel==='.candidate-card-wrap'?cards():rows,
   }};
   context.window=context;
   const frame={page:()=>page,evaluate:async script=>vm.runInNewContext(script,context),waitForFunction:async script=>{
@@ -138,14 +143,28 @@ test('different jobs select once; partial current-job matches only close dropdow
   }};
   const updated={parentFrame:()=>main,evaluate:async()=>label};
   const iframe={contentDocument:{location:{origin:'https://www.zhipin.com',pathname:'/web/frame/recommend/'},
-    querySelectorAll:()=>[{textContent:label,getClientRects:()=>[{}]}],querySelector:()=>({})}};
+    querySelectorAll:sel=>sel==='.candidate-card-wrap'?cards():[{textContent:label,getClientRects:()=>[{}]}],querySelector:()=>({})}};
   page.waitForFunction=async script=>{
-    assert.equal(vm.runInNewContext(script,{document:{querySelectorAll:()=>[iframe]},location:iframe.contentDocument.location}),iframe);
+    const poll = () => vm.runInNewContext(script,{document:{querySelectorAll:()=>[iframe]},location:iframe.contentDocument.location});
+    const before = ids;
+    assert.equal(poll(),false,'the new job label alone does not confirm new cards');
+    ids = [...before.slice(0,3),'new-tail'];
+    if (before.length >= 3) assert.equal(poll(),false,'a change after the first three does not confirm refresh');
+    ids = [];
+    assert.equal(poll(),false,'a temporarily empty list is not ready');
+    ids = ['', 'placeholder-2', 'placeholder-3'];
+    assert.equal(poll(),false,'a card with no ID is not ready');
+    ids = selected === 4 ? ['new-4-1','new-4-2'] : [1,2,3,4].map(i=>`new-${selected}-${i}`);
+    assert.equal(poll(),iframe);
     return {asElement:()=>({contentFrame:async()=>updated}),dispose:async()=>{}};
   };
   const result=await selectJob(frame,'行政专员',true);
   assert.equal(result.label,'行政专员');assert.equal(result.frame,updated);
   assert.equal(clicks,1);assert.equal(selected,1);
+  const refreshedIds = ids;
+  ids = oldIds;
+  await assert.rejects(readRecommendList(frame,result.beforeFingerprint),/读取时推荐列表刷新未确认/);
+  ids = refreshedIds;
   rows=[row('行政专员')];
   assert.equal(await selectRecommendJob(frame,'行政'),'行政专员');
   assert.equal(selected,1);assert.equal(open,false);
@@ -202,5 +221,5 @@ test('viewport screenshots crop locally at fractional DPR without browser clippi
   const result=await captureVisibleRegion(page,{x:20,y:10,width:100,height:60},1.5);
   assert.equal(result.width,150);assert.equal(result.height,90);
   assert.equal(result.data[0],30);assert.equal(result.data[1],15);
-  await assert.rejects(captureVisibleRegion(page,{x:180,y:10,width:100,height:60},1.5), /裁剪边界异常/);
+  await assert.rejects(captureVisibleRegion(page,{x:180,y:10,width:100,height:60},1.5), /截图区域超出当前 CSS 视口/);
 });

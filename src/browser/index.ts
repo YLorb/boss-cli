@@ -16,12 +16,9 @@ export {
   LAUNCH_ARGS_ALLOW_ALL_CORS,
   LAUNCH_ARGS_LESS_AUTOMATION,
   type ConnectBrowserOptions,
-  wasLastChromeLaunchHeadless,
 } from './cdp_browser.js';
 export {
   detachBrowserSession,
-  disconnectBrowserSession,
-  ensureAndGetBrowser,
   ensureBrowserSession,
   getBrowserRef,
   getPageRef,

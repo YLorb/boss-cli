@@ -15,7 +15,7 @@ test('isolated DOM: exact job selection, no repeated click, fail closed on ambig
     await page.setRequestInterception(true);
     page.on('request', request => void request.respond({ status: 200, contentType: 'text/html', body: '<html><body></body></html>' }));
     await page.goto('https://www.zhipin.com/web/chat/index');
-    await page.setContent(`<div class="chat-top-job"><div class="ui-dropmenu-label">岗位A _ 深圳</div><ul class="ui-dropmenu-list" hidden><li class="active">岗位A _ 深圳</li><li>岗位B _ 深圳</li><li>岗位B _ 上海</li><li>重复</li><li>重复</li><li class="disabled">关闭岗位</li><li>无响应</li></ul></div><button id="contact">联系</button>`);
+    await page.setContent(`<div class="chat-top-job"><div class="ui-dropmenu-label">岗位A _ 深圳</div><ul class="ui-dropmenu-list" hidden><li class="active">岗位A _ 深圳</li><li>岗位B _ 深圳</li><li>岗位C _ 上海</li><li>重复</li><li>重复</li><li class="disabled">关闭岗位</li><li>无响应</li></ul></div><button id="contact">联系</button>`);
     // Closed menus retain geometry; open state is the component's CSS class.
     await page.addStyleTag({content:'.ui-dropmenu-list[hidden] { display:block; opacity:0; pointer-events:none; }'});
     await page.evaluate(`(() => {
@@ -82,7 +82,12 @@ test('isolated DOM: exact job selection, no repeated click, fail closed on ambig
     const result=await switchChatJob(page,{job:'岗位B _ 深圳'}); assert.equal(result.job,'岗位B _ 深圳');
     assert.equal((await switchChatJob(page,{job:'岗位B _ 深圳'})).changed,false);
     assert.equal(await page.evaluate('window.jobClicks'),1);
-    for(const job of ['重复','岗位B','关闭岗位']) await assert.rejects(switchChatJob(page,{job,timeoutMs:150}),/唯一匹配|关闭或禁用/);
+    // Local patch 0.6.20-dev-7：岗位身份只看岗位名——同名不同城市属多选，禁止自动挑选，必须转人工重置（操作口径 2026-11-11）。
+    // 上游用例把「岗位B」当普通未命中，本地补丁下它与「岗位B _ 深圳」同名，故改用无歧义的「岗位C」。
+    await page.evaluate(`document.querySelectorAll('.ui-dropmenu-list li')[2].textContent='岗位A _ 上海'`);
+    await assert.rejects(switchChatJob(page,{job:'岗位A',timeoutMs:150}),/唯一匹配|人工重置/);
+    await page.evaluate(`document.querySelectorAll('.ui-dropmenu-list li')[2].textContent='岗位C _ 上海'`);
+    for(const job of ['重复','关闭岗位']) await assert.rejects(switchChatJob(page,{job,timeoutMs:150}),/唯一匹配|关闭或禁用/);
     assert.equal(await page.evaluate('window.jobClicks'),1);
     await assert.rejects(switchChatJob(page,{job:'无响应',timeoutMs:150}),/岗位切换未确认/);
     assert.equal(await page.evaluate('window.jobClicks'),2);

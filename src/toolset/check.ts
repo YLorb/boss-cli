@@ -3,7 +3,9 @@ import { REMOTE_DEBUGGING_PORT } from '../browser/cdp_browser.js';
 import type { Page } from 'puppeteer-core';
 import { CHAT_SEARCH_MATCH_SCRIPT } from './chat_search_match.js';
 import { RECOMMEND_CARD_IDENTITY_SCRIPT } from './recommend_identity.js';
-import { recommendJobKey } from './recommend_job.js';
+// Local patch 0.6.20-dev-7：上游只对推荐页做岗位名归一化，搜索页/沟通页用逐字比较，
+// 导致这两处 check --job 恒为 false。统一改为岗位名归一化比较（与 phase_state / switch-job 同口径）。
+import { jobTitleKey } from './recommend_job.js';
 import { installBossPageGuards } from '../common/boss_page_guards.js';
 import { withBossSessionLock } from '../common/boss_session_lock.js';
 
@@ -39,8 +41,9 @@ export const STATUS_SCRIPT = `(() => {
  const chatSearch=chatSearchRoot?{keyword:chatSearchRoot.querySelector('input.search-input')?.value,content:chatSearchVm?.content,showSearchResult:chatSearchVm?.showSearchResult,showClose:chatSearchVm?.showClose,matches:chatSearchVm?.searchList?.map((x,i)=>${CHAT_SEARCH_MATCH_SCRIPT}(x,chatSearchRows[i])),groupCount:chatSearchVm?.searchGroupList?.length,rows:chatSearchRows.map(e=>norm(e.textContent))}:null;
  const editorText=input?.innerText||input?.textContent||'';
  const buttons=Array.from((box||document).querySelectorAll('button,a,[role="button"],.btn-getcontact,.btn-greet')).filter(visible);
+ // Local patch 0.6.20-dev-7：上游只认「搜索畅聊卡（n/m）」，实测 DOM 文案为「畅聊卡 3/6」，整串失配 → matches=0。
  // 权益提示气泡可能渲染在按钮内部（「继续沟通 该牛人为热搜牛人…」），整串匹配会误判，故取按钮内标签叶子文本。
- const CONTACT_LABEL=/^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|搜索畅聊卡[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])$/;
+ const CONTACT_LABEL=/^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|(?:搜索)?畅聊卡\\s*[（(]?\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)]?)$/;
  const contactLabel=e=>{const whole=norm(e.textContent);if(CONTACT_LABEL.test(whole))return whole;const leaves=Array.from(e.querySelectorAll('*')).filter(x=>!x.children.length).map(x=>norm(x.textContent)).filter(t=>CONTACT_LABEL.test(t));return leaves[0]||whole;};
  const contact=buttons.filter(e=>CONTACT_LABEL.test(contactLabel(e)));
  if(box&&contact.length>1)throw new Error('沟通按钮不唯一');
@@ -109,7 +112,8 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
  if(c.embedded!==undefined&&s.embedded!==c.embedded)return false;
  if(c.keyword!==undefined&&s.keyword!==c.keyword)return false;
  const pageJob=s.pageType==='chat'?s.chatJob:s.pageType==='recommend'?s.recommendJob:s.searchJob;
- const sameJob=(actual:string,expected:string)=>s.pageType==='recommend'?recommendJobKey(actual||'')===recommendJobKey(expected):actual===expected;
+ // Local patch 0.6.20-dev-7：上游非推荐页走 actual===expected 逐字比较，而搜索页岗位下拉只显示岗位名，故恒 false。
+ const sameJob=(actual:string,expected:string)=>jobTitleKey(actual||'')===jobTitleKey(expected);
  if(!c.name&&!c.dataId&&!c.candidateId&&!c.state&&c.embedded===undefined) return !c.job||sameJob(pageJob,c.job);
  let identity=s.conversation,job=pageJob;
  if(c.embedded) {
@@ -127,7 +131,8 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
  if(c.name&&identity?.name!==c.name)return false;
  if(c.dataId&&identity?.dataId!==c.dataId)return false;
  if(c.candidateId&&identity?.candidateId!==c.candidateId)return false;
- if(c.job&&!(c.embedded?job===c.job:sameJob(c.state==='job-selected'?s.selectedJob:job,c.job)))return false;
+ // Local patch 0.6.20-dev-7：上游 embedded 分支直接 job===c.job 逐字比较，沟通页岗位标签带城市/薪资，恒 false。
+ if(c.job&&!sameJob(c.state==='job-selected'?s.selectedJob:job,c.job))return false;
  const norm=(v:string)=>(v||'').replace(/\r\n/g,'\n').trim();
  const seen=c.text!==undefined&&s.messages.some((m:string)=>norm(m)===norm(c.text!));
  switch(c.state){
@@ -135,7 +140,7 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
   case 'conversation':return !!identity&&(c.embedded?s.embedded:s.pageType==='chat');
   case 'send-ready':return !!identity&&s.editable&&!norm(s.draft)&&!seen;
   case 'message-visible':return !!seen;
-  case 'contact-ready':return s.pageType==='recommend'?!s.resume&&!!identity?.contactUsable&&/^打招呼/.test(identity.contactText):s.pageType==='search'&&s.resume&&s.contactUsable&&/^(立即沟通|打招呼|搜索畅聊卡)/.test(s.contactText);
+  case 'contact-ready':return s.pageType==='recommend'?!s.resume&&!!identity?.contactUsable&&/^打招呼/.test(identity.contactText):s.pageType==='search'&&s.resume&&s.contactUsable&&/^(立即沟通|打招呼|(?:搜索)?畅聊卡)/.test(s.contactText);
   case 'contacted':return s.resume&&(s.contactText==='继续沟通'||s.contactSuccessNotice===true);
   case 'job-selected':return !!s.selectedJob&&s.selectedJob===c.job;
   case 'resume-received':return s.resumeReceived;
@@ -144,7 +149,7 @@ export function matchesStatus(s:any,c:CheckCriteria):boolean {
  }
 }
 /** Separate read-only connection: no shared-session guards or browser launch. */
-async function withReadOnlyPage<T>(fn:(page:Page)=>Promise<T>):Promise<T>{
+export async function withReadOnlyPage<T>(fn:(page:Page)=>Promise<T>):Promise<T>{
  const browser=await puppeteer.connect({browserURL:`http://127.0.0.1:${REMOTE_DEBUGGING_PORT}`,defaultViewport:null,protocolTimeout:10000});
  try {
   const pages=(await browser.pages()).filter(p=>{try{return new URL(p.url()).hostname==='www.zhipin.com';}catch{return false;}});

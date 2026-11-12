@@ -22,14 +22,19 @@ function fixture(labels=[]){
   candidateReads=['candidate-1','candidate-1']; opened=0; main={}; search={};
   panelCount=frameCount=boxCount=1;
   props={geekInfo:{encryptGeekId:'candidate-1'},resumeInfo:{encryptGeekId:'candidate-1'}};
-  const element=extra=>({getClientRects:()=>[{}],...extra});
+  class HTMLElement {}
+  const element=extra=>Object.assign(new HTMLElement(), {
+    getClientRects:()=>[{}], getBoundingClientRect:()=>({width:100,height:100,top:0,left:0}),
+    closest:()=>null, parentElement:null,
+    ...extra,
+  });
   controls=labels.map(textContent=>element({textContent,click(){throw Error('must not click');}}));
   const box=element({get __vue__(){return {$props:props};},querySelectorAll:()=>controls});
-  const panel=element({querySelectorAll:selector=>selector.startsWith('iframe')?Array(frameCount).fill(element({})):Array(boxCount).fill(box)});
+  const panel=element({querySelectorAll:selector=>selector.startsWith('iframe')?Array(frameCount).fill(element({getAttribute:()=>'/web/frame/c-resume/test'})):Array(boxCount).fill(box)});
   resume={parentFrame:()=>main,url:()=> 'https://www.zhipin.com/web/frame/c-resume/',waitForFunction:async script=>assert.equal(typeof script,'string')};
   return {mainFrame:()=>main,url:()=> 'https://www.zhipin.com/web/chat/search',evaluate:async script=>{
     assert.equal(typeof script,'string');
-    return runInNewContext(script,{document:{querySelectorAll:()=>Array(panelCount).fill(panel)},getComputedStyle:()=>({display:'block',visibility:'visible'})});
+    return runInNewContext(script,{HTMLElement,window:{innerHeight:800},document:{body:{},querySelectorAll:()=>Array(panelCount).fill(panel)},getComputedStyle:()=>({display:'block',visibility:'visible'})});
   }};
 }
 

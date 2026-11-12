@@ -1,8 +1,8 @@
-import { open, readFile, rm } from 'node:fs/promises';
+import { mkdir, open, readFile, rm } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { sleepRandom } from '../browser/timing.js';
-import { CACHE_DIR, ensureAppDataLayout } from '../config.js';
+import { CACHE_DIR } from '../config.js';
 
 const SESSION_LOCK_FILE = join(CACHE_DIR, 'session.lock');
 const SESSION_LOCK_WAIT_MAX_MS = 30_000;
@@ -97,9 +97,9 @@ function formatSessionLockOwner(meta: SessionLockMeta | null): string {
     .join(', ');
 }
 
-export async function withBossSessionLock<T>(callback: () => Promise<T>): Promise<T> {
-  ensureAppDataLayout();
-  const deadline = Date.now() + SESSION_LOCK_WAIT_MAX_MS;
+export async function withBossSessionLock<T>(callback: () => Promise<T>, waitMs = SESSION_LOCK_WAIT_MAX_MS): Promise<T> {
+  await mkdir(CACHE_DIR, { recursive: true });
+  const deadline = Date.now() + waitMs;
 
   while (true) {
     try {
@@ -128,6 +128,7 @@ export async function withBossSessionLock<T>(callback: () => Promise<T>): Promis
         throw error;
       }
 
+      if (waitMs === 0) throw new Error('BOSS 浏览器会话已被占用，前置检查未执行');
       await clearStaleSessionLockIfNeeded();
       if (Date.now() >= deadline) {
         const meta = await readSessionLockMeta();

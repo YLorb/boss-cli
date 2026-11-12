@@ -170,6 +170,7 @@ export async function checkTaskConfig(): Promise<{
 }> {
   const path = taskConfigPath();
   if (!path) throw new Error('未设置 BOSS_TASK_CONFIG；请在启动前指向任务配置文件。');
+  if (!isAbsolute(path)) throw new Error('BOSS_TASK_CONFIG 必须是绝对路径。');
   const task = await loadTaskConfig(path);
   let permit: PermitDoc;
   try {

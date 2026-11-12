@@ -15,11 +15,15 @@
 
 适合 HR 日常提效，也适合 Claude / GPT / Gemini 等 **AI Agent** 通过子进程调用，搭建全自动化招聘流水线。
 
+构建后，在能跨招聘轮次存活的宿主启动 Chrome 会话：
+
 ```bash
-npm install -g @joohw/boss-cli@latest
-boss login
-boss help
+node dist/cli/index.js browser-session --json
 ```
+
+收到 `ready` 后，在另一个执行单元使用 `node dist/cli/index.js login --json` 打开登录页。
+
+Windows 上可从资源管理器双击 [start-test-cdp.cmd](start-test-cdp.cmd) 启动隔离的测试 Chrome。等待 `ready` 并保留窗口，测试端口为 `127.0.0.1:53471`。详见[桌面测试启动器](docs/browser-session.md#windows-桌面测试启动器)。
 
 > 纯 CLI，不内置对话式 Agent，由外部 Agent 通过子进程编排。业务命令均支持 `--json`（stdout 仅结果、诊断写 stderr），详见 [docs/cli-json-output.md](docs/cli-json-output.md)。
 
@@ -76,7 +80,8 @@ node dist/cli/index.js help
 
 | 命令 | 说明 |
 | --- | --- |
-| `boss login` | 打开 Boss直聘登录页（扫码/验证后手动完成） |
+| `boss browser-session --json` | 启动或核验复用 Chrome，在常驻宿主中报告存活状态 |
+| `boss login` | 连接已有 Chrome，打开 Boss直聘登录页（扫码/验证后手动完成） |
 | `boss collect --job <岗位完整名称> [--ledger-dir <目录>]` | 候选人处理流程的起点：启动常驻岗位账本，检查恢复状态；停止时发送 stop 写回 |
 | `boss update` | 通过 npm 安装最新版 boss-cli |
 | `boss list [--unread] [--chatting] [--json]` | 读取聊天列表；`--chatting` 选“沟通中”，`--json` 包含显示名称、`data-id` 和当前沟通职位 |
@@ -114,7 +119,7 @@ node dist/cli/index.js help
 
 ## 快速上手
 
-完成登录、确认岗位后，先启动岗位账本会话：
+在独立常驻宿主启动浏览器并收到 `ready`。完成登录、确认岗位后，启动岗位账本会话：
 
 ```bash
 # 1. 登录

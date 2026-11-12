@@ -1,9 +1,15 @@
 import type { Page } from 'puppeteer-core';
 import { withBossSessionPage } from '../common/boss_session_page.js';
+import { jobTitleKey } from './recommend_job.js';
 
 export type SwitchJobOptions = { list: boolean; job: string | null; timeoutMs: number };
 
 const visible = `el => el instanceof HTMLElement && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'`;
+// Local patch 0.6.20-dev-7：上游按完整标签逐字比较（含城市/薪资），`--job "岗位名"` 永远选不中。
+// Job identity is the title only, so a target without a city tag still matches.
+// 直接注入函数源码：模板插值不会重解释转义，多做一层 replace 会把 /\s+/ 变成 /\\s+/，页面内匹配必然失败。
+const titleKey = `(${jobTitleKey.toString()})`;
+const sameTitle = (actual: string, expected: string) => jobTitleKey(actual || '') === jobTitleKey(expected);
 // uiDropmenu keeps its list mounted; its public CSS class represents open state.
 const menuOpenScript = `(() => {
   const menus = [...document.querySelectorAll('.chat-top-job')].filter(${visible});
@@ -90,7 +96,8 @@ export async function switchChatJob(page: Page, { list = false, job = null, time
   if (job && /关闭|已结束/.test(job)) throw Error('目标岗位关闭或禁用：' + job);
   await page.evaluate(readyScript);
   const before = await page.evaluate(currentScript) as string;
-  if (!list && before === job) return { ok: true, changed: false, before, job: before, url: page.url() };
+  // Local patch 0.6.20-dev-7：上游用 before === job 判「已是目标岗位」，带城市标签时会重复点击。
+  if (!list && job !== null && sameTitle(before, job)) return { ok: true, changed: false, before, job: before, url: page.url() };
   await page.evaluate(`(() => {
     ${readyScript};
     const visible = ${visible};
@@ -124,26 +131,32 @@ export async function switchChatJob(page: Page, { list = false, job = null, time
     await page.evaluate(readyScript);
     return { ok: true, changed: false, before, options, url: page.url(), closeClick:point, note: '展开下拉，单次点击左侧随机空白点收起，未切换岗位；非只读命令' };
   }
-  const matches = (options as {label: string; unavailable: boolean}[]).filter(item => item.label === job);
-  if (matches.length !== 1) throw Error(`目标岗位须唯一匹配：job=${job} matches=${matches.length}`);
+  // Local patch 0.6.20-dev-7：改按岗位名匹配；同名多选一律拒绝自动挑选，转人工（R-05）。
+  const matches = (options as {label: string; unavailable: boolean}[]).filter(item => sameTitle(item.label, job as string));
+  if (matches.length !== 1) throw Error(`目标岗位须按岗位名唯一匹配：job=${job} matches=${matches.length}`
+    + (matches.length > 1 ? '；同名岗位命中多个候选，禁止自动挑选，需人工重置岗位筛选后再继续' : ''));
   if (matches[0].unavailable) throw Error('目标岗位关闭或禁用：' + job);
   await page.evaluate(`(() => {
     ${readyScript};
     const visible = ${visible};
-    const matches = [...document.querySelectorAll('.chat-top-job .ui-dropmenu-list li')].filter(el => visible(el) && el.textContent.trim() === ${JSON.stringify(job)});
-    if (matches.length !== 1) throw Error('点击前岗位身份发生变化');
+    const t = ${titleKey};
+    // Local patch 0.6.20-dev-7：点击前复核也走岗位名归一化，避免完整标签失配。
+    const matches = [...document.querySelectorAll('.chat-top-job .ui-dropmenu-list li')].filter(el => visible(el) && t(el.textContent.trim()) === t(${JSON.stringify(job)}));
+    if (matches.length !== 1) throw Error('点击前岗位身份发生变化' + (matches.length > 1 ? '：同名岗位命中多个候选，需人工重置岗位筛选' : ''));
     const el = matches[0];
     if (el.getAttribute('aria-disabled') === 'true' || el.hasAttribute('disabled') || el.classList.contains('disabled') || /关闭|已结束/.test(el.textContent)) throw Error('点击前岗位已不可用');
     el.click();
   })()`);
   try {
-    await page.waitForFunction(`(${currentScript}) === ${JSON.stringify(job)}`, { timeout: timeoutMs });
+    // Local patch 0.6.20-dev-7：切换确认改为岗位名归一化比较（上游为逐字相等）。
+    await page.waitForFunction(`(() => { const t = ${titleKey}; return t(${currentScript}) === t(${JSON.stringify(job)}); })()`, { timeout: timeoutMs });
     await page.waitForFunction(`!(${menuOpenScript})`, {timeout:timeoutMs});
   } catch (error) {
     throw Error(`岗位切换未确认：expected=${job} actual=${await page.evaluate(currentScript)}；${error instanceof Error ? error.message : String(error)}`);
   }
   const after = await page.evaluate(currentScript);
-  if (page.url() !== url.href || after !== job) throw Error('岗位切换后页面或岗位发生变化：' + page.url() + ' / ' + after);
+  // Local patch 0.6.20-dev-7：收尾复核同样按岗位名比较。
+  if (page.url() !== url.href || !sameTitle(String(after ?? ''), job as string)) throw Error('岗位切换后页面或岗位发生变化：' + page.url() + ' / ' + after);
   return { ok: true, changed: true, before, job: after, url: page.url() };
 }
 

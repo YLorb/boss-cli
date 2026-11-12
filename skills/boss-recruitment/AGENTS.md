@@ -3,8 +3,9 @@
 ## 项目与文档索引（Agent 加载本文件时可见）
 
 - **项目地址（唯一源码仓库）**：`https://github.com/YLorb/boss-cli`。源码从该仓库的 tag 或固定提交获取；**不从 npm 拉包、不写 npm 地址**。安装、下载与构建步骤见 [安装与兼容性](references/install.md)。
-- **版本校验（强制，保持「报告差异 + 停止确认」）**：每轮启动前设置 `BOSS_SKILL_DIR` 后运行 `boss version-check --json`。CLI 与 Skill 用独立版本号，按配套关系校验；不匹配时**报告实际版本、期望版本与路径并停止等待用户确认**，不自动升级、不取最新、不静默消除告警。详见 [SKILL.md「启动前版本校验」](SKILL.md) 与 [安装与兼容性](references/install.md)。
-- **命令用法／命令指南**：命令的唯一权威用法源是 `boss commands --json`（结构化返回每条命令的 usage、params、requires、sideEffects、pages，含 collect stdin 协议），由 `src/cli/command_spec.ts` 生成，禁止手抄；也可用 `boss help` 查看可读版。按任务入口选择对应 SOP（收集／推荐／搜索等）见 [SKILL.md「按任务加载」表](SKILL.md)。
+- **Chrome 常驻入口**：使用 WorkBuddy 正式后台任务执行 `boss browser-session --json`。同一专用目录与端口在宿主会话内只启动一个后台任务，记录任务 ID 和 `ready` 回执。已有运行的任务时直接进入预检；仅首次登录或确认登录失效时，在已启动的 Chrome 上使用公开 `login --json`。
+- **启动预检（强制）**：设置实际的 `BOSS_SKILL_DIR` 和本轮 `BOSS_TASK_CONFIG` 后执行 `boss preflight --json`。只有 `passed` 才初始化正式任务。版本不匹配时报告实际版本、期望版本与路径，等待用户确认处理方式。安装及离线诊断可用 `boss version-check --json`。
+- **命令用法**。用 `boss commands <命令名> --json` 查询单条命令，或用 `boss commands --json` 查询目录。启动命令读取 `usage` 和 `startupForm`，正式任务读取 `formalUsage` 和 `formalForms`。CLI 按同一份规格校验参数，使用长选项和单独传递的值。参数错误时按回执的查询指令查用法。按任务入口选择对应 SOP，见 [SKILL.md「按任务加载」表](SKILL.md)。
 - **问题与解决方法**：已知故障的现象、根因、修法见 [多岗位收集故障手册](../../docs/multijob-collect-troubleshooting-2026-11-09.md)；CLI 能力缺口与迁移边界见 [迁移与验收边界](references/manual-migration.md)；每轮出错先按 [错误分级与继续条件](references/non-contact-continuation.md) 判断停止当前对象还是结束本轮。
 
 ## 执行边界（强制，优先于本文件其余内容）

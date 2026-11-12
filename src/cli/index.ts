@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { config as loadEnv } from 'dotenv';
 import { APP_HOME } from '../config.js';
 import { runCli, isReadlineAbortError } from './cliRouter.js';
+import { jsonError } from './output.js';
 
 const userEnvPath = join(APP_HOME, '.env');
 if (existsSync(userEnvPath)) {
@@ -21,6 +22,12 @@ async function main() {
   } catch (error) {
     if (isReadlineAbortError(error)) {
       process.exit(0);
+    }
+    if (args[0] === 'collect' && error instanceof Error &&
+        ['TaskInitRequiredError', 'FormalUsageError'].includes(error.name)) {
+      console.log(jsonError('collect', error));
+      process.exitCode = 1;
+      return;
     }
     console.error('❌ 执行出错:', error);
     if (error instanceof Error) {

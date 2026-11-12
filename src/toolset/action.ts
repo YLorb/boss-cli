@@ -550,11 +550,7 @@ async function captureOnlineResumeScreenshot(page: Page, candidateLabel: string)
     return null;
   }
 
-  const ready = await waitForVisibleCResumeIframeReady(page);
-  if (!ready) {
-    await closeCResumePanel(page);
-    return null;
-  }
+  await waitForVisibleCResumeIframeReady(page);
 
   const fileName = `online-resume-${safeResumeScreenshotFileBase(candidateLabel)}-${Date.now()}.png`;
   const absPath = join(RESUME_SCREENSHOTS_DIR, fileName);

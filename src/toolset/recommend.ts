@@ -7,10 +7,22 @@ import {
 } from '../browser/index.js';
 import { withBossSessionPage } from '../common/boss_session_page.js';
 import { ensurePage } from '../common/ensure_page.js';
+import { waitForFrameAttachment } from '../common/resume_frame_locator.js';
 import { RECOMMEND_CARD_ROOT_SELECTOR, recommendTargetScript } from './recommend_identity.js';
 import { recommendJobKey, recommendJobQuery } from './recommend_job.js';
 
 const BOSS_CHAT_RECOMMEND_URL = 'https://www.zhipin.com/web/chat/recommend';
+const RECOMMEND_CARD_ID = `(card => {
+  const inner = card.querySelector('.card-inner') || card;
+  return inner.getAttribute('data-geekid') ?? inner.getAttribute('data-geek') ?? '';
+})`;
+const RECOMMEND_LIST_FINGERPRINT = `(doc => {
+  const ids = [...doc.querySelectorAll(${JSON.stringify(RECOMMEND_CARD_ROOT_SELECTOR)})]
+    .slice(0, 3).map(${RECOMMEND_CARD_ID});
+  return ids.every(id => id.trim()) && new Set(ids).size === ids.length ? JSON.stringify(ids) : null;
+})`;
+
+type RecommendJobSelection = { label: string; frame: Frame; beforeFingerprint?: string };
 
 export type RecommendCandidate = {
   geekId: string;
@@ -88,8 +100,10 @@ async function waitForRecommendJobSearchResults(frame: Frame, keyword: string): 
   );
 }
 
-async function waitForReadyRecommendFrame(page: Page, expected?: string) {
+async function waitForReadyRecommendFrame(page: Page, expected?: string, beforeFingerprint?: string): Promise<RecommendJobSelection> {
   const expectedKey = expected === undefined ? null : recommendJobKey(expected);
+  const timeoutMs = expected === undefined ? 18_000 : 10_000;
+  const started = Date.now();
   const element = await page.waitForFunction(`(() => {
     const frames = document.querySelectorAll('iframe[name="recommendFrame"]');
     if (frames.length > 1) throw Error('推荐 iframe 不唯一');
@@ -100,20 +114,33 @@ async function waitForReadyRecommendFrame(page: Page, expected?: string) {
     const key = ${recommendJobKey.toString()};
     const label = key(labels[0].textContent || '');
     const expectedKey = ${JSON.stringify(expectedKey)};
-    return !!label && (expectedKey === null || label === expectedKey) &&
-      !!doc.querySelector(${JSON.stringify(RECOMMEND_CARD_ROOT_SELECTOR + ', .card-list, .geek-list-wrap .geek-list')}) && host;
-  })()`, {timeout:expected === undefined ? 18000 : 10000});
+    if (!label || (expectedKey !== null && label !== expectedKey) ||
+        !doc.querySelector(${JSON.stringify(RECOMMEND_CARD_ROOT_SELECTOR + ', .card-list, .geek-list-wrap .geek-list')})) return false;
+    const before = ${JSON.stringify(beforeFingerprint ?? null)};
+    if (before !== null) {
+      const current = ${RECOMMEND_LIST_FINGERPRINT}(doc);
+      if (current === null || current === '[]' || current === before) return false;
+    }
+    return host;
+  })()`, {timeout:timeoutMs}).catch((error: unknown) => {
+    if (beforeFingerprint !== undefined && error instanceof Error && error.name === 'TimeoutError') {
+      throw new Error(`未确认推荐列表刷新：目标岗位=${expected}，${timeoutMs}ms 内未同时取得目标岗位与变化后的候选人指纹`, {cause:error});
+    }
+    throw error;
+  });
   try {
     const host = element.asElement() as ElementHandle<HTMLIFrameElement> | null;
-    const frame = await host?.contentFrame();
-    if (!frame || frame.parentFrame() !== page.mainFrame()) throw Error('核验后的推荐 iframe 已失效');
+    if (!host) throw Error('推荐 iframe 就绪回执缺少元素');
+    const frame = await waitForFrameAttachment(host, started + timeoutMs);
+    if (!frame) throw Error(`推荐 iframe 未挂接：frame=recommendFrame stage=attachment elapsedMs=${Date.now() - started}`);
+    if (frame.detached || frame.parentFrame() !== page.mainFrame()) throw Error('核验后的推荐 iframe 已失效');
     const label = await readCurrentRecommendJobLabel(frame);
     if (!label || (expectedKey !== null && recommendJobKey(label) !== expectedKey)) throw Error('只读复核的推荐岗位与目标不符');
-    return {label, frame};
+    return {label, frame, beforeFingerprint};
   } finally { await element.dispose(); }
 }
 
-export async function selectRecommendJob(frame: Frame, keyword: string, checkJob = false) {
+export async function selectRecommendJob(frame: Frame, keyword: string, checkJob = false): Promise<RecommendJobSelection> {
   const kw = keyword.trim();
   if (!kw) {
     return {label: await readCurrentRecommendJobLabel(frame), frame};
@@ -208,8 +235,10 @@ async function changeRecommendJob(frame: Frame, kw: string, checkJob: boolean, v
     return { ok: true, label, changed: true, target };
   })()`;
   const picked = (await frame.evaluate(`(() => {
-    const { target, ...result } = ${resolveOption}; return result;
-  })()`)) as { ok: boolean; label?: string; reason?: string; changed?: boolean };
+    const { target, ...result } = ${resolveOption};
+    if (result.ok && result.changed) result.beforeFingerprint = ${RECOMMEND_LIST_FINGERPRINT}(document);
+    return result;
+  })()`)) as { ok: boolean; label?: string; reason?: string; changed?: boolean; beforeFingerprint?: string | null };
   if (!picked.ok) {
     throw new Error(`岗位选择失败：${kw}；reason=${picked.reason}。`);
   }
@@ -230,12 +259,16 @@ async function changeRecommendJob(frame: Frame, kw: string, checkJob: boolean, v
     })()`, { timeout: 8_000 });
     return {label, frame};
   }
+  if (typeof picked.beforeFingerprint !== 'string') throw Error('切岗前推荐列表前三张卡片的候选人 ID 缺失或重复');
   startConfirmation();
   try {
     await frame.evaluate(`(() => {
       const row = ${resolveOption};
       if (!row.ok || !row.changed || row.label !== ${JSON.stringify(label)}) throw Error('点击前目标岗位已变化');
       row.target.scrollIntoView({block:'center',inline:'nearest'});
+      if (${RECOMMEND_LIST_FINGERPRINT}(document) !== ${JSON.stringify(picked.beforeFingerprint)}) {
+        throw Error('点击前推荐列表指纹已变化，未执行切岗');
+      }
       row.target.click();
     })()`);
   } catch (error) {
@@ -243,7 +276,7 @@ async function changeRecommendJob(frame: Frame, kw: string, checkJob: boolean, v
     if (!(error instanceof Error) || !/execution context was destroyed|detached frame|frame got detached|cannot find context with specified id/i.test(error.message)) throw error;
   }
   verify();
-  return waitForReadyRecommendFrame(frame.page(), label);
+  return waitForReadyRecommendFrame(frame.page(), label, picked.beforeFingerprint);
 }
 
 export async function ensureInRecommendPage(page: Page): Promise<Frame> {
@@ -272,11 +305,16 @@ export async function assertRecommendPageReadyForPreview(page: Page): Promise<Fr
   return assertRecommendPageReady(page, '预览候选人');
 }
 
-export async function readRecommendList(frame: Frame): Promise<RecommendCandidate[]> {
+export async function readRecommendList(frame: Frame, beforeFingerprint?: string): Promise<RecommendCandidate[]> {
   return (await frame.evaluate(`(() => {
     const norm = (v) => (v ?? "").replace(/\\s+/g, " ").trim();
     const cardSel = ${JSON.stringify(RECOMMEND_CARD_ROOT_SELECTOR)};
     const cards = Array.from(document.querySelectorAll(cardSel));
+    const before = ${JSON.stringify(beforeFingerprint ?? null)};
+    if (before !== null) {
+      const current = ${RECOMMEND_LIST_FINGERPRINT}(document);
+      if (current === null || current === '[]' || current === before) throw Error('读取时推荐列表刷新未确认');
+    }
     return cards.map((item) => {
       const inner = item.querySelector(".card-inner") || item;
       const wrap = item.matches(".candidate-card-wrap")
@@ -286,10 +324,7 @@ export async function readRecommendList(frame: Frame): Promise<RecommendCandidat
         (wrap && wrap.classList.contains("has-viewed")) ||
           (inner && inner.classList.contains("has-viewed")),
       );
-      const geekId =
-        inner?.getAttribute("data-geekid") ??
-        inner?.getAttribute("data-geek") ??
-        "";
+      const geekId = ${RECOMMEND_CARD_ID}(item);
       const name =
         norm(item.querySelector(".name-wrap .name")?.textContent) ||
         norm(item.querySelector(".name")?.textContent);
@@ -504,8 +539,8 @@ export async function runRecommend(jobKeyword?: string, json = false, checkJob =
       const frame = await ensureInRecommendPage(page).catch((cause: unknown) => {
         throw new Error(`推荐页起始就绪检查失败，尚未开始选岗：${cause instanceof Error ? cause.message : String(cause)}`, {cause});
       });
-      const {label:selectedJob, frame:currentFrame} = await selectRecommendJob(frame, (jobKeyword ?? '').trim(), checkJob);
-      const candidates = await readRecommendList(currentFrame);
+      const {label:selectedJob, frame:currentFrame, beforeFingerprint} = await selectRecommendJob(frame, (jobKeyword ?? '').trim(), checkJob);
+      const candidates = await readRecommendList(currentFrame, beforeFingerprint);
       if (json) return JSON.stringify({ job: selectedJob, candidates });
       const title = selectedJob ? `当前岗位：${selectedJob}` : '当前岗位：默认';
       return [title, '', renderRecommendList(candidates)].join('\n');

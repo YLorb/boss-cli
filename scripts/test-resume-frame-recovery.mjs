@@ -6,11 +6,15 @@ import {directResumeFrame,ResumeFrameOpenError} from '../dist/common/resume_fram
 import {withSearchResumeRecovery,closeSearchResumeScript,SEARCH_RESUME_CONDITIONS_SCRIPT} from '../dist/toolset/search-resume-recovery.js';
 
 test('direct locator queries only the verified host and rejects ambiguous/detached targets',async()=>{
-  const visible=e=>({getBoundingClientRect:()=>({width:100,height:100}),...e});
+  class HTMLElement {}
+  const visible=e=>Object.assign(new HTMLElement(), {
+    getBoundingClientRect:()=>({width:100,height:100,top:0,left:0}),
+    getAttribute:()=>'/web/frame/c-resume/test', closest:()=>null, parentElement:null, ...e,
+  });
   const iframe=visible({}),panel=visible({querySelectorAll:()=>[iframe]});
   let panels=[panel],queries=0,disposed=0;
   const host={evaluateHandle:async script=>{
-    queries++;const node=runInNewContext(script,{document:{querySelectorAll:()=>panels},getComputedStyle:()=>({display:'block',visibility:'visible'})});
+    queries++;const node=runInNewContext(script,{HTMLElement,window:{innerHeight:800},document:{body:{},querySelectorAll:()=>panels},getComputedStyle:()=>({display:'block',visibility:'visible'})});
     return {asElement:()=>node?{contentFrame:async()=>target,dispose:async()=>disposed++}:null,dispose:async()=>disposed++};
   }};
   const target={parentFrame:()=>host,detached:false};
@@ -81,12 +85,16 @@ test('second failure and close failure never cause a third attempt',async()=>{
 });
 test('guarded close verifies identity, unique visible button and hit-test before one click',()=>{
   let clicks=0,wrongId=false,covered=false,multiple=false;
-  const element=e=>({getClientRects:()=>[{}],getBoundingClientRect:()=>({left:10,top:10,width:100,height:100}),...e});
+  class HTMLElement {}
+  const element=e=>Object.assign(new HTMLElement(), {
+    getClientRects:()=>[{}], getBoundingClientRect:()=>({left:10,top:10,width:100,height:100}),
+    closest:()=>null, parentElement:null, ...e,
+  });
   const button=element({click:()=>clicks++,matches:()=>false,contains:()=>false});
   const box=element({});Object.defineProperty(box,'__vue__',{get(){return {$props:{geekInfo:{encryptGeekId:wrongId?'other':'id'},resumeInfo:{encryptGeekId:'id'}}};}});
-  const dialog={querySelectorAll:()=>multiple?[button,button]:[button]};
-  const panel=element({querySelectorAll:s=>s.startsWith('iframe')?[element({})]:[box],closest:()=>dialog});
-  const run=()=>runInNewContext(closeSearchResumeScript('id'),{document:{querySelectorAll:()=>[panel],elementFromPoint:()=>covered?{}:button},getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'}),innerWidth:1000,innerHeight:1000});
+  const dialog=element({querySelectorAll:()=>multiple?[button,button]:[button]});
+  const panel=element({querySelectorAll:s=>s.startsWith('iframe')?[element({getAttribute:()=>'/web/frame/c-resume/test'})]:[box],closest:()=>dialog});
+  const run=()=>runInNewContext(closeSearchResumeScript('id'),{HTMLElement,window:{innerHeight:1000},document:{body:{},querySelectorAll:()=>[panel],elementFromPoint:()=>covered?{}:button},getComputedStyle:()=>({display:'block',visibility:'visible',pointerEvents:'auto'}),innerWidth:1000,innerHeight:1000});
   run();assert.equal(clicks,1);
   wrongId=true;assert.throws(run,/身份/);wrongId=false;
   covered=true;assert.throws(run,/遮挡/);covered=false;

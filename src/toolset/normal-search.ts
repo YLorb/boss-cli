@@ -99,41 +99,23 @@ export async function assertNormalSearchPageReadyForPreview(page: Page): Promise
 async function runKeywordSearch(frame: Frame, keyword: string, filters?: SearchFilters, submitOnly = false): Promise<SearchQueryEvidence> {
   const kwLiteral = JSON.stringify(keyword);
   return submitSearchQuery(frame,keyword,async()=>{
-  const ok = (await frame.evaluate(`(() => {
-    const input = document.querySelector(".search-input");
-    if (!(input instanceof HTMLInputElement)) return false;
-    const kw = ${kwLiteral};
-    ${submitOnly ? `if(input.value !== kw)throw Error('提交前关键词变化');` : `input.focus();
-    input.value = kw;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));`}
-    ${filters ? `if (!(${searchFiltersMatch(filters)}) || input.value !== kw) throw Error('提交前搜索条件变化');
-    const buttons = [...document.querySelectorAll('.search-container .icon-search, .search-container button, .search-container .btn-search, .search-container [class*="search-btn"]')]
-      .filter(el => el.getClientRects().length > 0 && /搜索$/.test((el.textContent || '').trim()));
-    if (buttons.length !== 1) throw Error('搜索按钮缺失或不唯一：' + buttons.length);
-    buttons[0].click();` : `
-    input.dispatchEvent(new KeyboardEvent("keydown", {
-      key: "Enter",
-      code: "Enter",
-      keyCode: 13,
-      which: 13,
-      bubbles: true,
-      cancelable: true,
-    }));
-    input.dispatchEvent(new KeyboardEvent("keyup", {
-      key: "Enter",
-      code: "Enter",
-      keyCode: 13,
-      which: 13,
-      bubbles: true,
-      cancelable: true,
-    }));`}
-    return true;
-  })()`)) as boolean;
-  if (!ok) {
-    throw new Error('未找到常规搜索关键词输入框（.search-input）。');
-  }
-
+    await frame.evaluate(`(() => {
+      const inputs = [...document.querySelectorAll('.search-input')].filter(el => el.getClientRects().length);
+      if (inputs.length !== 1 || !(inputs[0] instanceof HTMLInputElement)) throw Error('关键词输入框缺失或不唯一');
+      const input = inputs[0];
+      const kw = ${kwLiteral};
+      ${submitOnly ? '' : `input.focus();
+      input.value = kw;
+      input.dispatchEvent(new Event('input', {bubbles:true}));
+      input.dispatchEvent(new Event('change', {bubbles:true}));`}
+      if (input.value !== kw${filters ? ` || !(${searchFiltersMatch(filters)})` : ''}) throw Error('提交前搜索条件变化');
+      const buttons = [...document.querySelectorAll('button, [role="button"], .icon-search, .btn-search, [class*="search-btn"]')]
+        .filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible')
+        .filter(el => [el.textContent, el.getAttribute('aria-label'), el.getAttribute('title')].some(label => label?.trim() === '搜索'));
+      if (buttons.length !== 1) throw Error('搜索按钮缺失或不唯一：' + buttons.length);
+      if (buttons[0].matches(':disabled, [disabled], [aria-disabled="true"]')) throw Error('搜索按钮不可用');
+      buttons[0].click();
+    })()`);
   },20_000,filters?.city);
 }
 
@@ -144,8 +126,13 @@ export async function runSearchControl(control:SearchControl,json=false):Promise
     const frame=await assertNormalSearchPageReadyForPreview(page);
     const before=await readSearchSettings(frame);
     let evidence:SearchQueryEvidence|undefined;
-    if(control.action==='city') await selectCity(frame,control.value!);
-    if(control.action==='job') await selectSearchFilters(frame,{city:before.city,job:control.value!});
+    if(control.action==='city' && control.value) await selectCity(frame,control.value);
+    if(control.action==='job') {
+      const selection=await selectSearchFilters(frame,{job:control.value!});
+      if(selection.status==='needs-confirmation') {
+        return JSON.stringify({action:'job',submitted:false,...before,...selection},null,json?undefined:2);
+      }
+    }
     if(control.action==='keyword') {
       await frame.evaluate(`(() => {
         const inputs=[...document.querySelectorAll('.search-input')].filter(el=>el.getClientRects().length);
@@ -156,20 +143,18 @@ export async function runSearchControl(control:SearchControl,json=false):Promise
       })()`);
     }
     if(control.action==='submit') {
-      if(!before.keyword?.trim()||!before.city||!before.job)throw Error('提交前须明确城市、岗位和非空关键词');
-      // Submit with the Enter path (the search button is not present under .search-container);
-      // city and job are still verified right after the response arrives.
-      evidence=await runKeywordSearch(frame,before.keyword,undefined,true);
+      if(typeof before.keyword!=='string'||!before.job)throw Error('提交前须确认岗位与关键词输入框');
+      evidence=await runKeywordSearch(frame,before.keyword,{job:before.job},true);
     }
     const settings=await readSearchSettings(frame);
-    if(control.action==='city'&&settings.city!==control.value ||
-       control.action==='job'&&(settings.job!==control.value||settings.city!==before.city) ||
+    if(control.action==='city'&&control.value&&settings.city!==control.value ||
        control.action==='keyword'&&(settings.keyword!==control.value||settings.city!==before.city||settings.job!==before.job)) throw Error('独立设置后的搜索条件核验失败');
     if(evidence&&!await frame.evaluate(searchMatchesEvidenceScript(evidence)))throw Error('提交后结果发生变化');
     const candidates=evidence?await readNormalSearchCandidates(frame):undefined;
     if(evidence&&JSON.stringify(candidates!.map(c=>c.candidateId))!==JSON.stringify(evidence.cards.map(c=>c.id)))throw Error('候选人结果与本次提交不符');
     if(evidence&&(!await frame.evaluate(searchMatchesEvidenceScript(evidence)) ||
-      !await frame.evaluate(searchFiltersMatch({city:before.city,job:before.job}))))throw Error('读取结果期间搜索条件变化');
+      !await frame.evaluate(searchFiltersMatch({city:before.city || undefined,job:before.job})) ||
+      settings.city!==before.city || settings.cityCode!==before.cityCode))throw Error('读取结果期间搜索条件变化');
     const result={action:control.action,submitted:!!evidence,...settings,...(candidates&&{candidates})};
     return json?JSON.stringify(result):JSON.stringify(result,null,2);
   });
@@ -300,9 +285,16 @@ export async function runNormalSearch(keyword?: string, json = false, filters?: 
   try {
     return await withBossSessionPage(async (page) => {
       const frame = filters ? await assertNormalSearchPageReadyForPreview(page) : await ensureInNormalSearchPage(page);
-      if (filters) await selectSearchFilters(frame, filters);
+      if (filters) {
+        const selection = await selectSearchFilters(frame, filters);
+        if (selection.status === 'needs-confirmation') {
+          const settings = await readSearchSettings(frame);
+          return JSON.stringify({action:'job',submitted:false,...settings,...selection},null,json?undefined:2);
+        }
+        filters = {city:filters.city || undefined,job:selection.job};
+      }
       let evidence:SearchQueryEvidence|undefined;
-      if (kw) {
+      if (kw || filters) {
         evidence=await runKeywordSearch(frame, kw, filters);
       }
 

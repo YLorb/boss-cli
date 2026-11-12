@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, mock } from 'node:test';
+import vm from 'node:vm';
 import puppeteer from 'puppeteer-core';
 
 let paywall = null;
@@ -12,6 +13,69 @@ const { openSearchResumeOnly } = await import('../dist/toolset/open-search-resum
 const { selectSearchContactJob } = await import('../dist/toolset/search-contact-job.js');
 const { greetNormalSearch } = await import('../dist/toolset/search-greet.js');
 const { STATUS_SCRIPT, matchesStatus } = await import('../dist/toolset/check.js');
+
+test('contact-ready accepts the search card label with or without its prefix', () => {
+  const candidate = {name:'测试', componentName:'测试', candidateId:'fixture-1'};
+  const status = {pageType:'search', resume:true, resumeId:candidate.candidateId,
+    resumeInfoId:candidate.candidateId, contactUsable:true, cards:[candidate]};
+  const criteria = {page:'search', state:'contact-ready', name:candidate.name, candidateId:candidate.candidateId};
+  for (const contactText of ['搜索畅聊卡(2/25)', '畅聊卡 3/6']) {
+    assert.equal(matchesStatus({...status, contactText}, criteria), true);
+    assert.equal(matchesStatus({...status, contactText, contactUsable:false}, criteria), false);
+  }
+});
+
+test('contact-mode reads entitlement labels and confirms only an explicit selection', async () => {
+  const candidateId = 'fixture-1';
+  const clicks = [];
+  const element = (textContent = '', left = 0) => ({
+    textContent, getBoundingClientRect: () => ({left, top:0, width:20, height:20}),
+    querySelectorAll: () => [], contains: () => false, closest: () => null,
+  });
+  const button = {...element('畅聊卡 3/6'), className:'', matches:() => false, scrollIntoView() {}};
+  const options = ['使用账号权益', '使用畅聊卡'].map((label, index) => ({
+    ...element(label, 30 * (index + 1)),
+    click() {
+      clicks.push(label);
+      button.textContent = '继续沟通';
+      opened = false;
+    },
+  }));
+  let opened = false;
+  const mode = {...element(), querySelectorAll:() => options};
+  const identity = {encryptGeekId:candidateId};
+  const box = {...element(), __vue__:{$props:{geekInfo:identity, resumeInfo:identity}}, querySelectorAll:() => [button]};
+  const panel = {...element(), querySelectorAll:selector => selector.startsWith('iframe') ? [element()] : [box]};
+  const context = vm.createContext({
+    document:{
+      querySelectorAll:selector => selector === '.resume-middle-wrap' ? [panel] : (opened ? [mode] : []),
+      elementFromPoint:x => x === 10 ? button : options.find(option => option.getBoundingClientRect().left + 10 === x),
+    },
+    getComputedStyle:() => ({visibility:'visible', display:'block', opacity:'1', pointerEvents:'auto'}),
+    innerWidth:200, innerHeight:200,
+  });
+  const frame = {
+    evaluate:script => vm.runInContext(script, context),
+    waitForFunction:script => assert.equal(vm.runInContext(script, context), true),
+    evaluateHandle:async () => ({
+      asElement() { return this; },
+      contentFrame:async () => ({detached:false, parentFrame:() => frame}),
+      dispose:async () => {},
+    }),
+  };
+  const page = {mainFrame:() => frame};
+  const greet = (check, label) => greetNormalSearch(page, frame, '测试', check, false, candidateId, label);
+  await assert.rejects(greet(false, '使用畅聊卡'), /开聊模式弹层未打开/);
+  opened = true;
+  const probe = await greet(true, '使用畅聊卡');
+  assert.equal(probe.status, 'mode-ready');
+  assert.deepEqual(Array.from(probe.options), ['使用账号权益', '使用畅聊卡']);
+  assert.deepEqual(clicks, []);
+  const selected = await greet(false, '使用畅聊卡');
+  assert.equal(selected.status, 'contact-confirmed');
+  assert.equal(selected.mode, '使用畅聊卡');
+  assert.deepEqual(clicks, ['使用畅聊卡']);
+});
 
 test('search greeting verifies identity, checks without clicking and never retries uncertain actions', async t => {
   const browser = await puppeteer.launch({

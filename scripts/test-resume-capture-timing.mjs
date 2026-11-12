@@ -119,10 +119,10 @@ let closed = false, keepOpen = false;
 mock.module('../dist/common/resume_chat_close.js', { namedExports: {
   closeChatResumeByBlankClick: async () => {closingEvents.push(['blank-close']);if(!keepOpen)closed=true;},
 } });
-const { captureCResumeIframeToFile } = await import('../dist/common/c_resume_capture.js');
+const { captureCResumeIframeToFile, waitForVisibleCResumeIframeReady } = await import('../dist/common/c_resume_capture.js');
 
 test('explicit capture disposition: preview stays open; collection closes after success; capture failure also closes to stop overlay stacking', async () => {
-  const iframe = { boundingBox: async () => ({ width: 100, height: 100 }), contentFrame: async () => null, dispose: async () => {} };
+  const iframe = { boundingBox: async () => ({ width: 100, height: 100 }), contentFrame: async () => ({ evaluate: async () => true }), dispose: async () => {} };
   const frame = {
     evaluateHandle: async () => ({ asElement: () => iframe, dispose: async () => {} }),
     // 弹层关闭脚本返回 false（本例不测按钮命中），可见性判据跟随 `closed`
@@ -160,7 +160,7 @@ test('verified host and capture disposition work together without scanning unrel
   let hostLookups = 0;
   const iframe = {
     boundingBox: async () => ({ width: 100, height: 100 }),
-    contentFrame: async () => ({ evaluate: async () => true }),
+    contentFrame: async () => ({ evaluate: async () => true, parentFrame: () => host }),
     dispose: async () => {},
   };
   const host = { evaluateHandle: async () => {
@@ -187,4 +187,28 @@ test('verified host and capture disposition work together without scanning unrel
   const beforeInvalidPolicy = hostLookups;
   await assert.rejects(captureCResumeIframeToFile(page, 'unused', { host, afterCapture: 'unknown' }), /必须指定截图后的页面处理方式/);
   assert.equal(hostLookups, beforeInvalidPolicy, 'invalid policy fails before page access');
+});
+
+test('readiness waits for attachment and render with and without a known host', async () => {
+  for (const scoped of [false, true]) {
+    const events = [];
+    let attempt = 0;
+    const content = {
+      parentFrame: () => host,
+      evaluate: async () => {
+        events.push('render');
+        return attempt === 3;
+      },
+    };
+    const iframe = {
+      boundingBox: async () => ({ width: 100, height: 100 }),
+      contentFrame: async () => (++attempt === 1 ? null : content),
+      dispose: async () => events.push('dispose'),
+    };
+    const host = { evaluate: async () => true, evaluateHandle: async () => ({ asElement: () => iframe }) };
+    await waitForVisibleCResumeIframeReady({ frames: () => [host] }, 500, scoped ? host : undefined);
+    assert.deepEqual(events, ['dispose', 'render', 'dispose', 'render', 'dispose']);
+    content.evaluate = async () => { throw Error('render failure'); };
+    await assert.rejects(waitForVisibleCResumeIframeReady({ frames: () => [host] }, 500, scoped ? host : undefined), /render failure/);
+  }
 });

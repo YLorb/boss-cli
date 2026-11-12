@@ -7,7 +7,7 @@ import { loadTaskConfig, taskConfigPath, type TaskConfig } from './task_config.j
 import { resolveAction, assertPermittedCommand, loadPermit } from './permit.js';
 import { getBoundRun } from './run_state.js';
 import { flowWatch, recordJournalResult } from '../common/flow_state.js';
-import { recommendJobKey, recommendJobQuery } from '../toolset/recommend_job.js';
+import { jobTitleKey } from '../toolset/recommend_job.js';
 import { assertActionHistory, beginAction, finishAction } from '../common/action_history.js';
 import {createHash} from 'node:crypto';
 import type {AttachmentProbe} from '../toolset/attachment.js';
@@ -20,13 +20,11 @@ export function isPhaseDenied(error: unknown): boolean { return error instanceof
 export function phaseStatePath(): string | null { return process.env.BOSS_PHASE_STATE?.trim() || null; }
 export function isPhaseEnabled(): boolean { return phaseStatePath() !== null; }
 const ALWAYS = new Set(['phase-set', 'phase-status', 'status', 'check', 'search-sidebar', '--check-login', 'flow-status', 'spec-list', 'task-check', 'task-init', 'help', 'version', 'version-check', 'flow-pause', 'flow-resume']);
-// 岗位身份 = 岗位名 + 城市；薪资只是展示数据（与 recommendJobKey 的既有约定一致）。
-// 任务配置的 job 是账本键（去薪资），页面下拉/筛选标签带薪资，故一律归一化后比较。
-// 搜索页岗位下拉只显示岗位名（不含城市），`--job` 必须与下拉文案逐字相同才选得中，
-// 因此「省略城市后缀的岗位名」也视为同一岗位，否则搜索模式永远无法设置岗位。
+// Local patch 0.6.20-dev-7：上游用 recommendJobKey(recommendJobQuery(...)) 双比较，搜不到纯岗位名。
+// 岗位身份只看岗位名：城市与薪资都是展示数据（使用者口径 2026-11-11：不携带城市标签，只做岗位名唯一匹配）。
+// 同名岗位命中多个候选时由选岗动作报「多选」并转人工重置，不在比较层靠城市区分。
 const sameJobKey = (actual: string | undefined, expected: string): boolean => actual !== undefined
-  && (recommendJobKey(actual) === recommendJobKey(expected)
-    || recommendJobKey(actual) === recommendJobKey(recommendJobQuery(expected)));
+  && jobTitleKey(actual) === jobTitleKey(expected);
 const TARGETED = new Set(['chat', 'preview', 'decide', 'greet', 'send', 'probe-resume', 'accept-resume', 'download-resume', 'action']);
 const SIDE_EFFECTS = new Set(['send', 'greet', 'accept-resume', 'download-resume', 'probe-resume', 'action']);
 function sideEffect(cmd:string,argv:string[]):boolean{return SIDE_EFFECTS.has(cmd)&&!(cmd==='action'&&resolveAction(argv)==='resume')&&!(cmd==='probe-resume'&&!hasFlag(argv,'--download'));}
@@ -185,6 +183,7 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
   if (!phaseStatePath() || !getBoundRun() || ['phase-set', 'phase-status'].includes(cmd)) return;
   const s = await state(), t = await task(); let result: any;
   try { result = JSON.parse(output); } catch (error) { deny(`命令 ${cmd} 回执不是 JSON，保留未决状态：${String(error)}`); }
+  if (cmd === 'search' && result?.status === 'needs-confirmation' && result.submitted === false) return;
   const id = targetId(argv, s);
   if (cmd === 'check' && result === true && sameJobKey(option(argv, '--job'), t.job)) s.jobVerified = true;
   if (cmd === 'flow-pause') s.paused = option(argv, '--reason')!;
@@ -205,8 +204,14 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
   if (['list', 'recommend', 'search'].includes(cmd) && Array.isArray(result.candidates) && !s.frozen) {
     if (!s.jobVerified) deny('冻结快照前必须核验岗位');
     const field = cmd === 'list' ? 'dataId' : cmd === 'recommend' ? 'geekId' : 'candidateId';
-    const targets = result.candidates.map((x: any) => ({ id: x[field], name: x.name }));
-    if (targets.some((x: Target) => typeof x.id !== 'string' || !x.id || typeof x.name !== 'string' || !x.name) || new Set(targets.map((x: Target) => x.id)).size !== targets.length) deny('列表回执缺少唯一 ID/姓名');
+    const all = result.candidates.map((x: any) => ({ id: x[field], name: x.name }));
+    // Local patch 0.6.20-dev-7：上游遇到无 ID 卡片直接 deny 整轮冻结，实际会卡死后续所有人。
+    // 无 ID 的卡片（占位/特殊卡型）无法唯一核验：按 SOP 跳过该人并显式记录，其余人照常冻结。
+    const targets = all.filter((x: Target) => typeof x.id === 'string' && !!x.id && typeof x.name === 'string' && !!x.name);
+    const skipped = all.length - targets.length;
+    if (skipped > 0) console.error(`[phase] 列表快照有 ${skipped} 张卡片缺少可核验 ID/姓名，已跳过，需人工核对。`);
+    if (targets.length === 0) deny('列表回执缺少唯一 ID/姓名');
+    if (new Set(targets.map((x: Target) => x.id)).size !== targets.length) deny('列表回执缺少唯一 ID/姓名');
     s.targets = targets; s.frozen = true;
   }
   if (cmd === 'dismiss-contact-notice' && s.pending?.cmd === 'greet' && id === s.pending.id) {
@@ -226,7 +231,11 @@ export async function recordPhaseCommand(cmd: string, argv: string[], output: st
       if (!s.contacts.includes(id)) s.contacts.push(id);
     }
   }
-  if (cmd === 'preview' || (cmd === 'action' && resolveAction(argv) === 'resume')) {
+  if (cmd === 'preview' && hasFlag(argv, '--open-only')) {
+    if (result.status !== 'open' || result.candidateId !== id || result.identityVerified !== true ||
+        result.screenshot !== false || result.closed !== false) deny('只打开简历回执缺少本人的身份或打开状态');
+    s.current = id;
+  } else if (cmd === 'preview' || (cmd === 'action' && resolveAction(argv) === 'resume')) {
     if (typeof result.path !== 'string' || !result.path) deny('截图回执缺少 path');
     s.current = id; s.material[id] = { image: result.path }; if (!s.observed.includes(id)) s.observed.push(id);
   }

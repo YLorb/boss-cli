@@ -87,15 +87,21 @@ function contactScript(name: string, resume: boolean, click: boolean, candidateI
         throw new Error('在线简历候选人 ID 与目标卡片不一致或缺失：' + name);
       root = boxes[0];
     } else {
+      // Local patch 0.6.20-dev-7：上游把 visible(el) 写在过滤条件里，深池滚动后目标卡片在视口外即判不可见 → matches=0。
+      // 深池滚动后目标卡片常在视口外，按钮会因 getBoundingClientRect 落在可视区外被判不可见。
+      // 身份匹配不看可见性，命中唯一卡片后先滚入视口再判按钮。
       const cards = Array.from(document.querySelectorAll('.geek-info-card')).filter(el =>
-        visible(el) && norm(el.querySelector('.name-label')?.textContent) === name && el.__vue__?.$props?.geek?.geekCard?.encryptGeekId === ${JSON.stringify(candidateId)});
+        norm(el.querySelector('.name-label')?.textContent) === name && el.__vue__?.$props?.geek?.geekCard?.encryptGeekId === ${JSON.stringify(candidateId)});
       if (cards.length !== 1) throw new Error('搜索候选人必须按完整显示姓名唯一匹配：' + name + '；matches=' + cards.length);
       const geek = cards[0].__vue__?.$props?.geek?.geekCard;
       if (geek?.encryptGeekId !== ${JSON.stringify(candidateId)} || norm(geek?.name) !== name)
         throw new Error('搜索卡片候选人身份已变化：' + name);
+      cards[0].scrollIntoView({ block: 'center', inline: 'nearest' });
+      void cards[0].offsetHeight;
       root = cards[0];
     }
-    const LABEL = /^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|搜索畅聊卡[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])$/;
+    // Local patch 0.6.20-dev-7：上游正则只认「搜索畅聊卡（n/m）」，实测 DOM 文案为「畅聊卡 3/6」→ matches=0。
+    const LABEL = /^(?:(?:立即沟通|打招呼|继续沟通)(?:[（(]\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)])?|(?:搜索)?畅聊卡\\s*[（(]?\\s*\\d+\\s*\\/\\s*\\d+\\s*[）)]?)$/;
     // 热搜牛人/畅聊卡的权益提示气泡会渲染在按钮内部，使 textContent 变成
     // 「继续沟通 该牛人为热搜牛人，需消耗3次…」，整串匹配会误判为「按钮缺失」。
     // 故按按钮内最贴近标签的叶子文本判定。
@@ -112,6 +118,10 @@ function contactScript(name: string, resume: boolean, click: boolean, candidateI
     if (!${continueChat} && text === '继续沟通') return {name, buttonText:text, status:'already-contacted'};
     if (button.matches(':disabled,[disabled],[aria-disabled="true"]') || /disabled|forbid|ban/.test(button.className) ||
         getComputedStyle(button).pointerEvents === 'none') throw new Error('目标沟通按钮不可用：' + name);
+    // Local patch 0.6.20-dev-7：上游不滚动直接取坐标，简历右侧操作区常在视口外导致「按钮被遮挡」。
+    // 简历右侧操作区常在视口外（面板自身滚动），点击前先滚入视口再取坐标。
+    button.scrollIntoView({ block: 'center', inline: 'nearest' });
+    void button.offsetHeight;
     const r = button.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
     const hit = document.elementFromPoint(x,y);
     if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight || !hit || !(hit === button || button.contains(hit)))
@@ -139,7 +149,8 @@ function contactModeScript(label: string | null, click: boolean): string {
     if (boxes.length > 1) throw new Error('开聊模式弹层不唯一：' + boxes.length);
     if (!boxes.length) return {present:false, options:[]};
     const root = boxes[0];
-    const all = Array.from(root.querySelectorAll('*')).filter(el => visible(el) && /^使用\\S*沟通$/.test(norm(el.textContent)));
+    const optionLabel = /^使用(?:账号权益|畅聊卡|\\S*沟通)$/;
+    const all = Array.from(root.querySelectorAll('*')).filter(el => visible(el) && optionLabel.test(norm(el.textContent)));
     const leaves = all.filter(el => !all.some(other => other !== el && el.contains(other)));
     const options = leaves.map(el => norm(el.textContent));
     if (!options.length) throw new Error('开聊模式弹层未找到可选项');
@@ -184,8 +195,8 @@ async function assertAncestorFramesExposed(frame: Frame, point: { x: number; y: 
   }
 }
 
-export async function visibleResumeFrame(page: Page, host: Frame = page.mainFrame()): Promise<Frame | null> {
-  return directResumeFrame(host);
+export async function visibleResumeFrame(page: Page, host: Frame = page.mainFrame(), timeoutMs = 0): Promise<Frame | null> {
+  return directResumeFrame(host, timeoutMs);
 }
 
 /** Read the same identity used by the rendered search card. No component methods are called. */
@@ -226,6 +237,7 @@ export async function greetNormalSearch(page: Page, searchFrame: Frame, name: st
       return { source, name, candidateId: expectedCandidateId, identityVerified: true, status: probe.present ? 'mode-ready' : 'mode-missing', options: probe.options, clicked: false };
     }
     const picked = await main.evaluate(contactModeScript(contactMode, true)) as { present: boolean; options: string[]; label: string };
+    if (!picked.present) throw new Error('开聊模式弹层未打开，未选择开聊模式');
     try {
       await main.waitForFunction(`(() => {
         const state = ${contactScript(name, true, false, expectedCandidateId, false)};

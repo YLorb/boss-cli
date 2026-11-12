@@ -105,7 +105,7 @@ async function establishSession(): Promise<void> {
   if (prev) {
     try {
       prev.removeAllListeners('disconnected');
-      await prev.close();
+      await prev.disconnect();
     } catch {
       /* 已断开时忽略 */
     }
@@ -130,15 +130,6 @@ async function establishSession(): Promise<void> {
   await installBossPageGuards(pageRef);
   await closeRedundantBlankPages(b, pageRef);
   trace('浏览器会话已就绪');
-}
-
-/**
- * 在 {@link ensureBrowserSession} 之后返回当前已连接的 Browser；
- * 用于工具内单次获取句柄，避免与异步 ensure 不同步的 `getBrowser()` 竞态。
- */
-export async function ensureAndGetBrowser(): Promise<Browser | null> {
-  await ensureBrowserSession();
-  return getBrowserRef();
 }
 
 export async function ensureBrowserSession(): Promise<void> {
@@ -206,21 +197,6 @@ export function setSessionPage(page: Page): void {
   }
   if (page.isClosed()) return;
   pageRef = page;
-}
-
-/** 进程退出时断开 CDP，避免残留子进程 */
-export async function disconnectBrowserSession(): Promise<void> {
-  const b = browserRef;
-  if (!b) return;
-  try {
-    b.removeAllListeners('disconnected');
-    await b.close();
-  } catch {
-    /* ignore */
-  }
-  browserRef = null;
-  pageRef = null;
-  clearSpawnedChromeProcessRef();
 }
 
 function unrefBrowserChildProcess(proc: ChildProcess | null | undefined): void {
