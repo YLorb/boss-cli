@@ -42,13 +42,13 @@ test('contact-mode reads entitlement labels and confirms only an explicit select
     },
   }));
   let opened = false;
-  const mode = {...element(), querySelectorAll:() => options};
+  const mode = {...element(), querySelectorAll:() => opened ? options : []};
   const identity = {encryptGeekId:candidateId};
   const box = {...element(), __vue__:{$props:{geekInfo:identity, resumeInfo:identity}}, querySelectorAll:() => [button]};
   const panel = {...element(), querySelectorAll:selector => selector.startsWith('iframe') ? [element()] : [box]};
   const context = vm.createContext({
     document:{
-      querySelectorAll:selector => selector === '.resume-middle-wrap' ? [panel] : (opened ? [mode] : []),
+      querySelectorAll:selector => selector === '.resume-middle-wrap' ? [panel] : [mode],
       elementFromPoint:x => x === 10 ? button : options.find(option => option.getBoundingClientRect().left + 10 === x),
     },
     getComputedStyle:() => ({visibility:'visible', display:'block', opacity:'1', pointerEvents:'auto'}),
@@ -65,6 +65,7 @@ test('contact-mode reads entitlement labels and confirms only an explicit select
   };
   const page = {mainFrame:() => frame};
   const greet = (check, label) => greetNormalSearch(page, frame, '测试', check, false, candidateId, label);
+  assert.equal((await greet(true, '使用畅聊卡')).status, 'mode-missing');
   await assert.rejects(greet(false, '使用畅聊卡'), /开聊模式弹层未打开/);
   opened = true;
   const probe = await greet(true, '使用畅聊卡');

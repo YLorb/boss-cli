@@ -153,7 +153,7 @@ function contactModeScript(label: string | null, click: boolean): string {
     const all = Array.from(root.querySelectorAll('*')).filter(el => visible(el) && optionLabel.test(norm(el.textContent)));
     const leaves = all.filter(el => !all.some(other => other !== el && el.contains(other)));
     const options = leaves.map(el => norm(el.textContent));
-    if (!options.length) throw new Error('开聊模式弹层未找到可选项');
+    if (!options.length) return {present:false, options:[]};
     const label = ${JSON.stringify(label)};
     if (!label) return {present:true, options};
     const hits = leaves.filter(el => { const n = norm(el.textContent); return n === label || n.startsWith(label); });

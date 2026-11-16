@@ -26,6 +26,10 @@ function setup(labels, { withButton = true, selectedLabel, resetCityOnJob = fals
   class HTMLInputElement {
     value = '原关键词';
     focus() {}
+    closest(selector) {
+      assert.equal(selector, '.search-container');
+      return searchForm;
+    }
     getClientRects() { return [{}]; }
     dispatchEvent(event) {
       if (event.type === 'input') events.push(['keyword', this.value]);
@@ -49,7 +53,7 @@ function setup(labels, { withButton = true, selectedLabel, resetCityOnJob = fals
       input.value = '';
     },
   }));
-  const button = { ...element('搜索'), click() {
+  const button = { ...element(), closest: () => null, click() {
     events.push(['submit', input.value]);
     const params = new URLSearchParams({ jobId: model.params$.jobId, page: '1' });
     if (model.params$.city) params.set('city', model.params$.city);
@@ -59,15 +63,21 @@ function setup(labels, { withButton = true, selectedLabel, resetCityOnJob = fals
     page.emit('request', request);
     page.emit('response', { request: () => request, ok: () => true, json: async () => ({ code: 0, zpData: { geeks: [] } }) });
   }};
+  const searchForm = {
+    __vue__: model,
+    querySelectorAll(selector) {
+      assert.equal(selector, '.icon-search');
+      return withButton ? [button] : [];
+    },
+  };
   const document = {
     querySelectorAll(selector) {
-      if (selector === '.search-container') return [{ __vue__: model }];
+      if (selector === '.search-container') return [searchForm];
       if (selector === '.search-input') return [input];
       if (selector === '.empty-tips') return [element()];
       if (selector.endsWith('.search-current-job')) return [opener];
       if (selector.includes('search_select_job')) return menuOpen ? rows : [];
       if (selector.endsWith('.search-result-item')) return [city];
-      if (selector.startsWith('button,')) return withButton ? [button] : [];
       return [];
     },
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; },

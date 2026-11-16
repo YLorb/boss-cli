@@ -109,11 +109,12 @@ async function runKeywordSearch(frame: Frame, keyword: string, filters?: SearchF
       input.dispatchEvent(new Event('input', {bubbles:true}));
       input.dispatchEvent(new Event('change', {bubbles:true}));`}
       if (input.value !== kw${filters ? ` || !(${searchFiltersMatch(filters)})` : ''}) throw Error('提交前搜索条件变化');
-      const buttons = [...document.querySelectorAll('button, [role="button"], .icon-search, .btn-search, [class*="search-btn"]')]
-        .filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible')
-        .filter(el => [el.textContent, el.getAttribute('aria-label'), el.getAttribute('title')].some(label => label?.trim() === '搜索'));
+      const form = input.closest('.search-container');
+      if (!form) throw Error('关键词输入框不在搜索表单内');
+      const buttons = [...form.querySelectorAll('.icon-search')]
+        .filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
       if (buttons.length !== 1) throw Error('搜索按钮缺失或不唯一：' + buttons.length);
-      if (buttons[0].matches(':disabled, [disabled], [aria-disabled="true"]')) throw Error('搜索按钮不可用');
+      if (buttons[0].closest(':disabled, [disabled], [aria-disabled="true"]')) throw Error('搜索按钮不可用');
       buttons[0].click();
     })()`);
   },20_000,filters?.city);
