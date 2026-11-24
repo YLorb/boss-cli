@@ -1,8 +1,6 @@
 // 命令注册表：boss-cli 全部公开命令的机器可读用法真源。
 // --help、boss commands --json、以及 Skill 文档均由本表生成/校验，禁止手抄。
 // 每条命令：名称、用法模板、参数说明、前置条件、副作用、适用页面。
-export const PREFLIGHT_ARGV = ['preflight', '--json'] as const;
-export const TASK_INIT_ARGV = ['task-init', '--json'] as const;
 
 export type CommandParam = { flag: string; desc: string };
 export type ValueSpec = {
@@ -424,11 +422,11 @@ export const COMMAND_SPECS: CommandSpec[] = [
       { flag: '{"op":"add","job":"<岗位>","dataId":"<ID>","name":"<姓名>"}', desc: '加入本岗位候选人' },
       { flag: '{"op":"decision","dataId":"<ID>","decision":"PASS|FAIL","evidence":{"verdict":"fit|not-fit","ref":"<回执路径>"}}',
         desc: 'screen 必须提供对应 verdict（PASS↔fit、FAIL↔not-fit），ref 可选；collect-only 可省略 evidence；FAIL 移除账本记录' },
-      { flag: '{"op":"mode","value":"screen|collect-only"}', desc: '正式任务须与冻结模式一致' },
+      { flag: '{"op":"mode","value":"screen|collect-only"}', desc: '切换附件账本的处理方式' },
       { flag: '{"op":"round"}', desc: '仅在明确授权范围内进行一次探测轮次' },
       { flag: '{"op":"recheck","recoveryAuthorized":true}', desc: '须取得明确授权，逐人核验待复查回执' },
       { flag: '{"op":"reconcile","recoveryAuthorized":true}', desc: '须取得明确授权，全量对账' },
-      { flag: '{"op":"receipt","dataId":"<ID>"}', desc: '将本轮核验过的下载回执写入活动账本' },
+      { flag: '{"op":"receipt","dataId":"<ID>"}', desc: '将逐步保存的下载回执写入账本' },
       { flag: '{"op":"stop"}', desc: '停止会话，等待回执和退出' },
     ],
   },
@@ -437,64 +435,19 @@ export const COMMAND_SPECS: CommandSpec[] = [
     formalForms: [form('sync-attachment', attachmentTarget)],
     usage: 'collect-sync --data-id <会话ID> --json',
     params: [{ flag: '--data-id', desc: '已下载会话ID' }],
-    requires: 'collect 已停止；正式收集任务绑定',
+    requires: '任务 JSON 的 job 与已保存下载回执',
     sideEffects: '核验下载回执字节/SHA-256 后写入固定岗位账本',
     pages: '无（离线）',
   },
-  // ── 流程护栏 ──
+  // ── 评估结果 ──
   {
     name: 'decide',
     formalForms: [form('record-verdict', [candidateId, value('--verdict', '结论', { choices: ['fit', 'not-fit', 'unknown'] })])],
     usage: 'decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]',
     params: [{ flag: '--verdict', desc: 'fit|not-fit|unknown' }],
-    requires: '锁模式（BOSS_FLOW_STATE）且候选人已打开',
-    sideEffects: '记录评估结论；greet 前须 fit',
+    requires: '明确的候选人 ID 和评估结论',
+    sideEffects: '逐步保存评估回执；Agent 按 SOP 决定后续动作',
     pages: '无（离线）',
-  },
-  {
-    name: 'flow-status',
-    formalForms: [form('read-flow')],
-    usage: 'flow-status [--json]',
-    params: [],
-    requires: '锁模式',
-    sideEffects: '无（只读接续状态与停滞）',
-    pages: '无',
-  },
-  {
-    name: 'flow-pause',
-    formalForms: [form('pause-flow', [value('--reason', '原因')])],
-    usage: 'flow-pause --reason <原因> [--json]',
-    params: [{ flag: '--reason', desc: '暂停原因' }],
-    requires: '锁模式',
-    sideEffects: '全局暂停，拒绝一切候选人动作',
-    pages: '无',
-  },
-  {
-    name: 'flow-resume',
-    formalForms: [form('resume-flow')],
-    usage: 'flow-resume [--json]',
-    params: [],
-    requires: '锁模式；未决动作须先核验',
-    sideEffects: '解除暂停',
-    pages: '无',
-  },
-  {
-    name: 'phase-set',
-    formalForms: [form('set-phase', [value('--phase', '阶段名')])],
-    usage: 'phase-set --phase <阶段名> [--json]',
-    params: [{ flag: '--phase', desc: '任务配置 phases 中声明的阶段名' }],
-    requires: '正式任务绑定；当前阶段有成功回执',
-    sideEffects: '按声明顺序相邻推进；禁止跳步/倒退',
-    pages: '无',
-  },
-  {
-    name: 'phase-status',
-    formalForms: [form('read-phase')],
-    usage: 'phase-status [--json]',
-    params: [],
-    requires: '正式任务绑定',
-    sideEffects: '无（只读允许动作/阻断原因/下一步）',
-    pages: '无',
   },
   {
     name: 'spec-list',
@@ -538,33 +491,11 @@ export const COMMAND_SPECS: CommandSpec[] = [
     pages: '无（离线）',
   },
   {
-    name: 'preflight',
-    startupForm: form('run-preflight', [json]),
-    params: [
-      { flag: 'BOSS_SKILL_DIR', desc: '实际加载的外部 Skill 绝对目录' },
-      { flag: 'BOSS_TASK_CONFIG', desc: '本轮任务配置文件绝对路径' },
-    ],
-    requires: '配套的 CLI/Skill、合法任务与 permit、已登录的唯一 BOSS 标签页',
-    sideEffects: '只读；返回 passed 或 failed 及首个阻塞原因',
-    pages: 'BOSS 招聘工作台；collect 要求沟通页',
-  },
-  {
     name: 'task-check',
     startupForm: form('check-task', [], [json]),
     params: [{ flag: 'BOSS_TASK_CONFIG', desc: '任务配置文件的绝对路径' }],
-    requires: 'BOSS_TASK_CONFIG 指向任务配置',
-    sideEffects: '无（离线校验）',
-    pages: '无',
-  },
-  {
-    name: 'task-init',
-    startupForm: form('initialize-task', [], [json, flag('--keep-observed')]),
-    params: [
-      { flag: 'BOSS_TASK_CONFIG', desc: '任务配置文件的绝对路径' },
-      { flag: '--keep-observed', desc: '续用上一轮同岗位已观察的简历与本地材料' },
-    ],
-    requires: 'BOSS_TASK_CONFIG；版本匹配',
-    sideEffects: '生成 runId，写入运行绑定',
+    requires: 'BOSS_TASK_CONFIG 指向普通任务 JSON；可选诊断',
+    sideEffects: '读取任务 JSON 并报告结果路径，不创建运行实例',
     pages: '无',
   },
   // ── 其它 ──
@@ -650,7 +581,7 @@ export function describeCommand(spec: CommandSpec) {
 export function renderCommandHelp(): string {
   const entries = COMMAND_SPECS.map(spec => [
     `  boss ${commandUsage(spec)}`,
-    ...(formalUsage(spec) ?? []).map(usage => `    正式任务：boss ${usage}`),
+    ...(formalUsage(spec) ?? []).map(usage => `    结构化调用：boss ${usage}`),
     `    前置条件：${spec.requires}`,
     `    行为：${spec.sideEffects}`,
     `    页面：${spec.pages}`,

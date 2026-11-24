@@ -6,7 +6,6 @@ import {
   clearSpawnedChromeProcessRef, connectBrowserWithMetadata, probeRemoteDebuggingWsEndpoint,
   REMOTE_DEBUGGING_PORT,
 } from '../browser/cdp_browser.js';
-import { withBossSessionLock } from '../common/boss_session_lock.js';
 
 const HEALTH_CHECK_MS = 5_000;
 const RECEIPT_FILE = '.boss-cli-browser-session.json';
@@ -31,7 +30,7 @@ async function verifyExisting(endpoint: string, userDataDir: string, profileDire
 
 /** The host keeps this CLI task running. Chrome stays available without an attached CDP client. */
 export async function runBrowserSession(emit: (line: string) => void): Promise<string> {
-  const session = await withBossSessionLock(async () => {
+  const session = await (async () => {
     const connection = await connectBrowserWithMetadata({}, verifyExisting);
     try {
       const { endpoint, pid, profileDirectory, userDataDir, reused } = connection;
@@ -57,7 +56,7 @@ export async function runBrowserSession(emit: (line: string) => void): Promise<s
         clearSpawnedChromeProcessRef();
       }
     }
-  }, 0);
+  })();
 
   const verifyAlive = async () => {
     const current = await probeRemoteDebuggingWsEndpoint(REMOTE_DEBUGGING_PORT, 1_000);

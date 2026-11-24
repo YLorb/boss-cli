@@ -52,16 +52,10 @@ let probes = 0;
 let liveEndpoint;
 const browser = {
   connected: true,
-  disconnect: async () => { assert.equal(locked, true); disconnects++; },
+  disconnect: async () => { disconnects++; },
   close: async () => { throw new Error('test browser should not be closed'); },
 };
-mock.module('../dist/common/boss_session_lock.js', { namedExports: {
-  withBossSessionLock: async (work, waitMs) => {
-    assert.equal(waitMs, 0);
-    locked = true;
-    try { return await work(); } finally { locked = false; }
-  },
-} });
+
 mock.module('../dist/browser/cdp_browser.js', { namedExports: {
   ...cdp,
   connectBrowserWithMetadata: async (_, verifyReuse) => {
@@ -69,7 +63,6 @@ mock.module('../dist/browser/cdp_browser.js', { namedExports: {
     return { browser, endpoint, pid, reused, userDataDir: profile, profileDirectory: 'Default' };
   },
   probeRemoteDebuggingWsEndpoint: async () => {
-    assert.equal(locked, false);
     probes++;
     return liveEndpoint;
   },
@@ -78,13 +71,12 @@ mock.module('../dist/browser/cdp_browser.js', { namedExports: {
 mock.module('node:timers/promises', { namedExports: { setTimeout: async () => {} } });
 const { runBrowserSession } = await import('../dist/cli/browser-session.js');
 
-test('Chrome supervision reports health after disconnect and releases the startup lock', async () => {
+test('Chrome supervision reports health after disconnect without a startup lock', async () => {
   liveEndpoint = endpoint;
   const events = [];
   const stopped = JSON.parse(await runBrowserSession(line => {
     const event = JSON.parse(line);
     events.push(event);
-    assert.equal(locked, false);
     assert.equal(disconnects, 1);
     if (event.status === 'alive') process.emit('SIGTERM');
   }));

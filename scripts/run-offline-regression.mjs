@@ -3,13 +3,13 @@ import {mkdir,writeFile} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 const output=resolve('output','managed-regression-'+Date.now());await mkdir(output,{recursive:true});
-const files=['test-task-config','test-run-state','test-run-atomic','test-phase-state','test-managed-routing','test-formal-arguments','test-collection-receipt','test-offline-boundary','test-permit','test-flow-lock','test-cli-json','test-collection','test-resume-analysis-session','test-preflight','test-browser-session','test-iframe-boundary','test-resume-capture-timing','test-search-controls','test-search-preview-identity','test-recommend-navigation','test-resume-frame-recovery'].map(x=>'scripts/'+x+'.mjs');
-const result=spawnSync(process.execPath,['--experimental-test-module-mocks','--test',...files],{encoding:'utf8',windowsHide:true,timeout:180000,maxBuffer:16*1024*1024,env:{...process.env,NODE_OPTIONS:'--import '+pathToFileURL(resolve('scripts/testing/offline-network.mjs')).href,BOSS_OFFLINE_TEST:'1',BOSS_APP_HOME:join(output,'home'),BOSS_RUNS_DIR:join(output,'runs'),BOSS_SKILL_DIR:resolve('skills/boss-recruitment')}});
+const files=['test-simple-workflow', 'test-simple-routing', 'test-offline-boundary', 'test-cli-json', 'test-collection', 'test-resume-analysis-session', 'test-browser-session', 'test-browser-entry', 'test-session-guard-boundary', 'test-session-no-recovery', 'test-iframe-boundary', 'test-resume-capture-timing', 'test-search-controls', 'test-search-preview-identity', 'test-recommend-navigation', 'test-resume-frame-recovery', 'test-search-more-back'].map(x=>'scripts/'+x+'.mjs');
+const result=spawnSync(process.execPath,['--experimental-test-module-mocks','--test',...files],{encoding:'utf8',windowsHide:true,timeout:180000,maxBuffer:16*1024*1024,env:{...process.env,NODE_OPTIONS:'--import '+pathToFileURL(resolve('scripts/testing/offline-network.mjs')).href,BOSS_OFFLINE_TEST:'1',BOSS_APP_HOME:join(output,'home'),BOSS_SKILL_DIR:resolve('skills/boss-recruitment')}});
 const log=(result.stdout??'')+(result.stderr??'');await writeFile(join(output,'tests.log'),log);
 const counts=Object.fromEntries(['tests','pass','fail','skipped'].map(key=>[key,Number(new RegExp('^# '+key+' (\\d+)','m').exec(log)?.[1]??0)]));
 let browser=null;
 if(process.argv.includes('--browser-fixtures')){
- const env={...process.env,BOSS_APP_HOME:join(output,'fixture-home'),BOSS_RUNS_DIR:join(output,'fixture-home','runs')};delete env.NODE_OPTIONS;
+ const env={...process.env,BOSS_APP_HOME:join(output,'fixture-home')};delete env.NODE_OPTIONS;
  const r=spawnSync(process.execPath,['--experimental-test-module-mocks','--test','scripts/test-collection-page.mjs'],{encoding:'utf8',windowsHide:true,timeout:120000,env});const log=(r.stdout??'')+(r.stderr??'');await writeFile(join(output,'browser-fixtures.log'),log);browser={exitCode:r.status,scope:'synthetic HTML in a separate Chrome; external traffic blocked by closed proxy'};
 }
 const ok=result.status===0&&(!browser||browser.exitCode===0);

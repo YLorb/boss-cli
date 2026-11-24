@@ -8,7 +8,7 @@ mock.module('../dist/browser/browser_session.js',{namedExports:{
   ensureBrowserSession:async()=>{},getBrowserRef:()=>({}),getPageRef:()=>page,setSessionPage:()=>{},
 }});
 mock.module('../dist/common/boss_page_guards.js',{namedExports:{installBossPageGuards:async()=>{}}});
-mock.module('../dist/common/boss_session_lock.js',{namedExports:{withBossSessionLock:async fn=>fn()}});
+
 const {withBossSessionPage}=await import('../dist/common/boss_session_page.js');
 
 test('context destruction is exposed after one attempt without refocusing a visible page',async()=>{

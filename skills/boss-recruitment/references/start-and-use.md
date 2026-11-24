@@ -1,84 +1,20 @@
----
-title: "启动、配置与使用示例"
-read_when: "首次运行或编排新一轮任务"
-updated: "2026-10-14"
-scope: "startup"
----
-
 # 启动与使用
 
-操作真实 BOSS 前必须读取[工具使用边界](tool-boundary.md)。限制覆盖启动、登录和全部业务阶段；不得用直接 CDP、内部模块或自写脚本代替 CLI，即使只是截图、监测或验收。命令缺失时停止并报告，不自行换工具。
-
-## 配置
-
-首次部署先读取[环境配置](environment.md)完成Node.js、Chrome、PATH、CDP端口与数据目录设置。无需Git的下载及解压步骤见[安装说明](install.md)。
-
-复制 [配置模板](../assets/config.example.json) 到自己的工作目录，填入绝对路径。**此 JSON 是 Agent 编排配置，CLI 不会自动读取它。** `resumeDir` 映射 download-resume 的 `--output-dir`，`ledgerDir` 映射 collect 的 `--ledger-dir`。`cdpUrl` 应与浏览器调试端口一致；CLI 原生支持的是端口环境变量，不是 `--cdpUrl` 参数。
-
-`timeoutBudgetSec:15` 表示当前附件命令的内置预算，改 JSON 不会改变 CLI 超时。其他命令没有同样的整命令预算。`messages.example.json` 为话术模板；消息3保留用户给定两段，但含公司信息，交付其他公司时须先由使用者修改确认。
+1. 读取实际使用的 SKILL.md、AGENTS.md 和对应 SOP，核对公开 CLI 安装路径。
+2. 将用户要求写入一个任务 JSON，设置 BOSS_TASK_CONFIG。外部 Skill 通过 BOSS_SKILL_DIR 指向实际目录。
+3. 使用 version-check --json 核对版本。所有业务调用继续执行 CLI/Skill 配套校验。
+4. 浏览器已就绪时直接执行 status --json。首次使用由宿主后台运行 browser-session --json 并等待 ready；仅确认需要登录时执行 login --json。
+5. 按 SOP 调用工具，每步取得回执后读取结果并保存 Agent 判断，串行循环直到满足用户的停止条件。
 
 ```powershell
-Set-Location 'C:\Recruitment\boss-cli'
-$env:BOSS_BROWSER_REMOTE_DEBUGGING_PORT = '53470'
-# 仅当自动发现 Chrome 失败时，由用户明确配置已安装的可执行文件：
-# $env:CHROME_PATH = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
-node .\dist\cli\index.js --check-login --json
+$env:BOSS_SKILL_DIR = 'C:\Recruitment\boss-cli\skills\boss-recruitment'
+$env:BOSS_TASK_CONFIG = 'C:\Recruitment\task.json'
+boss version-check --json
+boss status --json
 ```
 
-## 正式任务预检
+启动前无需创建运行实例或权限文件。task-check --json 可用于离线检查任务 JSON。工具参数以 boss commands <命令名> --json 为准。
 
-使用已核验安装的 `boss preflight --json`。该命令使用同一进程校验版本和任务配置，只读取已存在的唯一 BOSS 标签页。返回 `passed` 后运行 `boss task-init --json`；返回 `failed` 时读取 `reason.code` 和 `reason.message`。只有确定需要登录时才进入下节，完成后重新执行预检。
+browser-session 使用固定专用目录和调试端口，断开 CDP 后继续输出 ready、alive 和 stopped。业务命令只连接已有 Chrome。浏览器身份校验和端口冲突错误应直接报告。宿主负责后台进程生命周期，招聘循环由 Agent 执行。
 
-## Chrome启动与登录（强制入口）
-
-用宿主正式支持的后台任务模式执行 `boss browser-session --json`。等待 `ready`，保存宿主任务 ID、端口与专用目录。命令会在释放浏览器会话锁、断开 CDP 后继续检查同一调试端点。此后按轮运行 `preflight`，正常收尾仅结束招聘轮次。存活回执证明浏览器可连接，登录以预检或登录核验为准。
-
-Agent必须使用boss-cli提供的入口完成浏览器启动与登录流程，不得自行启动Chrome或用其他工具代替：
-
-```powershell
-node .\dist\cli\index.js login --json
-```
-
-首次登录或已确认未登录时，先确认独立的 `browser-session` 后台任务已返回 `ready` 且 Chrome 可见，再用 `login` 打开登录页。每次 automation 触发只复用已有会话。已由 check-login 确认登录时直接进入预检。端口未就绪时报告常驻任务状态，连接失败保留原始错误。
-
-扫码、验证码由用户在CLI打开的浏览器中完成。随后执行 `node .\dist\cli\index.js --check-login --json`，只有明确已登录才继续。login返回不等于已登录，无法判断或异常不能当成功；浏览器账号和招聘岗位由使用者确认。
-
-**禁止替代启动／登录路径**：直接运行chrome.exe、Start-Process、Puppeteer／Playwright launch、自写CDP连接及导航脚本、其他浏览器控制工具。不得复制他人的Cookie或自动更换用户数据目录来绕过故障。CHROME_PATH及端口配置仅交给CLI读取，不授权Agent另起浏览器。
-
-boss-cli入口不存在、启动失败或登录核验不明时，停止依赖登录的步骤，报告原始错误和配置上下文；不做静默重试或换工具兜底。岗位切换脚本直连真实浏览器的旧许可已撤销；沟通岗位通过正式 `switch-job` 选岗，再用公开CLI核验。
-
-## 账本启动
-
-启动前必须读取[路径与账本核验](paths.md)，确认固定ledgerDir并计算expectedLedgerFile；核对collect返回的file完全匹配后才处理候选人。
-
-有账本写入的正式业务运行，在独立终端保持下面进程及 stdin 打开：
-
-```powershell
-node .\dist\cli\index.js collect --job '目标岗位完整名称' --ledger-dir 'C:\Recruitment\shared\ledgers'
-```
-
-等待 started，核对 job、file、recoveryRequired。向**同一进程的 stdin** 写入一行 `{"op":"show"}`，等待响应。其他 CLI 命令在另一终端串行执行；collect stdin 只接受 JSON，不接受 shell。每条等待返回，不一次性灌入全部命令。结束写 `{"op":"stop"}` 并等待 stopped 及进程退出。
-
-仅查看评估的验收不启动正式账本写会话；保存独立运行记录即可。现存恢复状态若影响本轮去重，仍需读出并说明，不能跳过未决身份。
-
-## 启动 prompt
-
-以下业务 prompt 须同时带上[严格工具约束 prompt](tool-boundary.md#可复用执行-prompt)；“仅查看”或“验收”不构成非 CLI 工具例外。
-
-WorkBuddy 定时搜索／推荐且要求“单人出错不影响其他人”：使用[不联系模式配置与可复制提示词](non-contact-continuation.md)。先完成一次人工监督运行，再配置本地定时任务；该文档是 Agent 执行规范，不代表 CLI 已实现调度或跨任务互斥。
-
-推荐：
-> 使用 boss-recruitment Skill 执行推荐 SOP。目标岗位及 JD：……；评分标准：……；否决项：无；观察上限：5；触达门槛：……；允许查看、评估并对符合条件者发送已确认的消息3。运行目录：……。
-
-搜索验收：
-> 使用 boss-recruitment Skill 执行搜索 SOP。目标岗位及 JD：……；关键词：……；岗位筛选不限职位；评分标准：……；观察上限：1。本轮仅查看评估，不联系、不入正式账本。
-
-收集：
-> 使用 boss-recruitment Skill 收集“……”岗位本轮起始快照中的未读简历。按所附标准评估，允许发送已确认的求简历和收件确认消息；附件保存到……；不上传。循环内不刷新未读列表。
-
-恢复：
-> 仅检查并恢复指定岗位的本地账本，禁止操作 BOSS 页面。读取已有回执，报告能恢复的证据和必须由人工对账的部分。
-
-## 运行时创建
-
-账本由 collect 创建；运行回执、JD／评估配置和导出目录由 Agent 创建；浏览器用户目录及截图由 CLI 创建。上述运行文件均不需要预装，不打包回 Skill。默认数据根目录为用户的 `~/.boss-cli/`，截图位于 `.cache/resume-screenshots/`，附件位于 `resume-files/`；下载可指定自选目录。
+中断后读取原任务 JSON、固定结果文件和岗位账本，核对当前页面及未确认动作，从明确未完成的步骤继续。任务没有强制过期时间，Agent 继续遵守用户给出的停止要求。版本不匹配、身份不明或风控时按 SOP 停止并保留原始错误。

@@ -1,50 +1,29 @@
----
-title: "统一任务配置与运行绑定"
-updated: "2026-11-08"
-scope: "task-config"
----
+# 单个任务 JSON 与逐步结果
 
-# 正式任务
-
-自然语言由宿主 Agent 整理为本地任务 JSON，CLI 负责校验。`BOSS_TASK_CONFIG` 指向绝对路径，先执行 `boss preflight --json`，通过后使用 `next.argv` 调用同一 CLI 初始化。已设置 `BOSS_TASK_CONFIG` 且没有运行绑定时，业务命令返回 `TASK_INIT_REQUIRED`；先按回执执行预检。`task-check` 可独立进行离线配置诊断。只对缺项、业务范围或授权有实质歧义时询问用户；不增加每轮重复确认。
+Agent 把用户要求写进一个普通 JSON，用 BOSS_TASK_CONFIG 指定绝对路径后直接调用业务命令。CLI 每次读取该文件，版本配套校验继续生效。文件中的人数、获准动作、评估标准及停止条件由 Agent 按 SOP 执行。
 
 ```json
 {
-  "schemaVersion": 1,
-  "job": "完整岗位名 _ 城市",
-  "scope": "collect",
-  "mode": "collect-only",
-  "permit": "C:\\Recruitment\\permit.json",
-  "jobSpec": "C:\\Recruitment\\job-spec.json",
-  "ledgerDir": "C:\\Recruitment\\ledgers",
-  "targets": [{"id":"实际会话data-id","name":"实际姓名"}],
-  "messageScript": "用户已确认的完整对外话术",
-  "stop": {"observeLimit":20,"contactLimit":0,"maxConsecutiveFailures":3,"deadline":"2026-12-01T18:00:00+08:00"}
+  "job": "用户确认的完整岗位名 _ 城市",
+  "scope": "search",
+  "jd": "用户提供的岗位要求原文",
+  "criteria": [],
+  "allowedActions": ["search", "preview", "ocr", "decide", "back"],
+  "resultsFile": "C:/Recruitment/records/position.jsonl",
+  "ledgerDir": "C:/Recruitment/ledgers"
 }
 ```
 
-- scope：collect/recommend/search/view-only。mode 仅用于 collect：screen（默认）或明确授权的 collect-only。
-- jobSpec 若提供，必须是存在、可解析、schemaVersion=1且 job 匹配的绝对路径。规则内容仍按需读取，不能自行改标准。
-- targets 是已核验的本轮名单；没有预先名单时，岗位核验后从第一次 list/recommend/search 的结构化回执冻结。ID 按入口区分，不凭姓名扩大对象范围。
-- messageScript 是完整授权正文。未设置时不能发消息。消息2仍需下载成功，寻访消息仍需 fit 和联系确认。
-- ledgerDir 是跨轮固定岗位账本目录；未填使用应用的 ledgers 目录。不可为每个 run 新建空账本规避历史。
-- contactLimit 允许0，其他数值上限为正安全整数；deadline 必须含明确时区。未知字段或拼写错误直接拒绝。
-- phases 可选，结构见 phase-state.md。不填时正式任务仍执行身份、材料、授权、停止和防重放检查。
+该示例只声明查看评估。联系、发送和下载需要用户授权后在同一 JSON 中记录，发送正文使用 messageScript 原文。observeLimit、contactLimit 等业务要求可以直接放在 JSON 中，由 Agent 逐人核对。任务文件没有强制过期时间，中断后继续读取原文件及结果。JSON 的其他描述字段由 Agent 解释。
 
-## task-init 的结果
+job 必须是非空字符串。scope 如提供，应为 collect、recommend、search 或 view-only。resultsFile、ledgerDir 如提供，必须是绝对路径。可选的 task-check --json 只读取 JSON 并报告结果文件位置。创建任务文件后可直接执行工具。
 
-初始化回执包含 `runId` 和初始 `phase`。运行记录 schemaVersion=2，保存任务快照、任务/permit 内容哈希、实际 CLI/Skill 版本与路径、固定账本目录，并为本轮创建独立 flow/phase 文件。新任务替换本进程旧绑定，不能继承旧权限。
+resultsFile 未提供时，按 job 原文的 SHA-256 保存到 ~/.boss-cli/results/<岗位哈希>.jsonl。独立调用未提供任务 JSON 时，回执保存到 ~/.boss-cli/results/commands.jsonl。一次业务应固定同一个结果文件，Agent 在调用前读取既有记录。
 
-后续公开 CLI 自动加载当前运行指针；需要固定指定运行时可设置 BOSS_RUN_ID。显式环境变量和绑定冲突则报错，不能覆盖绑定。task-init 不消费旧运行绑定，因此可以明确创建新任务；新任务不能代替旧未决动作的核验。
+联系、发送和开聊确认前追加 intent，执行后追加完整 result 或 error，并同步文件。其他业务命令在取得结果后保存一次回执。每个 attemptId 的最后一条记录代表当前结果。记录包含命令、参数、岗位、候选人 ID、正文和时间。私密凭据配置入口不写入操作回执。Agent 另外保存评分依据、人数统计、下一步和停止原因，引用对应 attemptId 或文件位置。
 
-指针损坏、指向丢失记录、任务/permit 改变、Skill错配一律停止。只有从未初始化且没有当前指针时保留手工命令模式。旧 schemaVersion=1 不自动迁移，明确重新初始化；保留历史账本与证据。
+greet、send 使用稳定 ID 检查历史。已确认联系或已发送同文会阻止重复动作。intent 或 unknown 表示必须先核验。推荐 greet 返回 clicked 时仍待确认，通过同人聊天小窗的身份核验后记录联系确认。消息可通过同人、同岗位、完整正文的 check 回执确认。已确认尚未发出动作的发送前置错误记为 not-attempted，Agent 根据实际情况决定后续步骤。
 
-**`--keep-observed`（可选）**：只续用「上一轮同岗位运行」的 `observed`（已开过的简历 id）与 `material`（对应的截图/OCR 文本路径），其余字段仍从零开始。它不续用 `decisions`/`contacts`/`sent`/`downloaded`——评估结论、触达与下载回执必须按新任务重新取得，防重放仍由 flow journal 与岗位账本负责。上一轮状态不可读时降级为空起重来并打印原因，不阻断初始化。用途：改任务配置或重建运行时，不必把同一个人的简历再读一遍。
+兼容读取原 ledgerDir 中的 <岗位哈希>.actions.json，保留历史成功和未确认联系的去重效果。旧 runs 目录保留为历史材料，普通命令不读取其中的运行指针。旧任务中的控制字段可作为历史说明保留，CLI 只读取岗位及结果文件等实际使用字段。
 
-**版本漂移**：`cliVersion` 只作构建号，与已绑定运行不一致时默认**就地续绑**（写回运行记录并追加 `versionHistory` 审计项），观察/材料/未决全部保留；`skillDir`、`skillVersion`、`compatibilityId` 属契约身份，任一不一致仍必须重新 `task-init`。需要旧语义的严格校验时设 `BOSS_STRICT_VERSION_BIND=1`。
-
-正式任务按 `boss commands <命令名> --json` 返回的 `formalUsage` 传参。使用公开命令名、长选项及独立参数值，业务命令加 `--json`，常驻 `collect` 按逐行 JSON 协议执行。BOSS_APP_HOME/BOSS_RUNS_DIR 是显式数据/测试隔离目录，必须使用固定绝对路径；不要在正常轮次间切换账户数据目录。
-
-正式 collect 必须与绑定的 job、mode、ledgerDir 一致；stdin也受相同前置条件约束。联系/消息回执按岗位持久保存，未知结果不能因新建 run 而重放。
-
-这是 CLI 入口的编排约束，不是宿主或操作系统权限隔离。
+单 Agent 串行使用同一浏览器和岗位记录。逐人完成查看、OCR、评估、获准联系、发送及关闭，再处理下一位。结果保存失败时停止新的业务动作。

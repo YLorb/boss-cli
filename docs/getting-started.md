@@ -25,7 +25,7 @@
 
 代码位置：`https://github.com/YLorb/boss-cli`（**你可以从这里的 dev 分支获取到最新的版本或者补丁版本**）
 
-当前版本：CLI `0.6.20-dev-8`，配套 Skill `1.0.32`
+当前版本：CLI `0.6.21-dev.0`，配套 Skill `1.0.32`
 
 ---
 
@@ -72,7 +72,7 @@ Agent 会按 `skills/boss-recruitment/references/install.md` 执行：
 |---|---|
 | `BOSS_BROWSER_REMOTE_DEBUGGING_PORT` | Chrome 的 CDP 调试端口（如 `53470`） |
 | `BOSS_SKILL_DIR` | 本次实际加载的 Skill 绝对目录 |
-| `BOSS_RUN_ID` / `BOSS_TASK_CONFIG` | 指定哪个 run / 哪个 task 配置 |
+| `BOSS_TASK_CONFIG` | 指向普通任务 JSON |
 | `BOSS_CLI_TRACE` | 输出只读诊断信息到 stderr |
 
 ---
@@ -84,7 +84,7 @@ Agent 会按 `skills/boss-recruitment/references/install.md` 执行：
 ```
 boss-cli/
 ├── src/            # TypeScript 源码
-│   ├── cli/        # 命令路由、参数解析、权限(permit)、阶段状态(phase)、运行绑定(run)
+│   ├── cli/        # 命令路由、参数解析、版本校验、任务 JSON
 │   ├── toolset/    # 各业务命令实现：collect/recommend/search/greet/chat/send/ocr/jd...
 │   ├── browser/    # 浏览器会话、CDP 连接、人工延迟、视口
 │   ├── common/     # 简历抓取、OCR、页面守卫、动作历史、流程锁等公共能力
@@ -99,77 +99,37 @@ boss-cli/
 └── landing/        # 官网落地页
 ```
 
-### 4.2 核心机制（理解这三点就懂了 80%）
+### 4.2 Agent 与 CLI 的职责
 
-**① 权限（permit）—— 每一步都要被授权**
-命令按 `entry`（`collect` / `recommend` / `search` / `view-only`）划分权限，且必须与 task 的 `scope` 一致。`jd`、`search` 等敏感能力都需显式授权，否则 deny。
+任务要求保存在一个普通 JSON。Agent 负责按 SOP 判断下一步、人数和停止条件。CLI 保留版本、参数、实际身份及重复联系检查，并把业务结果逐步追加到固定 JSONL，联系与发送另存动作前意图。
 
-**② 阶段状态（phase-state）—— 逐人闭环，禁止重放**
-记录 `paused`（全局暂停）、`pending`（未决动作）、`decisions`（评估结论）、`observed`（已查看名单）、`contacts`（已触达名单）。评估结论落账后，**该人的触达必须紧接着完成**，不得攒批。任何有副作用的动作（send/greet 等）会查动作历史，防止重复。
-
-**③ 运行绑定（run-state）—— 版本校验 + 任务一致性**
-`run` 记录 `cliVersion`、`taskFile`、`taskHash`。启动时校验 CLI 与 Skill 的配套版本，不一致就停止等确认；任务配置被改动导致 `taskHash` 不匹配也会报「任务配置已改变或错绑」。
-
-### 4.3 命令一览（常用）
-
-| 命令 | 作用 |
-|---|---|
-| `boss preflight --json` | 正式任务只读预检，含版本、配置、登录与页面 |
-| `boss task-check / task-init` | 写任务配置、初始化本轮 |
-| `boss phase-status --json` | 读取当前阶段状态 |
-| `boss collect / recommend / search` | 三种寻访入口 |
-| `boss preview <姓名> --candidate-id <ID>` | 打开候选人完整简历 |
-| `boss ocr <截图路径>` | 简历截图转文字 |
-| `boss decide --verdict fit/not-fit` | 记录评估结论 |
-| `boss greet / chat / send` | 打招呼、开会话、发消息 |
-| `boss flow-resume / flow-status` | 解除暂停、看流程锁 |
-
-完整命令与页面 URL 对照见 `boss commands --json` 和 `docs/boss-url-map.md`。
-
----
+使用 BOSS_TASK_CONFIG 指定任务文件后可直接运行业务命令。task-check --json 是可选离线诊断。具体示例见 [任务 JSON](../skills/boss-recruitment/references/task-config.md)。
 
 ## 5. 运行示例
 
-以一个「搜索轮评估 + 触达」的最小闭环为例（搜索后训练平台工程师岗位）：
+Agent 先将用户要求写入一个任务 JSON，固定结果文件路径，再按 SOP 串行调用。下面展示搜索查看与评估的独立命令，Agent 每步读取结果后决定下一步。
 
 ```bash
-# 0. 设环境变量（Chrome 已开，CDP 端口 53470）
-export BOSS_BROWSER_REMOTE_DEBUGGING_PORT=53470
 export BOSS_SKILL_DIR=/path/to/skills/boss-recruitment
-
-# 1. 核验本轮任务配置与已有 Chrome
 export BOSS_TASK_CONFIG=/path/to/task.json
-node dist/cli/index.js preflight --json
 
-# 2. 仅在预检返回 passed 后初始化本轮任务
-node dist/cli/index.js task-init --json
+boss version-check --json
+boss status --json
 
-# 3. 搜索：设城市 + 岗位 + 关键词，提交
-node dist/cli/index.js search --city "深圳" --json
-node dist/cli/index.js search --job "后训练平台工程师" --json
-node dist/cli/index.js search --submit --json
+boss search --city "深圳" --json
+boss search --job "后训练平台工程师" --json
+boss search --keyword "用户提供的关键词" --json
+boss search --submit --json
 
-# 4. 打开某位候选人完整简历，核验身份
-node dist/cli/index.js preview "杨**" --candidate-id "89fc..." --json
-
-# 5. OCR 识别简历文字，评估
-node dist/cli/index.js ocr "C:\...\preview-杨__-xxx.png" --layout boss-online-resume --json
-
-# 6. 记录结论
-node dist/cli/index.js decide --candidate-id "89fc..." --verdict fit --json
-
-# 7. 触达（先在简历内打开，再打招呼）
-node dist/cli/index.js preview "杨**" --candidate-id "89fc..." --open-only --json
-node dist/cli/index.js greet "杨**" --candidate-id "89fc..." --check --json
-
-# 8. 发求简历话术、关窗
-node dist/cli/index.js send --embedded --candidate-id "89fc..." --text "你好，方便发一份简历吗？" --json
-node dist/cli/index.js chat --embedded --close --candidate-id "89fc..." --json
+boss preview "当前卡片姓名" --candidate-id "当前卡片ID" --json
+boss ocr "截图回执的绝对路径" --layout boss-online-resume --json
+boss decide --candidate-id "当前卡片ID" --verdict fit --json
 ```
 
-> 注意：`--candidate-id` 用每次 `preview`/`greet` 回执里核验通过的真实 ID，不要自己编。搜索页岗位名要传**下拉里显示的原文**（纯岗位名，不带城市/薪资）。
+岗位、关键词和评估结论以用户要求及本人的材料为准。CLI 逐步保存工具结果，Agent 补充评估理由、计数与下一步。需要联系时按[搜索 SOP](../skills/boss-recruitment/references/search-sop.md)核验并执行获准动作，逐人完成后继续循环。
 
----
+中断后读取原任务 JSON 和结果文件，核验未确认动作，从明确未完成的步骤继续。任务没有强制过期时间。
+
 
 ## 6. 目前遇到的问题及解决方案
 
@@ -182,14 +142,10 @@ node dist/cli/index.js chat --embedded --close --candidate-id "89fc..." --json
 | `search --job "岗位 _ 城市"` 连续 8s 超时 | 搜索页下拉是纯岗位名，`pickOption` 精确匹配，带城市必超时 | 传不带城市的岗位名 |
 | `recommend --job ...` 报 `❌ 用法` | recommend 只接受 `--check-job` / `--ensure-job` | 改用 `--ensure-job` |
 | `--ensure-job` 报「冻结快照前必须核验岗位」 | 需先 `status` 核验 | 先跑 `status --json` 再 ensure-job |
-| 报「运行绑定冲突」 | 多岗位共用同一浏览器会话，同时设了 `BOSS_TASK_CONFIG` 又依赖 `current.json` 指针 | 用 `BOSS_RUN_ID`（`--run <runId>`）覆盖指针，不再设 `BOSS_TASK_CONFIG` |
 | 改 task 配置后报「任务配置已改变或错绑」 | `taskHash` 不匹配 | 改配置（如 `observeLimit`）时，用 CLI 内部 `loadTaskConfig`+`digest` 重算并同步写回 run 快照，别手工算 hash |
 | 报「已到观察上限」 | `stop.observeLimit` 太小 | 提高该值，并按上一条同步 taskHash |
-| 报「已到连续失败上限」 | `maxConsecutiveFailures` 太紧，诊断一次就撞顶 | 调大（如 8）+ `task-init` 重置 |
-| `preview` 报「在线简历 iframe 不可见 / 高度滚动变化」 | 页面加载慢 | `flow-resume` + 稍等重试 |
 | OCR 报「图片不是当前候选人截图」 | Git Bash 把 `C:\` 改写成 `C:/`，路径对不上 | 用 Python `subprocess.run` 传 argv 绕开 shell 路径改写 |
 | `MSYS2_ARG_CONV_EXCL='*'` 报 `Cannot find module` | 该变量破坏 node 脚本路径 | 不要用该变量，改用 subprocess 传参 |
-| `flow-resume` 报「未决动作尚未核验，不能解除暂停」且 `status` 也报暂停死锁 | pending 需读页面核验才能清、读页面需 resume、resume 需 pending 已清，三重死锁 | 已修复：`flow-resume` 只解暂停、保留 pending，重放仍由「动作结果未决」门拦截 |
 
 **一句话经验**：遇到失败，**先怀疑操作方式和参数**，不要立刻认定是代码缺陷——很多「以前能跑、现在跑不了」的情况，是参数传错或漏了前置步骤，而不是代码坏了。
 
@@ -207,7 +163,6 @@ node dist/cli/index.js chat --embedded --close --candidate-id "89fc..." --json
 4. **原始报错全文**：直接粘贴 stderr / 回执原文，**不要翻译、不要截断**。
 5. **环境**：CLI 版本、Skill 版本、Node 版本、Chrome 端口、是否多岗位共用会话。
 6. **复现步骤**：如果可复现，写出最小步骤。
-7. **当时的阶段状态**（可选但很有用）：`phase-status --json` 的关键字段（`paused`、`pending`、`decisions`、`observed`）。
 
 ### 7.2 反馈模板（直接复制填）
 

@@ -4,10 +4,9 @@ import type { Page } from 'puppeteer-core';
 import { CHAT_SEARCH_MATCH_SCRIPT } from './chat_search_match.js';
 import { RECOMMEND_CARD_IDENTITY_SCRIPT } from './recommend_identity.js';
 // Local patch 0.6.20-dev-7：上游只对推荐页做岗位名归一化，搜索页/沟通页用逐字比较，
-// 导致这两处 check --job 恒为 false。统一改为岗位名归一化比较（与 phase_state / switch-job 同口径）。
+// 导致这两处 check --job 恒为 false。统一改为岗位名归一化比较（与 switch-job 同口径）。
 import { jobTitleKey } from './recommend_job.js';
 import { installBossPageGuards } from '../common/boss_page_guards.js';
-import { withBossSessionLock } from '../common/boss_session_lock.js';
 
 export type CheckCriteria = { page?: string; overlay?: string; state?: string; name?: string; dataId?: string; candidateId?: string; job?: string; keyword?: string; text?: string; embedded?: boolean };
 export const PAGE_TYPES = ['chat','search','recommend','deep-search','online-resume','positions','login','other'];
@@ -162,9 +161,9 @@ export async function runStatus():Promise<string>{return withReadOnlyPage(async 
 
 /** Existing browser only; callers must validate the page before installing guards. */
 export async function withGuardedReadOnlyPage<T>(validate:(page:Page)=>void, read:(page:Page)=>Promise<T>):Promise<T>{
- return withBossSessionLock(()=>withReadOnlyPage(async page=>{
+ return withReadOnlyPage(async page=>{
   validate(page);
   await installBossPageGuards(page);
   return read(page);
- }));
+ });
 }

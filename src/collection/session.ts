@@ -5,22 +5,38 @@ import { appendFileSync } from 'node:fs';
 import { Ledger } from './ledger.js';
 import { CollectionRunner, type Candidate } from './runner.js';
 import { runFullCandidateInventory } from '../toolset/list.js';
-import { getBoundRun } from '../cli/run_state.js';
-import { assertPermittedCommand } from '../cli/permit.js';
-import { assertPermittedPhase, recordCollectionDecision, readCollectionReceipt } from '../cli/phase_state.js';
+import { readTaskConfig, taskResultsFile } from '../cli/task_config.js';
+import { readCommandReceipts } from '../common/action_history.js';
+import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { APP_HOME } from '../config.js';
+import { join } from 'node:path';
+import type { AttachmentProbe } from '../toolset/attachment.js';
 
 export type CollectionMode = 'screen' | 'collect-only';
 
 async function applyDownloadReceipt(ledger:Ledger,id:string):Promise<void>{
   if(ledger.recoveryRequired)throw new Error('有信息需要恢复。');
-  const receipt=await readCollectionReceipt(id);
+  const task = await readTaskConfig();
+  if (!task || task.job !== ledger.job) throw new Error('下载回执入账需要同岗位任务 JSON');
+  const rows = await readCommandReceipts(taskResultsFile(task));
+  const row = rows.reverse().find(row => row.job === task.job && row.id === id && row.outcome === 'success' &&
+    (row.command === 'download-resume' ? (row.result as any)?.path : row.command === 'probe-resume' && (row.result as any)?.download?.path));
+  const result = row?.result as any;
+  const download = row?.command === 'probe-resume' ? result?.download : result;
+  if (!download?.path || !download.attachmentName || !download.sha256 || !row?.name) throw new Error(`没有该候选人的完整下载回执：${id}`);
+  const bytes = await readFile(download.path);
+  if (bytes.length !== download.bytes || createHash('sha256').update(bytes).digest('hex') !== download.sha256) {
+    throw new Error(`附件文件与回执字节数或 SHA-256 不符：${download.path}`);
+  }
+  const receipt: AttachmentProbe = {name:row.name,dataId:id,attachment:'RECEIVED',attachmentName:download.attachmentName,
+    request:'NOT_OBSERVED',requestEvidence:[],scope:'loaded-messages',download};
   ledger.add({dataId:id,name:receipt.name});
-  if((getBoundRun()!.task.mode??'screen')==='screen')ledger.decide(id,'PASS');
   ledger.recordProbe(id,receipt);
 }
 export async function syncCollectionReceipt(id:string):Promise<string>{
-  const run=getBoundRun();if(!run||run.scope!=='collect')throw new Error('collect-sync 需要正式收集任务绑定');
-  const ledger=await Ledger.load(run.ledgerDir,run.job);
+  const task=await readTaskConfig();if(!task)throw new Error('collect-sync 需要同岗位任务 JSON');
+  const ledger=await Ledger.load(task.ledgerDir ?? join(APP_HOME,'ledgers'),task.job);
   try{await applyDownloadReceipt(ledger,id);return JSON.stringify({ok:true,dataId:id,file:ledger.file,status:ledger.get(id).status});}
   finally{await ledger.stop();}
 }
@@ -103,16 +119,12 @@ export async function runCollectionSession(directory: string, job: string, mode:
           } else {
             audit({ op: 'decision', dataId, decision: command.decision, mode: currentMode, evidence: null });
           }
-          // 先核验材料门，再更新正式账本；阶段结论在账本成功后写入。
-          await recordCollectionDecision(dataId,command.decision === 'PASS' ? 'fit' : 'not-fit',false);
           ledger.decide(dataId, command.decision);
-          await recordCollectionDecision(dataId,command.decision === 'PASS' ? 'fit' : 'not-fit');
           emit({ ok: true, op: 'decision', dataId, removed: command.decision === 'FAIL' });
           break;
         }
         case 'mode': {
           if (command.value !== 'screen' && command.value !== 'collect-only') throw new Error('mode 必须是 screen 或 collect-only。');
-          const run=getBoundRun();if(run&&command.value!==(run.task.mode??'screen'))throw new Error('mode 与冻结任务不匹配，必须明确重新初始化任务');
           currentMode = command.value;
           audit({ op: 'mode-change', value: command.value });
           emit({ ok: true, op: 'mode', mode: currentMode });
@@ -123,8 +135,6 @@ export async function runCollectionSession(directory: string, job: string, mode:
           emit({ ok: true, op: command.op, results: await runner.round(command.op) });
           break;
         case 'reconcile': {
-          await assertPermittedCommand('list',['list','--json']);
-          await assertPermittedPhase('list',['list','--json']);
           ledger.beginReconciliation();
           const inventory = JSON.parse(await runFullCandidateInventory(() => runner.stopRequested)) as { candidates: Candidate[] };
           if (runner.stopRequested) break;

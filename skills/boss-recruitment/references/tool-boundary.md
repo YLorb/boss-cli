@@ -24,7 +24,7 @@ Shell 仅用于调用公开 CLI。编排脚本可以串行调用公开命令并�
 - 其他浏览器、MCP 浏览器、桌面自动化、系统鼠标键盘或系统截图工具直接读取／操作 BOSS。
 - 直接连接 CDP，使用 Puppeteer、Playwright、Selenium 或 DevTools 脚本；包括只读 DOM、截图、监测导航／网络、滚动、点击和开标签页。
 - 自写 JS/Python/PowerShell、浏览器扩展、直接 HTTP／WebSocket 请求获取或操作 BOSS 在线数据。
-- 导入 `src`／`dist` 模块绕过 CLI 路由、身份校验、会话锁或 SOP；临时包装、复制或修改脚本冒充公开 CLI。
+- 导入 `src`／`dist` 模块绕过 CLI 路由、身份校验或 SOP；临时包装、复制或修改脚本冒充公开 CLI。
 - 运行 `scripts/switch-job.mjs` 连接真实浏览器：该脚本的旧许可已撤销，源码保留不代表允许执行。
 - 以只读、诊断、截图、监测或线上验收为由换工具，或因筛选、加载更多、滚动等能力不足而临时申请绕过。
 

@@ -1,0 +1,15 @@
+{
+  "job": "用户确认的完整岗位名 _ 城市",
+  "scope": "search",
+  "jd": "用户提供的岗位要求原文",
+  "criteria": [],
+  "allowedActions": [
+    "search",
+    "preview",
+    "ocr",
+    "decide",
+    "back"
+  ],
+  "resultsFile": "C:/Recruitment/records/position.jsonl",
+  "ledgerDir": "C:/Recruitment/ledgers"
+}

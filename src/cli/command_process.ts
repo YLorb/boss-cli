@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { attachmentCommandTimeoutMs } from '../common/attachment_timeout.js';
+import { withCommandReceipt } from '../common/action_history.js';
 
 export const ATTACHMENT_TIMEOUT_MS = 15_000;
 
@@ -19,6 +20,10 @@ export function runCommandProcess(
   timeoutMs = attachmentCommandTimeoutMs(argv),
   worker = new URL('./command_worker.js', import.meta.url),
 ): Promise<string> {
+  return withCommandReceipt(argv, () => executeWorker(argv, timeoutMs, worker));
+}
+
+function executeWorker(argv: string[], timeoutMs: number, worker: URL): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [fileURLToPath(worker), ...argv], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true });
     let result: WorkerResult | undefined;

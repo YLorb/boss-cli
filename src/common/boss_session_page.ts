@@ -11,7 +11,6 @@ import {
   setSessionPage,
 } from '../browser/browser_session.js';
 import { installBossPageGuards } from './boss_page_guards.js';
-import { withBossSessionLock } from './boss_session_lock.js';
 
 const SHOULD_DISABLE_JS =
   process.env.BOSS_BROWSER_DISABLE_JS === 'true' || process.env.BOSS_BROWSER_DISABLE_JS === '1';
@@ -135,32 +134,30 @@ export async function withBossSessionPage<T>(
   const shouldEnsureChatShell = options.ensureChatShell !== false;
   const shouldEnsureMenuList = options.ensureMenuList !== false;
 
-  return withBossSessionLock(async () => {
-    await ensureBrowserSession();
-    const browser = getBrowserRef();
-    if (!browser) {
-      throw new Error('无法获取浏览器实例。');
-    }
+  await ensureBrowserSession();
+  const browser = getBrowserRef();
+  if (!browser) {
+    throw new Error('无法获取浏览器实例。');
+  }
 
-    let page: Page | null = getPageRef();
-    if (!page || page.isClosed()) {
-      page = (await pickExistingPage(browser)) ?? (await browser.newPage());
-    }
-    setSessionPage(page);
-    if (await page.evaluate("document.visibilityState") !== "visible") await page.bringToFront();
+  let page: Page | null = getPageRef();
+  if (!page || page.isClosed()) {
+    page = (await pickExistingPage(browser)) ?? (await browser.newPage());
+  }
+  setSessionPage(page);
+  if (await page.evaluate("document.visibilityState") !== "visible") await page.bringToFront();
 
-    await installBossPageGuards(page);
+  await installBossPageGuards(page);
 
-    if (shouldEnsureChatShell) {
-      await ensureBossChatShellUrlBeforeMenuList(page);
-    }
-    if (SHOULD_DISABLE_JS) {
-      await page.setJavaScriptEnabled(false);
-    }
-    if (shouldEnsureMenuList) {
-      await ensureMenuListMountedAfterLoad(page);
-    }
+  if (shouldEnsureChatShell) {
+    await ensureBossChatShellUrlBeforeMenuList(page);
+  }
+  if (SHOULD_DISABLE_JS) {
+    await page.setJavaScriptEnabled(false);
+  }
+  if (shouldEnsureMenuList) {
+    await ensureMenuListMountedAfterLoad(page);
+  }
 
-    return await callback(page);
-  });
+  return await callback(page);
 }

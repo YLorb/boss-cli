@@ -9,7 +9,7 @@ scope: "ledger"
 
 ## collect协议
 
-每个完整岗位名＋城市（去掉薪资）对应SHA-256文件名；默认 `~/.boss-cli/ledgers`。例如「全栈软件开发工程师 _ 深圳」与「全栈软件开发工程师 _ 西安」分别建账。CLI按job原文区分，Agent在传参前按paths规范确定固定名称。同名且同城市但不同职位ID仍须明确区分，不擅自共用。每岗只能一个存活会话。
+每个完整岗位名＋城市（去掉薪资）对应SHA-256文件名；默认 `~/.boss-cli/ledgers`。例如「全栈软件开发工程师 _ 深圳」与「全栈软件开发工程师 _ 西安」分别建账。CLI按job原文区分，Agent在传参前按paths规范确定固定名称。同名且同城市但不同职位ID仍须明确区分，不擅自共用。同一岗位记录由单 Agent 串行更新。
 
 启动前必须按[路径核验规范](paths.md)确认固定ledgerDir及expectedLedgerFile；启动后逐项核对started/job/file/recoveryRequired，file必须与预期绝对路径一致，否则停止业务并正常关闭新会话。下面每行是给**同一进程stdin**的独立命令，等待前一条结果，不一次性提交：
 
@@ -28,7 +28,7 @@ scope: "ledger"
 | round | `{"op":"round"}`遍历已有账本；不扫描新人、不评分、不自动发消息或上传。只用于用户明确范围的特殊模式 |
 | recheck | `{"op":"recheck","recoveryAuthorized":true}`人工明确触发，复查RECHECK；进入全部，仅核对证据，不下载发送 |
 | reconcile | `{"op":"reconcile","recoveryAuthorized":true}`人工明确触发，全量对账解除恢复；会操作页面，禁止页面操作时不能执行 |
-| stop | 等在途任务完成并释放账本锁；等stopped与进程退出才称保存成功 |
+| stop | 等在途任务完成并结束账本会话；等stopped与进程退出才称保存成功 |
 
 ## 数据及持久化
 
@@ -40,7 +40,7 @@ candidate字段：dataId、name、createdAt、updatedAt、attachment、status、
 
 ## 外部结果合并
 
-正式任务独立下载后，活动collect会话通过stdin `{"op":"receipt","dataId":"实际ID"}` 入账；会话已停止时使用公开 `boss collect-sync --data-id <实际ID> --json`。只消费绑定run的实际下载回执，重新核验文件bytes/SHA-256后更新固定岗位账本。锁冲突、文件改变、无回执或恢复未完成均报错，不自行删锁或换入口重试。发送回执保存在固定岗位的actions记录中，与账本关联；不能用消息回执伪造收到附件。
+正式任务独立下载后，活动collect会话通过stdin `{"op":"receipt","dataId":"实际ID"}` 入账；会话已停止时使用公开 `boss collect-sync --data-id <实际ID> --json`。只消费任务 JSON 对应结果文件中的实际下载回执，重新核验文件bytes/SHA-256后更新固定岗位账本。文件改变、无回执或恢复未完成均报错，不自行删锁或换入口重试。发送回执逐步追加到固定结果 JSONL，旧 actions 记录继续用于历史去重，与账本关联；不能用消息回执伪造收到附件。
 
 只有真实附件证据才能写RECEIVED；消息3不能写附件请求SENT；NOT_OBSERVED仅表示已加载历史未看到。新的空探测不能覆盖之前已核验发送或下载证据。RECHECK不能用旧回执自动解除。
 
@@ -48,7 +48,7 @@ candidate字段：dataId、name、createdAt、updatedAt、attachment、status、
 
 reading／reconciliationRequired存在时先停普通业务，保持原文件，对用户仅提示“有信息需要恢复。”。recheck、reconcile 均须本轮用户明确授权对应岗位和范围，再传 recoveryAuthorized:true；reconcile 需要授权页面全量对账；本轮已明确授权时不重复询问。要求“仅恢复本地、不操作页面”时，只核验本地回执，不清除必须页面对账的标记，保留未决并报告。
 
-过期锁先核实所属PID已退出；损坏JSON、身份冲突、无法识别锁直接报错，不自动覆盖或删锁。恢复不能重发不明消息，也不能从历史未找到就推断没发。
+损坏 JSON、身份冲突和不完整回执直接报错。新流程移除文件占用锁，旧文件保留为历史材料。Agent 串行使用浏览器和岗位记录。恢复不能重发未确认消息。
 
 附件超时先确认子进程退出，再记录RECHECK并保留证据；普通错误停止。当前会话包装器不会因页面上下文销毁而重跑业务回调；保存原始错误与现场，不自动重试。
 

@@ -19,7 +19,7 @@ src/common/
 ### 1. 启动与连接
 
 - 在支持跨轮次存活的宿主运行公开命令 `boss browser-session --json`。端口明确未监听时启动 Chrome，已有会话通过专用配置目录回执核验。收到 `ready` 后保持该宿主任务运行。
-- automation 每轮调用 `preflight --json`，再由业务命令连接同一端口。端点不可用时报告失败，启动职责归常驻任务。
+- Agent 读取任务 JSON，直接调用业务命令连接同一端口。端点不可用时报告失败，启动职责归常驻任务。
 - Chrome 的生命周期取决于启动它的宿主。多层子进程、`detached` 和 `unref()` 无法保证 Chrome 跨宿主回收存活。若后台任务随每轮 automation 回收，应在用户独立桌面会话或宿主提供的持久服务里启动常驻任务。
 
 ### 2. ensureBrowserSession() — `src/browser/browser_session.ts`
@@ -92,7 +92,7 @@ withBossSessionPage(callback)
 
 ## 跨命令复用
 
-常驻宿主启动一次 `browser-session --json` 并保留其任务 ID。首次登录使用 `login --json`。每轮 automation 通过 `preflight --json` 核验已存在的会话，后续业务命令共用同一端口和专用用户数据目录。业务命令结束时释放其连接，保留常驻任务。
+常驻宿主启动一次 `browser-session --json` 并保留其任务 ID。首次登录使用 `login --json`。每轮 Agent 通过 `status --json` 核对当前页面及既有结果，后续业务命令共用同一端口和专用用户数据目录。业务命令结束时释放其连接，保留常驻任务。
 
 ## Windows 桌面测试启动器
 

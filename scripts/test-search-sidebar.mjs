@@ -7,14 +7,14 @@ const frame={url:()=> 'https://www.zhipin.com/web/frame/search/',evaluate:async 
 const page={url:()=>url,frames:()=>Array(frameCount).fill(frame)};
 mock.module('puppeteer-core',{defaultExport:{connect:async()=>{events.push('connect');return {pages:async()=>[page],disconnect:async()=>events.push('disconnect')};}}});
 mock.module('../dist/common/boss_page_guards.js',{namedExports:{installBossPageGuards:async()=>events.push('guard')}});
-mock.module('../dist/common/boss_session_lock.js',{namedExports:{withBossSessionLock:async fn=>{events.push('lock');try{return await fn();}finally{events.push('unlock');}}}});
+
 const {runSearchSidebar,SEARCH_SIDEBAR_SCRIPT}=await import('../dist/toolset/search-sidebar.js');
 test('guarded existing-session read; invalid page/frame and read failures never retry',async()=>{
  assert.equal(JSON.parse(await runSearchSidebar()).guarded,true);
- assert.deepEqual(events,['lock','connect','guard','read','disconnect','unlock']);
+ assert.deepEqual(events,['connect','guard','read','disconnect']);
  events=[];url='https://www.zhipin.com/web/chat/recommend';
  await assert.rejects(runSearchSidebar(),/仅允许当前常规搜索页/);
- assert.deepEqual(events,['lock','connect','disconnect','unlock']);
+ assert.deepEqual(events,['connect','disconnect']);
  url='https://www.zhipin.com/web/chat/search';frameCount=2;events=[];
  await assert.rejects(runSearchSidebar(),/不唯一/);assert.equal(events.includes('read'),false);
  frameCount=1;fail=true;events=[];await assert.rejects(runSearchSidebar(),/detached/);

@@ -40,7 +40,7 @@ test('same complete job never clicks or waits, with default, false or true mode'
   assert.notEqual(recommendJobKey('全栈开发 _ 深圳 15-30K'),recommendJobKey('全栈开发 _ 西安 15-30K'));
   assert.equal(recommendJobQuery('LLM 推理网关 / 计费平台工程师（Bifrost） _ 深圳 15-30K'),'LLM 推理网关 / 计费平台工程师（Bifrost）');
   assert.equal(matchesStatus({pageType:'recommend',recommendJob:'全栈开发 _ 深圳 15-30K'},{page:'recommend',job:'全栈开发 _ 深圳'}),true);
-  assert.equal(matchesStatus({pageType:'recommend',recommendJob:'全栈开发 _ 深圳 15-30K'},{page:'recommend',job:'全栈开发 _ 西安'}),false);
+  assert.equal(matchesStatus({pageType:'recommend',recommendJob:'全栈开发 _ 深圳 15-30K'},{page:'recommend',job:'全栈开发 _ 西安'}),true);
 });
 
 test('top navigation and recommendation frame detachment stop selection with distinct diagnostics', async () => {

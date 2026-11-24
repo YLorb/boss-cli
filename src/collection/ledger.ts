@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { hostname } from 'node:os';
 import { closeSync, fsyncSync, openSync, renameSync, writeFileSync } from 'node:fs';
 import { validateAttachmentProbe, type AttachmentProbe } from '../toolset/attachment.js';
 
@@ -53,12 +52,12 @@ function validate(doc: Document, job: string): void {
   }
 }
 
-/** One owner per job. Publish each mutation to disk before exposing it in memory. */
+/** The Agent serializes access to each job. Publish each mutation to disk before exposing it in memory. */
 export class Ledger {
   private rows = new Map<string, Entry>();
   private closed = false;
   recoveryRequired: boolean;
-  private constructor(readonly file: string, readonly job: string, private lockFile: string, doc: Document, recovery: boolean) {
+  private constructor(readonly file: string, readonly job: string, doc: Document, recovery: boolean) {
     this.recoveryRequired = recovery;
     for (const row of doc.candidates) {
       if (row.decision === 'FAIL') continue;
@@ -71,39 +70,6 @@ export class Ledger {
     if (!job.trim()) throw new Error('账本必须指定岗位。');
     await mkdir(directory, { recursive: true });
     const file = path.join(path.resolve(directory), createHash('sha256').update(job).digest('hex') + '.json');
-    const lockFile = file + '.lock';
-    // Serialize both stale-lock removal and acquisition so two starters cannot remove each other's lock.
-    const openingFile = file + '.opening';
-    let opening;
-    try { opening = await open(openingFile, 'wx'); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      throw new Error(`岗位账本正在打开，或上次在获取锁期间中断：${openingFile}；若确认其进程已退出，删除此文件后重新打开。`);
-    }
-    try {
-      await opening.writeFile(JSON.stringify({ pid: process.pid, host: hostname() }));
-      // Stale-owner recovery is explicit: a live or unidentifiable owner is never displaced.
-      try {
-        const owner = JSON.parse(await readFile(lockFile, 'utf8')) as { pid: number; host: string };
-        if (!Number.isInteger(owner.pid) || owner.pid <= 0 || owner.host !== hostname()) throw new Error(`账本锁无效或属于其他主机：${lockFile}`);
-        let alive = true;
-        try { process.kill(owner.pid, 0); } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-          alive = false;
-        }
-        if (alive) throw new Error(`岗位账本正在使用：job=${job} pid=${owner.pid}`);
-        await rm(lockFile);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      const lock = await open(lockFile, 'wx');
-      try {
-        await lock.writeFile(JSON.stringify({ pid: process.pid, host: hostname() }));
-        await lock.sync();
-      } finally { await lock.close(); }
-    } finally {
-      await opening.close();
-      await rm(openingFile);
-    }
     try {
       let doc: Document;
       try { doc = JSON.parse(await readFile(file, 'utf8')); } catch (error) {
@@ -112,11 +78,10 @@ export class Ledger {
       }
       validate(doc, job);
       const recovery = doc.header.reading === true || doc.header.reconciliationRequired === true;
-      const ledger = new Ledger(file, job, lockFile, doc, recovery);
+      const ledger = new Ledger(file, job, doc, recovery);
       ledger.save(ledger.rows);
       return ledger;
     } catch (error) {
-      await rm(lockFile);
       throw new Error(`加载岗位账本失败：job=${job} file=${file}；${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
   }
@@ -216,11 +181,10 @@ export class Ledger {
   async stop(): Promise<void> {
     this.requireOpen();
     this.closed = true;
-    await rm(this.lockFile);
   }
 
-  /** EOF releases the lock without discarding previously saved candidate updates. */
+  /** EOF preserves previously saved candidate updates. */
   async abandon(): Promise<void> {
-    if (!this.closed) { this.closed = true; await rm(this.lockFile); }
+    this.closed = true;
   }
 }

@@ -16,8 +16,9 @@ const args=process.argv.slice(2);
 if(args[0]!=='--run'||!args[1])throw Error('Usage: simulate-recruitment.sh --run <new output directory> init|observe|inspect|classify|advance|command|report');
 const directory=resolve(args[1]),operation=args[2],tail=args.slice(3);
 if(!directory.startsWith(resolve(root,'output')+sep))throw Error('Simulation run must be under workspace output/');
-const worldFile=join(directory,'world.json'),flowFile=join(directory,'flow.json');
-process.env.BOSS_FLOW_STATE=flowFile;
+const worldFile=join(directory,'world.json'),resultsFile=join(directory,'results.jsonl');
+process.env.BOSS_APP_HOME=join(directory,'home');
+process.env.BOSS_TASK_CONFIG=join(directory,'task.json');
 const save=async()=>writeFile(worldFile,JSON.stringify(world,null,2)+'\n');
 const event=async(value)=>appendFile(join(directory,'events.ndjson'),JSON.stringify({at:new Date().toISOString(),pid:process.pid,...value})+'\n');
 const emit=value=>console.log(JSON.stringify(value));
@@ -27,8 +28,9 @@ if(operation==='init'){
  const handle=await open(worldFile,'wx');
  world={version:1,cursor:0,open:null,records:{},decisions:{},classifications:{},messageEvents:[],contactEvents:[],faults:{},inspections:{},commands:0};
  await handle.writeFile(JSON.stringify(world,null,2));await handle.close();
- const manifest={version:1,scope:'Local workflow simulation using production CLI routing/state and simulated toolset; no browser, real OCR or LLM calls',rules:RULES,count:CASES.length};
+ const manifest={version:1,scope:'Local workflow simulation using production CLI routing and receipts and simulated toolset; no browser, real OCR or LLM calls',rules:RULES,count:CASES.length};
  await writeFile(join(directory,'manifest.json'),JSON.stringify(manifest,null,2));
+ await writeFile(process.env.BOSS_TASK_CONFIG,JSON.stringify({job:'合成模拟岗位',resultsFile}));
  await event({type:'init'});emit(manifest);process.exit(0);
 }
 world=JSON.parse(await readFile(worldFile,'utf8'));
@@ -81,11 +83,11 @@ mock.module('../../dist/toolset/index.js',{namedExports:Object.fromEntries(names
 mock.module('../../dist/toolset/back.js',{namedExports:{runBack:back,hasOnlineResumePanel:async()=>!!world.open}});
 mock.module('../../dist/common/boss_session_page.js',{namedExports:{withBossSessionPage:async()=>{throw Error('SIM_REAL_SESSION_FORBIDDEN');}}});
 const {executeCommand}=await import('../../dist/cli/cliRouter.js');
-const {flowStatus,flowWatch}=await import('../../dist/common/flow_state.js');
+const {readCommandReceipts}=await import('../../dist/common/action_history.js');
 
 if(operation==='observe'){
  const c=CASES[world.cursor];emit({rules:RULES,index:world.cursor+1,current:c?{id:c.id,name:c.name}:null,
-  panel:world.open,progress:world.classifications,flow:await flowStatus(flowFile),watch:await flowWatch(flowFile)});
+  panel:world.open,progress:world.classifications,receipts:await readCommandReceipts(resultsFile)});
 }else if(operation==='inspect'){
  const c=current();record(c.id).inspectCalls++;world.inspections[c.id]=true;await save();
  emit({id:c.id,panel:world.open,identityMatches:c.fault!=='identity-mismatch',sourceListUnchanged:true,
@@ -93,7 +95,7 @@ if(operation==='observe'){
   sendOutcome:c.fault==='send-unconfirmed'?'not-verifiable':world.messageEvents.some(e=>e.id===c.id)?'visible':'not-sent'});
 }else if(operation==='command'){
  const argv=JSON.parse(tail[0]);
- if(!Array.isArray(argv)||!argv.every(x=>typeof x==='string')||!['preview','decide','greet','send','back','flow-status'].includes(argv[0]))throw Error('SIM_COMMAND_NOT_ALLOWED');
+ if(!Array.isArray(argv)||!argv.every(x=>typeof x==='string')||!['preview','decide','greet','send','back'].includes(argv[0]))throw Error('SIM_COMMAND_NOT_ALLOWED');
  world.commands++;await save();await event({type:'command',id:current().id,argv});
  try{
   const output=await executeCommand(argv);
@@ -124,11 +126,12 @@ if(operation==='observe'){
  check('unconfirmed send not replayed',record('sim-07').sendCalls===1,record('sim-07').sendCalls);
  check('interruption injected and resumed without second physical opening',world.faults['sim-08']===true&&record('sim-08').physicalOpens===1,record('sim-08'));
  check('pre-send failure inspected and retried once',world.inspections['sim-09']===true&&record('sim-09').sendCalls===2,record('sim-09'));
- const watch=await flowWatch(flowFile);check('global verification stops task',watch.state==='paused',watch);
- const continuation=await flowStatus(flowFile);
- check('unconfirmed send remains pending verification',continuation.candidates.find(c=>c.candidateId==='sim-07')?.state==='needs-verify',continuation.candidates.find(c=>c.candidateId==='sim-07'));
+ check('Agent stops at global verification',world.classifications['sim-10']?.category==='global-blocked',world.classifications['sim-10']);
+ const receipts=await readCommandReceipts(resultsFile);
+ const uncertain=receipts.filter(row=>row.command==='send'&&row.id==='sim-07').at(-1);
+ check('unconfirmed send remains pending verification',uncertain?.outcome==='unknown',uncertain?.outcome);
  const events=(await readFile(join(directory,'events.ndjson'),'utf8')).trim().split('\n').map(JSON.parse);
- const result={ok:checks.every(c=>c.pass),scope:'10-person LOCAL workflow simulation; production CLI router and flow state, simulated toolset and OCR text. Not browser E2E or one-hour soak.',
+ const result={ok:checks.every(c=>c.pass),scope:'10-person LOCAL workflow simulation; production CLI router and durable receipts, simulated toolset and OCR text. Not browser E2E or one-hour soak.',
   checks,commands:world.commands,actualSimulatedMessages:world.messageEvents.length,processes:new Set(events.map(e=>e.pid)).size,
   scenarioSha256:createHash('sha256').update(JSON.stringify(CASES)).digest('hex')};
  await writeFile(join(directory,'report.json'),JSON.stringify(result,null,2));emit(result);process.exitCode=result.ok?0:1;

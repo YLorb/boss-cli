@@ -47,19 +47,16 @@ import { dismissContactNotice } from '../toolset/contact-notice.js';
 import { favoriteResume } from '../toolset/favorite.js';
 import { openRecommendChat } from '../toolset/recommend-chat.js';
 import { checkSkillCompatibility, requireSkillCompatibility, splitVersionConfirmation } from './skill_compatibility.js';
-import { assertPermittedCommand, isPermitDenied, resolveAction } from './permit.js';
+import { resolveAction } from './action_arguments.js';
+import { withCommandReceipt } from '../common/action_history.js';
 import { COMMAND_SPECS, describeCommand, findCommandSpec, renderCommandHelp } from './command_spec.js';
-import { assertTaskInvocation, parseStartupArguments } from './formal_arguments.js';
-import { checkTaskConfig, taskConfigPath } from './task_config.js';
-import { initRun, activateRunBindings, getBoundRun } from './run_state.js';
+import { parseStartupArguments } from './formal_arguments.js';
+import { checkTaskConfig, readTaskConfig } from './task_config.js';
 import { installOfflineTestGuard } from '../common/offline_test.js';
-import { assertPermittedPhase, isPhaseDenied, setPhase, phaseStatus, beforePhaseCommand, recordPhaseCommand, failPhaseCommand } from './phase_state.js';
 import { runCheckLogin } from '../toolset/check_login.js';
 import { APP_HOME, JOBS_DIR } from '../config.js';
 import { join } from 'node:path';
-import { acquireFlowOpen, clearFlowPause, consecutiveActionFailures, flowStatePath, flowStatus, flowWatch, pauseFlow, readFlowOpen, recordFlowDecision, recordJournalIntent, recordJournalResult, releaseFlowOpen, verifyFlowCandidate, verifyFlowDecided, verifyFlowNotPaused, verifyFlowNotReplayed, type JournalAction } from '../common/flow_state.js';
 import {
-  printPackageUpdateNoticeIfDue,
   printVersionInfo,
   runPackageUpdate,
 } from './version.js';
@@ -276,68 +273,15 @@ function startProcessingSpinner(): () => void {
   };
 }
 
-/** 动作结果分类：副作用结果未确认的错误记为 unknown，其余 failed。 */
-function classifyJournalResult(error: unknown): 'failed' | 'unknown' {
-  const name = error instanceof Error ? error.name : '';
-  return name === 'EmbeddedSendUnconfirmedError' || name === 'AttachmentTimeoutError' ? 'unknown' : 'failed';
-}
-
-/** 触达受阻（付费/风控等）视为必须暂停的硬失败。 */
-function isHardFailure(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return /付费|VIP|购买|权益|限流|风控|验证码|访问频繁/.test(msg);
-}
-
-/** 动作前后机械落盘意图/结果到流程日志；flow 为空（未开锁）时直接执行，不改日志。 */
-async function withFlowJournal<T>(
-  flow: string | null,
-  target: { candidateId: string; name: string; action: JournalAction },
-  fn: () => Promise<T>,
-  extractEvidence?: (value: T) => Record<string, string> | undefined,
-): Promise<T> {
-  if (!flow) return fn();
-  await recordJournalIntent(flow, target.candidateId, target.name, target.action);
-  try {
-    const value = await fn();
-    await recordJournalResult(flow, target.candidateId, target.name, target.action, 'success', undefined, extractEvidence ? extractEvidence(value) : undefined);
-    return value;
-  } catch (error) {
-    await recordJournalResult(flow, target.candidateId, target.name, target.action, classifyJournalResult(error), error instanceof Error ? error.message : String(error));
-    throw error;
-  }
-}
-
-/**
- * 执行一条子命令并返回结果（与传入 `process.argv` 切片语义一致，不含 `boss` 本身）。
- */
+/** Commands share receipts, while the Agent owns sequencing and recovery. */
 export async function executeCommand(argv: string[]): Promise<string> {
   installOfflineTestGuard();
-  if (process.env.BOSS_RUN_ID) await activateRunBindings();
-  return executeBoundCommand(argv, validateTaskCommand(argv));
-}
-
-function validateTaskCommand(argv: string[]): string {
   if (!argv.length) die('命令不能为空');
-  const cmd = normalizeSubcommand(argv[0]);
-  assertTaskInvocation(argv, cmd, Boolean(getBoundRun()), Boolean(taskConfigPath()));
-  return cmd;
+  const normalized = [normalizeSubcommand(argv[0]), ...argv.slice(1)];
+  return withCommandReceipt(normalized, () => executeCommandBody(normalized));
 }
 
-async function executeBoundCommand(argv: string[], cmd: string): Promise<string> {
-  await assertPermittedCommand(cmd, argv);
-  await assertPermittedPhase(cmd, argv);
-  await beforePhaseCommand(cmd, argv);
-  try {
-    const result = await executeCommandBody(argv);
-    await recordPhaseCommand(cmd, argv, result);
-    return result;
-  } catch (error) {
-    await failPhaseCommand(cmd, argv, error);
-    throw error;
-  }
-}
-
-async function executeCommandBody(argv: string[]): Promise<string> {
+export async function executeCommandBody(argv: string[]): Promise<string> {
   if (argv.length === 0) {
     die('❌ 空命令');
   }
@@ -347,7 +291,7 @@ async function executeCommandBody(argv: string[]): Promise<string> {
   const delimiter = tail.indexOf('--');
   const optionTokens = delimiter === -1 ? tail : tail.slice(0, delimiter);
   if (optionTokens.some((token) => token.startsWith('--json='))) die('❌ --json 是布尔开关，不接受值。');
-  if (json && !['collect-sync', 'favorite', 'switch-job', 'ocr', 'check', 'decide', 'flow-pause', 'flow-resume', 'flow-status', 'phase-set', 'phase-status', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
+  if (json && !['collect-sync', 'favorite', 'switch-job', 'ocr', 'check', 'decide', 'spec-list', 'status', 'search-sidebar', '--check-login', 'login', 'list', 'chat', 'chat-search', 'action', 'probe-resume', 'accept-resume', 'download-resume', 'send', 'positions', 'jd', 'deep-search', 'deepsearch', 'search', 'search-more', 'preview', 'recommend', 'greet', 'back', 'dismiss-contact-notice'].includes(cmd)) {
     die(`❌ ${cmd} 不支持 --json。`);
   }
   if (cmd === 'ocr') {
@@ -365,14 +309,8 @@ async function executeCommandBody(argv: string[]): Promise<string> {
       else paths.push(tail[i]);
     }
     if (paths.length !== 1) die('用法: boss ocr <PNG绝对路径> [--layout <auto|boss-online-resume>] [--timeout-ms <1000-120000>] [--json]');
-    try {
-      const result = await runResumeOcr(paths[0], timeoutMs, layout);
-      return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
-    } catch (error) {
-      const ocrFlow = flowStatePath();
-      if (ocrFlow) await pauseFlow(ocrFlow, 'OCR服务错误').catch(() => {});
-      throw error;
-    }
+    const result = await runResumeOcr(paths[0], timeoutMs, layout);
+    return json ? JSON.stringify(result) : `OCR 完成：${result.textPath}\n原图：${result.imagePath}\n结果：${result.resultPath}`;
   }
   if(cmd==='status') {
     if(tail.length) die('status 不接受参数');
@@ -396,56 +334,9 @@ async function executeCommandBody(argv: string[]): Promise<string> {
     if(rest.length||flags.size||!opts['candidate-id']?.trim()||!opts.verdict?.trim()||Object.keys(opts).some(k=>!['candidate-id','verdict'].includes(k)))
       die('❌ 用法: decide --candidate-id <ID> --verdict <fit|not-fit|unknown> [--json]');
     if(!['fit','not-fit','unknown'].includes(opts.verdict))die('❌ decide --verdict 必须是 fit/not-fit/unknown');
-    const decideFlow=flowStatePath();
-    if(!decideFlow)die('❌ decide 需要在锁模式（BOSS_FLOW_STATE）下使用');
-    await verifyFlowNotPaused(decideFlow);
-    const decideCandidateId=opts['candidate-id'].trim();
-    const decideVerdict=opts.verdict as 'fit'|'not-fit'|'unknown';
-    const decideOpenName=(await readFlowOpen(decideFlow))?.name ?? '';
-    await recordJournalIntent(decideFlow,decideCandidateId,decideOpenName,'decide');
-    try {
-      await recordFlowDecision(decideFlow,decideCandidateId,decideVerdict);
-      await recordJournalResult(decideFlow,decideCandidateId,decideOpenName,'decide','success',undefined,{verdict:decideVerdict});
-    } catch (error) {
-      await recordJournalResult(decideFlow,decideCandidateId,decideOpenName,'decide','failed',error instanceof Error?error.message:String(error));
-      throw error;
-    }
-    return json?JSON.stringify({ok:true,candidateId:decideCandidateId,verdict:decideVerdict}):`已记录评估结论：${decideCandidateId} ${decideVerdict}`;
-  }
-  if(cmd==='flow-status') {
-    if(tail.length) die('flow-status 不接受参数');
-    const fsFlow=flowStatePath();
-    if(!fsFlow)die('❌ flow-status 需要在锁模式（BOSS_FLOW_STATE）下使用');
-    const report=await flowStatus(fsFlow);
-    const watch=await flowWatch(fsFlow);
-    const summary={...report,paused:watch.paused,lastProgressAt:watch.lastProgressAt,idleMs:watch.idleMs,watchState:watch.state};
-    return json?JSON.stringify(summary):`已打开：${report.open?`${report.open.name}（${report.open.state}${report.open.next?`→${report.open.next}`:''}）`:'无'}\n需核验：${report.candidates.filter(c=>c.state==='needs-verify').map(c=>c.name).join('、')||'无'}\n已完成：${report.candidates.filter(c=>c.state==='done').length} 人\n停滞：${watch.state}${watch.paused?`（${watch.paused.reason}）`:''}`;
-  }
-  if(cmd==='flow-pause') {
-    const {rest,opts,flags}=parseOpts(tail);
-    if(rest.length||flags.size||!opts.reason?.trim()||Object.keys(opts).some(k=>k!=='reason'))die('❌ 用法: flow-pause --reason <原因> [--json]');
-    const fpFlow=flowStatePath();
-    if(!fpFlow)die('❌ flow-pause 需要在锁模式（BOSS_FLOW_STATE）下使用');
-    await pauseFlow(fpFlow,opts.reason.trim());
-    return json?JSON.stringify({ok:true,paused:true,reason:opts.reason.trim()}):`已暂停：${opts.reason.trim()}`;
-  }
-  if(cmd==='flow-resume') {
-    if(tail.length)die('flow-resume 不接受参数');
-    const frFlow=flowStatePath();
-    if(!frFlow)die('❌ flow-resume 需要在锁模式（BOSS_FLOW_STATE）下使用');
-    await clearFlowPause(frFlow);
-    return json?JSON.stringify({ok:true,paused:false}):'已恢复';
-  }
-  if(cmd==='phase-set') {
-    const {rest,opts,flags}=parseOpts(tail);
-    if(rest.length||flags.size||!opts.phase?.trim()||Object.keys(opts).some(k=>k!=='phase'))die('❌ 用法: phase-set --phase <阶段名> [--json]');
-    const ps=await setPhase(opts.phase.trim());
-    return json?JSON.stringify({ok:true,phase:ps.phase,at:ps.at}):`已进入阶段：${ps.phase}`;
-  }
-  if(cmd==='phase-status') {
-    if(tail.length)die('phase-status 不接受参数');
-    const report=await phaseStatus();
-    return JSON.stringify({ok:true,...report as object});
+    const verdict = opts.verdict;
+    const candidateId = opts['candidate-id'].trim();
+    return json ? JSON.stringify({ok:true,candidateId,verdict}) : `已记录评估结论：${candidateId} ${verdict}`;
   }
   if(cmd==='collect-sync') {
     const {rest,opts,flags}=parseOpts(tail);
@@ -662,12 +553,7 @@ async function executeCommandBody(argv: string[]): Promise<string> {
       if(rest.length || !opts.name || !opts['candidate-id'] || !opts.job || !(opts.text||opts.t) ||
         [...flags].some(f=>!['embedded','check'].includes(f)) || Object.keys(opts).some(k=>!['name','candidate-id','job','text','t'].includes(k)))
         die('send --embedded --name <实际姓名> --candidate-id <ID> --job <完整岗位> --text <正文> [--check]');
-      const sendFlow = flags.has('check') ? null : flowStatePath();
-      if (sendFlow) {
-        await verifyFlowNotPaused(sendFlow);
-        await verifyFlowNotReplayed(sendFlow, opts['candidate-id'].trim(), opts.name.trim(), 'send');
-      }
-      return withFlowJournal(sendFlow, { candidateId: opts['candidate-id'].trim(), name: opts.name.trim(), action: 'send' }, () => sendEmbeddedChat({name:opts.name.trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()},opts.text||opts.t,flags.has('check')));
+      return sendEmbeddedChat({name:opts.name.trim(),candidateId:opts['candidate-id'].trim(),job:opts.job.trim()},opts.text||opts.t,flags.has('check'));
     }
     const check = flags.has('check');
     const text = opts.text?.trim() || opts.t?.trim() || '';
@@ -685,12 +571,7 @@ async function executeCommandBody(argv: string[]): Promise<string> {
         Array.from(flags).some((flag) => flag !== 'request-resume' && flag !== 'check')) {
       die('❌ 用法: send --text <内容> [--name <姓名> --data-id <会话ID>] [--request-resume] [--check]');
     }
-    const normalSendFlow = check ? null : flowStatePath();
-    if (normalSendFlow) {
-      await verifyFlowNotPaused(normalSendFlow);
-      await verifyFlowNotReplayed(normalSendFlow, dataId || name || '', name, 'send');
-    }
-    return withFlowJournal(normalSendFlow, { candidateId: dataId || name || '', name, action: 'send' }, () => implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check }));
+    return implSendMessage({ text, requestResume, target: name ? { name, dataId } : undefined, json, check });
   }
 
   if (cmd === 'positions') {
@@ -767,30 +648,10 @@ async function executeCommandBody(argv: string[]): Promise<string> {
       die('❌ 用法: preview <姓名>');
     }
     if(flags.has('reopen-on-frame-error')&&!opts['candidate-id']?.trim())die('--reopen-on-frame-error 要求 --candidate-id');
-    const previewCandidateId = opts['candidate-id']?.trim();
-    const previewFlow = flowStatePath();
-    if (previewFlow) {
-      if (!previewCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下 preview 必须提供 --candidate-id；深度搜索不支持锁，请勿对深度搜索设置 BOSS_FLOW_STATE。');
-      await verifyFlowNotPaused(previewFlow);
-      await verifyFlowCandidate(previewFlow, previewCandidateId, candidateTarget);
-    }
-    let previewResult: string;
-    try {
-      previewResult = await withFlowJournal(previewFlow, { candidateId: previewCandidateId ?? '', name: candidateTarget, action: 'preview' }, () => implPreview({ candidateTarget, json, ...(previewCandidateId ? {candidateId:previewCandidateId} : {}), ...(flags.has('open-only') ? { openOnly: true } : {}), ...(flags.has('reopen-on-frame-error')?{reopenOnFrameError:true}:{}) }), (result) => {
-        if (!json) return undefined;
-        try {
-          const obj = JSON.parse(result);
-          return obj && typeof obj.path === 'string' ? { screenshot: obj.path } : undefined;
-        } catch { return undefined; }
-      });
-    } catch (error) {
-      if (previewFlow && (await consecutiveActionFailures(previewFlow, 'preview')) >= 3) {
-        await pauseFlow(previewFlow, '在线简历连续打开失败');
-      }
-      throw error;
-    }
-    if (previewFlow) await acquireFlowOpen(previewFlow, previewCandidateId!, candidateTarget, !flags.has('open-only'));
-    return previewResult;
+    return implPreview({ candidateTarget, json,
+      ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}),
+      ...(flags.has('open-only') ? {openOnly:true} : {}),
+      ...(flags.has('reopen-on-frame-error') ? {reopenOnFrameError:true} : {}) });
   }
 
   if (cmd === 'back') {
@@ -804,12 +665,7 @@ async function executeCommandBody(argv: string[]): Promise<string> {
     }
     if (Object.keys(opts).length) die('--expect-url 仅用于 back --previous');
     if(flags.has('check-in_online_resume')) {if(flags.has('if-open'))die('检查不能与返回动作混用');return runCheck({state:'online-resume-open'});}
-    const backFlow = flowStatePath();
-    if (backFlow) await verifyFlowNotPaused(backFlow);
-    const backOpen = backFlow ? await readFlowOpen(backFlow) : null;
-    const backResult = await withFlowJournal(backFlow, { candidateId: backOpen?.candidateId ?? '', name: backOpen?.name ?? '', action: 'back' }, () => runBack(flags.has('if-open'), json));
-    if (backFlow) await releaseFlowOpen(backFlow);
-    return backResult;
+    return runBack(flags.has('if-open'), json);
   }
 
   if (cmd === 'recommend') {
@@ -850,29 +706,13 @@ async function executeCommandBody(argv: string[]): Promise<string> {
     if (!target) {
       die('❌ 用法: greet <姓名> [--candidate-id <ID>] [--job <岗位关键字>] [--select-job <联系岗位完整名称>] [--confirm-contact | --continue-chat --candidate-id <ID>] [--check]');
     }
-    const contactForm = !flags.has('check') && !flags.has('continue-chat');
-    const actualContact = contactForm && !flags.has('confirm-contact') && !opts['select-job'];
-    const greetAction: JournalAction = flags.has('confirm-contact') ? 'confirm-contact' : opts['select-job'] ? 'select-job' : 'greet';
-    const greetCandidateId = opts['candidate-id']?.trim();
-    const greetFlow = flowStatePath();
-    if (contactForm && greetFlow) {
-      if (!greetCandidateId) die('❌ 锁模式（BOSS_FLOW_STATE）下联系动作（greet/select-job/confirm-contact）必须提供 --candidate-id。');
-      await verifyFlowNotPaused(greetFlow);
-      await verifyFlowCandidate(greetFlow, greetCandidateId, target);
-      await verifyFlowDecided(greetFlow, greetCandidateId, target);
-      await verifyFlowNotReplayed(greetFlow, greetCandidateId, target, greetAction);
-    }
-    let greetResult: string;
-    try {
-      greetResult = await withFlowJournal(contactForm ? greetFlow : null, { candidateId: greetCandidateId ?? '', name: target, action: greetAction }, () => implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json, ...(flags.has('check') ? { check: true } : {}), ...(greetCandidateId ? {candidateId:greetCandidateId} : {}), ...(flags.has('continue-chat') ? {continueChat:true} : {}), ...(flags.has('confirm-contact') ? {confirmContact:true} : {}), ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}), ...(opts['contact-mode'] !== undefined ? {contactMode:opts['contact-mode'].trim()} : {}) }));
-    } catch (error) {
-      if (actualContact && greetFlow && isHardFailure(error)) {
-        await pauseFlow(greetFlow, '触达受阻（付费/风控）');
-      }
-      throw error;
-    }
-    if ((actualContact || flags.has('confirm-contact')) && greetFlow) await releaseFlowOpen(greetFlow);
-    return greetResult;
+    return implRecommendGreet({ candidateTarget: target, jobKeyword: jobKeyword || undefined, json,
+      ...(flags.has('check') ? {check:true} : {}),
+      ...(opts['candidate-id'] ? {candidateId:opts['candidate-id'].trim()} : {}),
+      ...(flags.has('continue-chat') ? {continueChat:true} : {}),
+      ...(flags.has('confirm-contact') ? {confirmContact:true} : {}),
+      ...(opts['select-job'] ? {selectJob:opts['select-job'].trim()} : {}),
+      ...(opts['contact-mode'] !== undefined ? {contactMode:opts['contact-mode'].trim()} : {}) });
   }
 
   die(`❌ 未知命令 “${argv[0]}”。输入 help 查看用法。`);
@@ -888,7 +728,7 @@ export async function runOneCommand(argv: string[]): Promise<void> {
   } catch (e) {
     if (splitJsonFlag(argv.slice(1)).json) printStdout(jsonError(normalizeSubcommand(argv[0]), e));
     else console.error(e instanceof Error ? e.message : String(e));
-    process.exitCode = (isPermitDenied(e) || isPhaseDenied(e)) ? 2 : 1;
+    process.exitCode = 1;
   }
 }
 
@@ -908,12 +748,6 @@ async function executeManagedCommand(argv: string[]): Promise<string> {
     const { runBrowserSession } = await import('./browser-session.js');
     return runBrowserSession(printStdout);
   }
-  if (argv[0] === 'preflight') {
-    const { runPreflight } = await import('./preflight.js');
-    const result = await runPreflight();
-    if (result.status === 'failed') process.exitCode = 2;
-    return JSON.stringify(result);
-  }
   if (argv[0] === 'version-check') {
     const report = await checkSkillCompatibility();
     if (!report.compatible) process.exitCode = 2;
@@ -923,23 +757,17 @@ async function executeManagedCommand(argv: string[]): Promise<string> {
     const report = await checkTaskConfig();
     return JSON.stringify({ ok: true, ...report });
   }
-  if (argv[0] === 'task-init') {
-    const run = await initRun(undefined, { keepObserved: startup!.options.has('--keep-observed') });
-    return JSON.stringify({ ok: true, ...run, phase: run.task.phases?.[0]?.name ?? 'task' });
-  }
-  const run = await activateRunBindings();
   const parsed = argv[0] === 'update' ? { argv, confirmation: undefined } : splitVersionConfirmation(argv);
-  const cmd = validateTaskCommand(parsed.argv);
-  if (cmd !== 'update' && (!run || parsed.confirmation)) await requireSkillCompatibility(parsed.confirmation);
-  return isAttachmentCommand(parsed.argv)
-    ? runCommandProcess(parsed.argv)
-    : executeBoundCommand(parsed.argv, cmd);
+  if (parsed.argv[0] !== 'update') await requireSkillCompatibility(parsed.confirmation);
+  if (isAttachmentCommand(parsed.argv)) {
+    return runCommandProcess(parsed.argv);
+  }
+  return executeCommand(parsed.argv);
 }
 
 async function runInteractiveLoop(): Promise<void> {
   await requireSkillCompatibility();
   const rl = createInterface({ input, output, terminal: true });
-  await printPackageUpdateNoticeIfDue();
   printBossInteractiveBanner();
   try {
     for (;;) {
@@ -989,29 +817,18 @@ async function runInteractiveLoop(): Promise<void> {
 export async function runCli(argv: string[]): Promise<void> {
   installOfflineTestGuard();
   if (argv[0] === 'collect') {
-    const run = await activateRunBindings();
     const parsed = splitVersionConfirmation(argv);
     argv = parsed.argv;
-    validateTaskCommand(argv);
-    if (!run || parsed.confirmation) await requireSkillCompatibility(parsed.confirmation);
+    await requireSkillCompatibility(parsed.confirmation);
     const { rest, opts, flags } = parseOpts(argv.slice(1));
     if (rest.length || flags.size || !opts.job?.trim() || Object.keys(opts).some(key => !['job', 'ledger-dir', 'mode'].includes(key))) {
-      die('❌ 用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]');
+      die('用法: boss collect --job <岗位完整名称> [--ledger-dir <目录>] [--mode <screen|collect-only>]');
     }
-    if (run && (run.scope !== 'collect' || run.job !== opts.job.trim())) die('collect 的岗位/入口与运行任务不匹配');
-    const mode = (opts.mode ?? run?.task.mode ?? 'screen') as 'screen' | 'collect-only';
-    if (run && mode !== (run.task.mode ?? 'screen')) die('collect --mode 与任务配置不匹配');
-    if (mode !== 'screen' && mode !== 'collect-only') die('❌ collect --mode 必须是 screen 或 collect-only。');
-    // 账本目录一致性：run 绑定的 ledgerDir 与显式 --ledger-dir 不一致即拒绝。
-    const boundLedgerDir = process.env.BOSS_LEDGER_DIR?.trim();
-    const requestedLedgerDir = opts['ledger-dir']?.trim();
-    if (boundLedgerDir && requestedLedgerDir && requestedLedgerDir !== boundLedgerDir) {
-      die(`❌ collect --ledger-dir 与运行绑定账本目录不一致：${requestedLedgerDir} / ${boundLedgerDir}`);
-    }
-    await assertPermittedCommand('collect', argv);
-    await assertPermittedPhase('collect', argv);
+    const mode = (opts.mode ?? 'screen') as 'screen' | 'collect-only';
+    if (!['screen','collect-only'].includes(mode)) die('collect --mode 必须是 screen 或 collect-only');
+    const task = await readTaskConfig();
     try {
-      await runCollectionSession(requestedLedgerDir || boundLedgerDir || join(APP_HOME, 'ledgers'), opts.job.trim(), mode);
+      await runCollectionSession(opts['ledger-dir'] || task?.ledgerDir || join(APP_HOME, 'ledgers'), opts.job.trim(), mode);
     } finally { await cleanupAfterCommand('collect', true); }
     return;
   }
@@ -1038,10 +855,6 @@ export async function runCli(argv: string[]): Promise<void> {
   if (argv[0] === 'help' || argv[0] === '--help' || argv[0] === '-h') {
     printHelp();
     return;
-  }
-
-  if (!findCommandSpec(argv[0]!)?.startupForm && !taskConfigPath() && !argv.some(a=>a==='--check'||a==='--check-job'||a==='--check-in_online_resume') && !isAttachmentCommand(argv) && !['ocr', 'update', 'check', 'status', '--check-login'].includes(normalizeSubcommand(argv[0] ?? '')) && !splitJsonFlag(argv.slice(1)).json) {
-    await printPackageUpdateNoticeIfDue();
   }
 
   try {

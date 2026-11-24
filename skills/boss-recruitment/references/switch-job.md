@@ -8,7 +8,7 @@ scope: "chat-job-switch"
 # 通过公开 CLI 切换沟通岗位
 
 1. 用 `status --json` 核对已在 `/web/chat/index`；不在该页时由用户进入，不自动导航。
-2. `boss switch-job --list --json` 复用会话锁和页面守卫，展开下拉读取实时完整文案与 unavailable，再收起。该命令会点击菜单，不是只读；不切岗位、不切分类、不联系。
+2. `boss switch-job --list --json` 复用页面守卫，展开下拉读取实时完整文案与 unavailable，再收起。该命令会点击菜单，不是只读；不切岗位、不切分类、不联系。
 3. 按用户指定岗位及城市从实时选项确定唯一完整文案，执行 `boss switch-job --job "完整文案" --json`。简称、多个城市或重名不自动挑选；需要用户明确。当前相同岗位不点击，禁用/关闭岗位拒绝选择。
 4. 命令确认岗位标签改变且下拉收起，返回 before/job/changed/url。接着用 `status --json` 的 chatFilterJob 核对；之后由 list 获取该岗位起始快照。选岗回执只证明标签，不证明候选列表加载完成。
 5. 每个岗位仅在开始收集前选一次；循环内不切岗刷新快照。草稿、简历遮挡、身份变化、未知结构或超时保存回执并停止，不盲重试。
@@ -21,4 +21,4 @@ scope: "chat-job-switch"
 
 2026-10-29 真实验收：`switch-job --list` 成功列出24项并收起菜单，整条命令859ms；随后 status 确认岗位仍为“全部职位”、未打开候选人。此结果仅验证列举与空白点击收起，尚未验证实际岗位切换和完整收集流程。
 
-`scripts/switch-job.mjs` 的独立 CDP 入口仍禁止用于真实页面；正式实现位于 toolset，统一通过 CLI 版本检查、会话锁和页面守卫执行。`collect --job` 仅选择账本，不切页面。此功能不修改滚轮、随机等待和 OCR 行为。
+`scripts/switch-job.mjs` 的独立 CDP 入口仍禁止用于真实页面；正式实现位于 toolset，统一通过 CLI 版本检查、页面守卫执行。`collect --job` 仅选择账本，不切页面。此功能不修改滚轮、随机等待和 OCR 行为。

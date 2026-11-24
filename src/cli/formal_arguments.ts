@@ -1,7 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { CliError } from './arguments.js';
 import {
-  PREFLIGHT_ARGV, findCommandSpec, requiredFormalOptions,
+  findCommandSpec, requiredFormalOptions,
   type CommandForm, type CommandOption, type ValueSpec,
 } from './command_spec.js';
 
@@ -11,7 +11,6 @@ class FormalUsageError extends CliError {
     this.name = 'FormalUsageError';
   }
 }
-
 function matchesValue(value: string, spec: ValueSpec): boolean {
   if (!spec.allowEmpty && !value.trim()) return false;
   if (spec.choices && !spec.choices.includes(value)) return false;
@@ -97,16 +96,4 @@ export function assertFormalCommand(argv: readonly string[], command = argv[0]!)
   };
   if (argv[0] !== command) deny(`正式任务须使用命令名 ${command}`);
   parseDeclaredArguments(argv, spec.formalForms.map(form => ({ form, required: requiredFormalOptions(spec, form) })), deny);
-}
-
-const TASK_SETUP_COMMANDS = new Set(['login', '--check-login', 'status', 'check', 'spec-list']);
-
-export function assertTaskInvocation(argv: readonly string[], command: string, bound: boolean, configured: boolean): void {
-  if (!bound && !configured) return;
-  if (!bound && !TASK_SETUP_COMMANDS.has(command)) {
-    const error = new CliError(`正式任务尚未初始化：请先执行 boss ${PREFLIGHT_ARGV.join(' ')}，预检通过后按回执初始化`);
-    error.name = 'TaskInitRequiredError';
-    throw error;
-  }
-  assertFormalCommand(argv, command);
 }

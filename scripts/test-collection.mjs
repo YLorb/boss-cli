@@ -54,10 +54,11 @@ test('candidate changes are durable before acknowledgment without a dirty-sessio
   assert.equal(Object.keys(saved.candidates[0]).length, 7);
 });
 
-test('full job names retain city isolation and reject concurrent ownership', async t => {
+test('full job names retain city isolation without creating lock files', async t => {
   const dir = await directory(t);
   const first = await Ledger.load(dir, '全栈软件开发工程师 _ 深圳');
-  await assert.rejects(Ledger.load(dir, '全栈软件开发工程师 _ 深圳'), /正在使用/);
+  await assert.rejects(readFile(first.file + '.lock'), {code:'ENOENT'});
+  await assert.rejects(readFile(first.file + '.opening'), {code:'ENOENT'});
   const second = await Ledger.load(dir, '全栈软件开发工程师 _ 西安');
   assert.notEqual(first.file, second.file);
   first.add(candidate);

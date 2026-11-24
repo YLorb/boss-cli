@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
-import { test, mock } from 'node:test';
+import { test, mock, beforeEach } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, writeFile, rm, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 import { splitJsonFlag } from '../dist/cli/output.js';
+
+const receiptRoot = await mkdtemp(path.join(process.env.TEMP || process.cwd(), 'boss-cli-routing-'));
+let receiptIndex = 0;
+beforeEach(async () => {
+  const file = path.join(receiptRoot, 'task-' + (++receiptIndex) + '.json');
+  await writeFile(file, JSON.stringify({job:'合成测试岗位',resultsFile:path.join(receiptRoot, receiptIndex + '.jsonl')}));
+  process.env.BOSS_TASK_CONFIG = file;
+});
 
 const calls = [];
 mock.module('../dist/toolset/search-sidebar.js',{namedExports:{runSearchSidebar:async()=>{calls.push({name:'runSearchSidebar',args:[]});return JSON.stringify({readOnly:true,guarded:true});}}});

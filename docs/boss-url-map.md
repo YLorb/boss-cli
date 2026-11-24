@@ -1,6 +1,5 @@
 # Boss URL 与功能对照
 
-2026-11-08：`task-check --json` 离线校验任务/permit/岗位规范；`task-init --json` 校验实际版本，创建 schemaVersion=2 绑定和独立 flow/phase，不连接浏览器。正式命令校验绑定内容，collect核对岗位、模式、账本目录；阶段门覆盖会话入口、stdin决策/对账及附件worker。`phase-status --json` 返回允许动作和阻断原因；`phase-set` 仅允许满足回执前置条件的相邻前进。BOSS_RUN_ID 显式固定运行。详见 Skill task-config.md、phase-state.md。
 
 `collect-sync --data-id <ID> --json` 是本地收集回执提交，不要求当前页面位置，不连接浏览器。仅限已绑定的收集任务：核验本轮同人下载回执及实际文件字节数/SHA256后写入固定岗位账本；运行中的 collect 会话使用 stdin `{"op":"receipt","dataId":"ID"}`。文件、身份或回执不符直接拒绝，不重新下载，不自动切换两种提交方式。
 
@@ -18,7 +17,7 @@
 
 2026-10-29：搜索/推荐简历定位只查询已核验宿主的唯一可见 `.resume-middle-wrap` 与其中唯一 `c-resume` iframe，通过 `contentFrame()` 获取目标，不遍历无关 Frame；搜索宿主为主文档，推荐宿主为推荐 Frame。后续仍验证 Canvas 就绪、父子关系及双 ID。
 
-用户明确授权的恢复入口：`preview <姓名> --candidate-id <ID> --reopen-on-frame-error [--open-only] --json`，仅常规搜索页。该显式开关仅在目标 Frame 定位/Canvas 加载失败时允许关闭同人预览层并重开一次，处于原会话锁/页面守护内；关闭前验证唯一面板、双 ID、唯一可见且未遮挡的关闭按钮，前后比较 URL、主页面导航事件、固定搜索参数（含城市、关键词、岗位，排除分页page）及岗位标签；允许候选列表动态追加/重排及分页、后台列表加载，目标候选人仍须通过原有姓名＋ID与简历双ID核验。任何身份/条件变化、关闭失败、第二次打开失败或截图失败均停止；不浏览器历史回退、不刷新、不修改筛选、不重试沟通。默认不带开关仍无恢复。同一次打开会等待目标内容 Frame 挂接和渲染，可见简历不唯一时停止。成功回执附 recovery，stderr记录恢复阶段，错误包含stage及candidateId。此开关是用户明确要求的有限恢复例外，不扩大其他命令的权限。
+用户明确授权的恢复入口：`preview <姓名> --candidate-id <ID> --reopen-on-frame-error [--open-only] --json`，仅常规搜索页。该显式开关仅在目标 Frame 定位/Canvas 加载失败时允许关闭同人预览层并重开一次，处于原页面守护内；关闭前验证唯一面板、双 ID、唯一可见且未遮挡的关闭按钮，前后比较 URL、主页面导航事件、固定搜索参数（含城市、关键词、岗位，排除分页page）及岗位标签；允许候选列表动态追加/重排及分页、后台列表加载，目标候选人仍须通过原有姓名＋ID与简历双ID核验。任何身份/条件变化、关闭失败、第二次打开失败或截图失败均停止；不浏览器历史回退、不刷新、不修改筛选、不重试沟通。默认不带开关仍无恢复。同一次打开会等待目标内容 Frame 挂接和渲染，可见简历不唯一时停止。成功回执附 recovery，stderr记录恢复阶段，错误包含stage及candidateId。此开关是用户明确要求的有限恢复例外，不扩大其他命令的权限。
 
 在线简历 OCR 固定使用 `ocr <PNG绝对路径> --layout boss-online-resume --json`，按纵向行排序，同行从左到右；保留全部文字框、坐标及置信度，同一行文字框包含、重合导致顺序歧义时直接报错，不按左右栏猜读序。preview/action 的 OCR 回执参数包含该选项。其他图片保留显式 `--layout auto`（默认）的原有单双栏识别；两种模式不会失败后切换。
 
@@ -28,11 +27,11 @@
 
 ## Chrome 常驻
 
-`boss browser-session --json` 是唯一的 Chrome 启动入口。它校验 CLI/Skill 配套并加锁启动或核验复用专用 Chrome，释放锁和 CDP 后返回 `ready`，随后每 5 秒核验本地调试端点并输出 `alive`。回执含进程 PID、端口和配置目录。常驻任务须运行在能跨招聘轮次保留进程的宿主中。登录与业务命令仅连接已有 Chrome，端口未就绪时报告启动入口。端口拒绝连接才允许常驻命令启动 Chrome，其他探测或身份核验失败直接停止。收到正常停止信号时返回 `stopped`，Chrome 随后的生命周期由宿主管理。
+`boss browser-session --json` 是唯一的 Chrome 启动入口。它校验 CLI/Skill 配套并启动或核验复用专用 Chrome，断开 CDP 后返回 `ready`，随后每 5 秒核验本地调试端点并输出 `alive`。回执含进程 PID、端口和配置目录。常驻任务须运行在能跨招聘轮次保留进程的宿主中。登录与业务命令仅连接已有 Chrome，端口未就绪时报告启动入口。端口拒绝连接才允许常驻命令启动 Chrome，其他探测或身份核验失败直接停止。收到正常停止信号时返回 `stopped`，Chrome 随后的生命周期由宿主管理。
 
-## 正式任务预检
+## 任务 JSON 与直接调用
 
-`boss preflight --json` 按顺序校验 CLI/Skill、任务配置、permit 和截止时间。随后尝试获取现有会话锁，并一次连接已有 Chrome，检查唯一 BOSS 标签页、登录信号、主页面导航变化和当前工作台；收集要求沟通页。校验通过返回 `{"status":"passed","next":{"argv":["task-init","--json"]}}`，首个阻塞返回 `{"status":"failed","reason":{"code":"…","message":"…"}}`，退出码 2。版本不符附版本详情。预检不启动浏览器，不安装页面守卫，不修改页面、任务、运行绑定或账本。通过后以 `next.argv` 调用同一 CLI 写入运行，回执含初始 `phase`。安装及离线诊断仍可独立校验版本或配置。
+Agent 将要求写入一个普通 JSON，设置 BOSS_TASK_CONFIG 后直接调用工具。任务没有强制过期时间，Agent 核对人数、获准动作及停止条件。task-check --json 可读取 JSON 并报告结果位置。结果逐步追加到固定 JSONL，联系和消息保留历史去重，Agent 根据回执串行判断下一步。详见 [任务 JSON](../skills/boss-recruitment/references/task-config.md)。
 
 ## 启动前配套版本检查
 
@@ -43,16 +42,14 @@ $env:BOSS_SKILL_DIR = 'C:\Recruitment\workspace\.workbuddy\skills\boss-recruitme
 node .\dist\cli\index.js version-check --json
 ```
 
-本地开发版 CLI 0.6.20-dev-8 配套 Skill 1.0.32，兼容标识为 `2026-10-30-recommend-chat-v1`。独立版本号按配套关系比较。未设置 BOSS_SKILL_DIR 时明确使用当前 CLI 安装附带的 Skill；加载外部 Skill 的 Agent 必须指定外部实际目录，不能以包内版本替代检查。文件缺失、格式错误直接报错，不搜索其他路径。
+本地开发版 CLI 0.6.21-dev.0 配套 Skill 1.0.32，兼容标识为 `2026-10-30-recommend-chat-v1`。独立版本号按配套关系比较。未设置 BOSS_SKILL_DIR 时明确使用当前 CLI 安装附带的 Skill；加载外部 Skill 的 Agent 必须指定外部实际目录，不能以包内版本替代检查。文件缺失、格式错误直接报错，不搜索其他路径。
 
 匹配返回 compatible:true，退出码 0；不匹配返回 compatible:false、requiresConfirmation:true、实际与期望版本、路径及 confirmationToken，退出码 2。所有业务命令（含 login、只读 status/check、附件子进程和 collect）在连接浏览器或写账本前阻止启动。help、version、update、version-check 可用于诊断和修复。
 
-不匹配时将结果展示给用户，**等待用户明确确认后**，才可在本轮命令末尾附加 `--confirm-version-mismatch <返回令牌>`；不得自行确认、写入长期默认参数或从旧任务沿用授权。令牌绑定 CLI 版本、Skill 路径和完整正文，任一改变都会失效。确认仅解除版本门槛，不解除会话锁、身份校验或其他守护。CLI 校验令牌，执行 Agent 负责取得并记录用户确认。优先同步配套版本；确认不意味着兼容性已验证。
+不匹配时将结果展示给用户，**等待用户明确确认后**，才可在本轮命令末尾附加 `--confirm-version-mismatch <返回令牌>`；不得自行确认、写入长期默认参数或从旧任务沿用授权。令牌绑定 CLI 版本、Skill 路径和完整正文，任一改变都会失效。确认仅解除版本门槛，身份校验和页面守护继续执行。CLI 校验令牌，执行 Agent 负责取得并记录用户确认。优先同步配套版本；确认不意味着兼容性已验证。
 
 
-查询单条命令使用 `boss commands <命令名> --json`，完整目录使用 `boss commands --json`。`formalUsage` 及 `formalForms` 描述正式任务的可执行语法。设置 `BOSS_TASK_CONFIG` 且未绑定运行时，CLI 先拒绝业务命令并提供预检参数。登录和准备阶段的只读诊断仍可使用。绑定运行后，CLI 在权限检查、写入动作意图和启动附件子进程前，用同一规格拒绝别名、未知或重复选项、缺值及不合法组合。业务命令使用 `--json`，常驻 `collect` 使用自己的逐行 JSON 协议。参数形式通过后仍需通过岗位、阶段、身份与权限校验。
-
-初始化前的命令以目录返回的 `usage` 和 `startupForm` 为准。CLI 在读取任务配置、启动 Chrome 或写入运行绑定前按同一规格校验参数。JSON 错误中的 `next.argv` 可以直接传给 `boss` 查询用法。
+查询单条命令使用 boss commands <命令名> --json，完整目录使用 boss commands --json。命令规格描述参数、当前位置与副作用。旧的运行绑定、阶段状态及文件锁已移除。业务命令继续进行配套版本、参数、身份及结果检查。
 
 本文件记录 boss-cli 已知页面 URL、对应命令和当前位置要求。修改页面导航、命令入口或报错文案前，先对照这里，避免把某个命令改成隐式跳转或多路径兜底。
 
@@ -77,11 +74,11 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ### 显式收藏当前简历（2026-10-30，功能扩展）
 
-`boss favorite --candidate-id <当前简历ID> [--check] [--json]` 仅在 `/web/chat/search` 或 `/web/chat/recommend` 已打开的简历中执行。搜索宿主为主文档，推荐宿主为唯一 `recommendFrame`。复用会话锁和页面守护，核对简历两处候选人 ID、唯一右侧收藏按钮的文案、图标和组件状态。状态不一致、身份不符、加载中、控件异常或遮挡时停止。`--check` 仅读取身份、收藏状态和控件坐标，不表示按钮一定可点击；执行时再次在同一页面任务内核验状态，只有未收藏才点击一次，已收藏返回 already-favorited、clicked=false。确认收藏状态在 5000ms 内更新后返回 favorited；错误不重试、不取消收藏、不刷新或导航，不打开／关闭简历、不沟通。仅由 Agent 按用户指令临时调用，不加入任何招聘 SOP。依据离线保存的页面结构实现，隔离模拟测试不代表当前真实页面验收。
+`boss favorite --candidate-id <当前简历ID> [--check] [--json]` 仅在 `/web/chat/search` 或 `/web/chat/recommend` 已打开的简历中执行。搜索宿主为主文档，推荐宿主为唯一 `recommendFrame`。复用页面守护，核对简历两处候选人 ID、唯一右侧收藏按钮的文案、图标和组件状态。状态不一致、身份不符、加载中、控件异常或遮挡时停止。`--check` 仅读取身份、收藏状态和控件坐标，不表示按钮一定可点击；执行时再次在同一页面任务内核验状态，只有未收藏才点击一次，已收藏返回 already-favorited、clicked=false。确认收藏状态在 5000ms 内更新后返回 favorited；错误不重试、不取消收藏、不刷新或导航，不打开／关闭简历、不沟通。仅由 Agent 按用户指令临时调用，不加入任何招聘 SOP。依据离线保存的页面结构实现，隔离模拟测试不代表当前真实页面验收。
 
 ### 搜索侧栏只读入口（2026-10-29）
 
-- `boss search-sidebar [--json]`：仅当前 `/web/chat/search`，复用会话锁和页面守护，只连接已有唯一 BOSS 标签页，不启动浏览器、不导航、刷新、滚动或点击。
+- `boss search-sidebar [--json]`：仅当前 `/web/chat/search`，复用页面守护，只连接已有唯一 BOSS 标签页，不启动浏览器、不导航、刷新、滚动或点击。
 - 唯一匹配 `/web/frame/search`，以唯一可见“我的订阅”标题向上限定同时包含“搜索畅聊卡”的独立侧栏；范围含候选人卡片、标题或 frame 不唯一、侧栏过大均报错，不换定位路径。
 - 返回当前 `keyword`、`job`、`sidebar.text` 和侧栏 `elements`（标签、类名、文字、role、href、cursor、disabled），用于读取订阅条件及观察交互线索。`cursor=pointer` 等仅是线索，不保证可以成功点击。无订阅应用或选择功能，不将历史订阅条件当作当前搜索条件。
 - 错误停止，不重试、不回退。该入口经过守护，原 `status` / `check` 的独立只读语义保持不变。
@@ -90,7 +87,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ### 有上限的扩池与显式历史返回（2026-10-28）
 
-- `boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]`：只在当前 `/web/chat/search` 执行，要求无在线简历弹层、搜索 iframe 已就绪。两个上限必填；每轮响应及页面核验共用超时，默认 10000ms。复用 `withBossSessionPage` 的会话锁和页面守护，不切岗位／关键词，不调用 search 重查。
+- `boss search-more --max-scrolls <1-20> --max-candidates <1-500> [--timeout-ms <1000-15000>] [--json]`：只在当前 `/web/chat/search` 执行，要求无在线简历弹层、搜索 iframe 已就绪。两个上限必填；每轮响应及页面核验共用超时，默认 10000ms。复用 `withBossSessionPage` 的页面守护，不切岗位／关键词，不调用 search 重查。
 - 单一路径滚动搜索 iframe 的 `document.scrollingElement` 到底，监听页面自然发起的下一页 geeks.json 请求；不直接发接口请求、不调用组件加载方法。容器不可滚动或已到底而无法再滚动时明确报错，不改用其他容器。每轮只接受一次、当前关键词＋岗位 ID＋下一页码的成功响应，核对响应 ID/lid 与组件及 DOM；变化、重复请求、接口错误、超时均停止，不返回部分池冒充成功。
 - 返回池按 candidateId 去重并核验同 ID 姓名；人数上限包含起始列表，限制返回的唯一候选人数量，平台单次响应可能加载更多卡片。达到任一上限、成功空响应或成功响应没有新增 ID 后正常结束；没有响应是失败，不推断已到底。JSON 含 keyword、jobId、上限、scrolls、initialCount、addedCount、duplicatesSkipped、stopReason、candidates。跨命令去重仍由运行回执维护；命令不预览、不联系、不发送。
 - `boss back --previous --expect-url <完整URL> [--json]`：显式返回前一条浏览器历史，仅一步。当前页只允许上述四种已知列表、`/web/frame/c-resume/...` 或 `/web/chat/business/mine`；目标须为 HTTPS `www.zhipin.com` 的已知列表完整 URL（含查询参数）。登录、验证、未知页面、无前项、同 URL、目标不符、弹层仍打开均停止。先检查相邻历史及当前 URL，再调用一次 `goBack`，返回后核对历史索引、条目 ID 和完整 URL。
@@ -125,7 +122,7 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 - 2026-10-26 新增[沟通页候选人定位流程](../skills/boss-recruitment/references/chat-candidate-location.md)：`boss chat-search "完整昵称" [--info "已知原文"] [--data-id "预期ID"] [--job "预期完整岗位"] --json`，当前位置必须为 `/web/chat/index`，不隐式导航。不操作岗位下拉，点击 `.chat-search-btn`，在“搜索姓名/群聊”输入昵称，读取完整 `.geek-search-list` 及组件searchList（包括隐藏项）；唯一精确匹配才点击一次，核对搜索uniqueId与实际data-id、姓名及岗位。重名或其他歧义返回 `status=needs-confirmation`、`clicked=false` 和匹配项，等待用户手动确认或进一步指令，已知 ID 或 info 可用于区分同名。成功为 `status=opened`；已完成零结果返回status=not-found且不点击；未完成查询超时、旧搜索未清空或核验失败直接报错，不自动重试。不支持--check，不发送；`status --json` 新增只读chatSearch输入／结果及chatFilterJob。与 `/web/chat/search` 和顶部分类“全部”不同，现有chat及指定对象发送／附件／探测均接入此搜索，不保留滚动回退；起始快照仍限定本轮对象范围。离线测试：`node --experimental-test-module-mocks --test scripts/test-chat-search.mjs`。
 
-- 沟通页新增 `boss switch-job --list [--json]` 和 `boss switch-job --job "实时完整文案" [--timeout-ms 1..60000] [--json]`。须已在 `/web/chat/index`，两者复用会话锁和页面守卫；--list 展开读取并收起菜单，非只读；--job 精确唯一匹配，相同岗位不点击。草稿、遮挡、禁用、重名及超时直接停止。回执核对标签及菜单关闭，再由 `status --json` 核验 chatFilterJob；不导航、不切分类、不联系，不宣称候选列表已加载完成。`scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，禁止作为替代入口。完整边界见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
+- 沟通页新增 `boss switch-job --list [--json]` 和 `boss switch-job --job "实时完整文案" [--timeout-ms 1..60000] [--json]`。须已在 `/web/chat/index`，两者复用页面守卫；--list 展开读取并收起菜单，非只读；--job 精确唯一匹配，相同岗位不点击。草稿、遮挡、禁用、重名及超时直接停止。回执核对标签及菜单关闭，再由 `status --json` 核验 chatFilterJob；不导航、不切分类、不联系，不宣称候选列表已加载完成。`scripts/switch-job.mjs` 直连真实浏览器的旧许可已撤销，禁止作为替代入口。完整边界见 [Skill岗位切换](../skills/boss-recruitment/references/switch-job.md)。
 
 - 正常招聘SOP只从指定岗位未读列表逐人处理，评估一人后完成其发送/收件或等待，再处理下一人；本轮附件收集完成后统一上传。对账、复查、仅收集须人工明确指定。当前 `collect round` 遍历全账本、`chat --data-id` 通过昵称搜索已指定对象、`--check` 未命中只返回false，不能保证严格未读边界；不得将这些技术能力作为正常SOP扩大范围的授权。
 
@@ -222,12 +219,12 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 - `chat --inspect-embedded --json` 只读输出当前窗口的最小身份及已加载消息，不代表身份核验通过；无窗口或多窗口报错。
 - `chat "实际姓名" --embedded --check --candidate-id "触达回执ID" --job "完整岗位" --json`：仅 `/web/chat/search`，核对卡片 conversation.encryptUid/name/toPosition、容器 friendId 和输入组件 uniqueId；不依赖脱敏姓名猜测。
-- `chat "实际姓名" --embedded --close --candidate-id "触达回执ID" --job "完整岗位" --json`：在现有会话锁和页面守护内，核验同一身份及会话，保护未发送草稿，仅点击该窗口唯一可见、启用且未遮挡的 `.iboss.iboss-close` 一次；5 秒内确认窗口消失且 URL 不变。无窗口、多窗口、超时或身份变化直接报错，不刷新、不导航、不重试。`--close` 与 `--check` 互斥，后者只做身份检查，不代表关闭可执行。
+- `chat "实际姓名" --embedded --close --candidate-id "触达回执ID" --job "完整岗位" --json`：在现有页面守护内，核验同一身份及会话，保护未发送草稿，仅点击该窗口唯一可见、启用且未遮挡的 `.iboss.iboss-close` 一次；5 秒内确认窗口消失且 URL 不变。无窗口、多窗口、超时或身份变化直接报错，不刷新、不导航、不重试。`--close` 与 `--check` 互斥，后者只做身份检查，不代表关闭可执行。
 - `send --embedded --name "实际姓名" --candidate-id "触达回执ID" --job "完整岗位" --text "正文" [--check] --json`：同一身份核验后发送一次；此入口的 `--check` 严格只读，不输入或发送。已有同文消息返回 already-visible，不重复发送；已有草稿拒绝覆盖。聚焦页面后粘贴，核对换行、发送禁用状态和身份，再按 Enter；发送后要求新消息 ID、己方、接收者、可见正文均匹配。超时不重试。
 - 不导航、不刷新、不重新打招呼、不修改页面禁用状态，不支持在此入口请求附件。独立沟通页命令行为不变。
 - 返回 conversationId 是内嵌组件原生 uniqueId。尚未核对它与沟通列表 DOM data-id 的映射时，不能直接作为 collect dataId；先保留待关联回执。
 - 验证：2026-10-28 内嵌真实发送及新消息核验通过；关闭入口离线验证通过，并在真实同人窗口完成单次关闭验证。
-- 畅聊卡现场记录（2026-10-28）：用户确认步骤为“关闭畅聊卡使用提示 → 继续沟通 → 小窗聊天 → 关闭小窗”。CLI 已记录联系成功、继续沟通因遮挡而未点击，以及人工打开后的同一候选人会话；随后通过正式 status 在新候选人现场采集到已知成功文案及 `.boss-dialog__footer .boss-dialog__button` 的“关闭”控件。正式入口 `dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位> --json` 仅在当前 `/web/chat/search`、同人简历、岗位及已联系状态一致时，点击已知成功提示的关闭一次；复用会话锁／页面守护，5 秒核验提示消失及搜索条件未变。失败不重复联系，不将未知付费／确认弹窗当作此提示；不点“查看对话”，不自动继续。离线测试通过，2026-10-28 已在真实成功提示上关闭一次并核验，随后继续沟通、发送消息3及关闭内嵌小窗均成功。
+- 畅聊卡现场记录（2026-10-28）：用户确认步骤为“关闭畅聊卡使用提示 → 继续沟通 → 小窗聊天 → 关闭小窗”。CLI 已记录联系成功、继续沟通因遮挡而未点击，以及人工打开后的同一候选人会话；随后通过正式 status 在新候选人现场采集到已知成功文案及 `.boss-dialog__footer .boss-dialog__button` 的“关闭”控件。正式入口 `dismiss-contact-notice <姓名> --candidate-id <已联系ID> --job <完整岗位> --json` 仅在当前 `/web/chat/search`、同人简历、岗位及已联系状态一致时，点击已知成功提示的关闭一次；复用页面守护，5 秒核验提示消失及搜索条件未变。失败不重复联系，不将未知付费／确认弹窗当作此提示；不点“查看对话”，不自动继续。离线测试通过，2026-10-28 已在真实成功提示上关闭一次并核验，随后继续沟通、发送消息3及关闭内嵌小窗均成功。
 
 
 ## 搜索同名候选人定位（2026-10-22）
@@ -251,6 +248,6 @@ WorkBuddy 执行顺序、每步指令和 2026-10-13 实测注意事项见 [招�
 
 ## 推荐页继续聊与消息3
 
-仅在 `/web/chat/recommend` 使用 `chat <卡片姓名> --recommend --open --candidate-id <已联系ID> --recommend-job <推荐岗位与城市> --job <聊天岗位原文> [--json]`。复用会话锁和页面守护；核验唯一推荐 iframe、岗位标签及卡片 DOM/组件 ID，只点击同人卡片唯一可用、无遮挡的“继续聊／继续沟通”按钮一次。仍是打招呼则拒绝，不导航、不联系、不发送；同人小窗已打开时只核验复用。5 秒内确认主文档唯一小窗的候选人 ID、岗位和会话关联，返回实际姓名供后续命令使用。异常或导航停止，不重试。
+仅在 `/web/chat/recommend` 使用 `chat <卡片姓名> --recommend --open --candidate-id <已联系ID> --recommend-job <推荐岗位与城市> --job <聊天岗位原文> [--json]`。复用页面守护；核验唯一推荐 iframe、岗位标签及卡片 DOM/组件 ID，只点击同人卡片唯一可用、无遮挡的“继续聊／继续沟通”按钮一次。仍是打招呼则拒绝，不导航、不联系、不发送；同人小窗已打开时只核验复用。5 秒内确认主文档唯一小窗的候选人 ID、岗位和会话关联，返回实际姓名供后续命令使用。异常或导航停止，不重试。
 
 `chat --embedded --check/--close`、`chat --inspect-embedded` 与 `send --embedded` 支持搜索和推荐主页面的小窗；发送检查完整正文、草稿、同人会话关联和页面不变，重复已加载己方正文不再发送。只接受同一收件人的新消息 ID、正文与可见证据确认成功。不能把小窗 conversationId 当成正式账本 dataId。具体串行步骤和记账见[推荐 SOP](../skills/boss-recruitment/references/recommend-sop.md#打招呼后的边界)。新增推荐路径仅离线测试，未在真实页面验收。

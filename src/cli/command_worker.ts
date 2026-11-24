@@ -1,11 +1,13 @@
-import { executeCommand } from './cliRouter.js';
+import { executeCommandBody } from './cliRouter.js';
 import { detachBrowserSession } from '../browser/index.js';
+import { installOfflineTestGuard } from '../common/offline_test.js';
 
 // If the owner dies, this worker must not continue issuing browser actions.
 process.on('disconnect', () => process.exit(1));
 let result: { text?: string; error?: { name: string; message: string } };
 try {
-  const text = await executeCommand(process.argv.slice(2));
+  installOfflineTestGuard();
+  const text = await executeCommandBody(process.argv.slice(2));
   await detachBrowserSession();
   result = { text };
 } catch (error) {

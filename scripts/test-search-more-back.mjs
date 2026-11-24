@@ -5,14 +5,11 @@ import { EventEmitter } from 'node:events';
 
 let activePage, locked = false, guards = 0;
 mock.module('../dist/browser/browser_session.js', { namedExports: {
-  ensureBrowserSession: async () => { assert.ok(locked); }, getBrowserRef: () => ({}),
+  ensureBrowserSession: async () => { }, getBrowserRef: () => ({}),
   getPageRef: () => activePage, setSessionPage: p => { activePage = p; },
 }});
-mock.module('../dist/common/boss_session_lock.js', { namedExports: { withBossSessionLock: async fn => {
-  assert.equal(locked, false); locked = true;
-  try { return await fn(); } finally { locked = false; }
-}}});
-mock.module('../dist/common/boss_page_guards.js', { namedExports: { installBossPageGuards: async () => { assert.ok(locked); guards++; } }});
+
+mock.module('../dist/common/boss_page_guards.js', { namedExports: { installBossPageGuards: async () => { guards++; } }});
 mock.module('../dist/browser/index.js', { namedExports: { RESUME_PREVIEW_OPEN_GAP_MS: { min: 0, max: 0 }, sleepRandom: async () => {} } });
 mock.module('../dist/common/c_resume_capture.js', { namedExports: {
   C_RESUME_IFRAME_SELECTOR: 'iframe[src*="c-resume"]', closeCResumePanel: async () => { throw Error('unexpected panel close'); },
@@ -90,8 +87,7 @@ test('public runner holds the existing lock, installs guards, deduplicates IDs a
   const r = JSON.parse(await runSearchMore(options, true));
   assert.deepEqual(r.candidates.map(c => c.candidateId), ['a', 'b']);
   assert.equal(r.addedCount, 1); assert.equal(r.scrolls, 2); assert.equal(r.stopReason, 'empty-response');
-  assert.equal(f.scrolls(), 2); assert.equal(guards, oldGuards + 1); assert.equal(locked, false);
-  for (const event of ['request', 'response', 'requestfailed']) assert.equal(f.page.listenerCount(event), 0);
+  assert.equal(f.scrolls(), 2); assert.equal(guards, oldGuards + 1); for (const event of ['request', 'response', 'requestfailed']) assert.equal(f.page.listenerCount(event), 0);
 });
 
 test('candidate cap includes starting cards and never scrolls after cap; batched excess is not returned', async () => {
@@ -163,8 +159,7 @@ test('explicit back shares session lock and guards, uses one goBack and verifies
   const f = historyFixture(); const before = guards;
   const r = JSON.parse(await runBack(false, true, f.expected));
   assert.equal(r.steps, 1); assert.equal(r.url, f.expected); assert.equal(f.backs(), 1); assert.equal(f.detached(), 1);
-  assert.equal(guards, before + 1); assert.equal(locked, false);
-});
+  assert.equal(guards, before + 1); });
 
 test('untrusted target, wrong previous entry, same URL, verification page, history races and open panel stop before back', async () => {
   for (const setup of [

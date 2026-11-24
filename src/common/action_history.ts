@@ -1,37 +1,152 @@
-// 跨轮联系/消息回执。固定岗位目录保存，结果未知不能靠新 run 清除。
-import { mkdir, readFile, writeFile, rename, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { getBoundRun } from '../cli/run_state.js';
-type Entry = { attemptId: string; runId: string; cmd: string; id: string; text: string; outcome: 'intent' | 'success' | 'unknown' | 'not-attempted'; at: string };
-function file(): string { const run = getBoundRun(); if (!run) throw new Error('持久动作记录需要运行绑定'); return join(run.ledgerDir, createHash('sha256').update(run.job).digest('hex') + '.actions.json'); }
-async function entries(): Promise<Entry[]> {
-  let value: any;
-  try { value = JSON.parse(await readFile(file(), 'utf8')); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw new Error(`岗位动作记录损坏：${file()}；${String(error)}`); }
-  if (value?.version !== 1 || !Array.isArray(value.entries) || value.entries.some((e: any) => !e || ['attemptId','runId','cmd','id','at'].some(k=>typeof e[k]!=='string'||!e[k]) || typeof e.text!=='string' || !Number.isFinite(Date.parse(e.at)) || !['intent', 'success', 'unknown', 'not-attempted'].includes(e.outcome))) throw new Error(`岗位动作记录结构无效：${file()}`);
-  return value.entries;
-}
-async function append(entry: Entry): Promise<void> {
-  const rows = await entries(); rows.push(entry); const run = getBoundRun()!; await mkdir(run.ledgerDir, { recursive: true });
-  const target = file(), tmp = `${target}.${randomUUID()}.tmp`;
-  await writeFile(tmp, JSON.stringify({ version: 1, entries: rows }, null, 2) + '\n', { flag: 'wx' });
-  try { await rename(tmp, target); } finally { await unlink(tmp).catch(error => { if (error.code !== 'ENOENT') throw error; }); }
-}
-export async function assertActionHistory(cmd: string, id: string, text: string): Promise<void> {
-  const rows = await entries(), last = new Map<string, Entry>(); for (const e of rows) last.set(e.attemptId, e);
-  for (const e of last.values()) {
-    if (e.id !== id) continue;
-    if (e.outcome === 'intent' || e.outcome === 'unknown') throw new Error(`历史动作结果未决：${e.cmd}/${id}，需明确核验，禁止重放`);
-    if (e.outcome === 'success' && e.cmd === cmd && ['greet', 'send'].includes(cmd) && (cmd === 'greet' || e.text === text)) throw new Error(`历史 ${cmd} 已成功，禁止重复：${id}`);
+import { mkdir, open, readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { APP_HOME } from '../config.js';
+import { parseCommandArguments } from '../cli/arguments.js';
+import { readTaskConfig, taskResultsFile, type TaskConfig } from '../cli/task_config.js';
+
+type Outcome = 'intent' | 'success' | 'unknown' | 'not-attempted' | 'failed';
+export type CommandReceipt = {
+  attemptId: string;
+  at: string;
+  command: string;
+  job: string | null;
+  id: string;
+  name: string;
+  text: string;
+  outcome: Outcome;
+  argv: string[];
+  result?: unknown;
+  error?: { name: string; message: string; details?: unknown };
+};
+
+export async function readCommandReceipts(file: string): Promise<CommandReceipt[]> {
+  let source: string;
+  try { source = await readFile(file, 'utf8'); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
+  return source.split(/\r?\n/).filter(line => line.trim()).map((line, index) => {
+    let row: CommandReceipt;
+    try { row = JSON.parse(line); }
+    catch (error) { throw new Error(`结果记录损坏：${file} 第 ${index + 1} 行；${String(error)}`); }
+    if (!row || typeof row.attemptId !== 'string' || !row.attemptId || typeof row.command !== 'string' ||
+        typeof row.id !== 'string' || typeof row.text !== 'string' || !Number.isFinite(Date.parse(row.at)) ||
+        !['intent', 'success', 'unknown', 'not-attempted', 'failed'].includes(row.outcome)) {
+      throw new Error(`结果记录结构无效：${file} 第 ${index + 1} 行`);
+    }
+    return row;
+  });
 }
-export async function beginAction(cmd: string, id: string, text: string): Promise<string> {
-  await assertActionHistory(cmd, id, text); const attemptId = randomUUID();
-  await append({ attemptId, runId: getBoundRun()!.runId, cmd, id, text, outcome: 'intent', at: new Date().toISOString() }); return attemptId;
+
+async function appendReceipt(file: string, receipt: CommandReceipt): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  const handle = await open(file, 'a');
+  try {
+    await handle.writeFile(JSON.stringify(receipt) + '\n', 'utf8');
+    await handle.sync();
+  } finally { await handle.close(); }
 }
-export async function finishAction(attemptId: string, outcome: 'success' | 'unknown' | 'not-attempted'): Promise<void> {
-  const rows = await entries(), entry = [...rows].reverse().find(e => e.attemptId === attemptId);
-  if (!entry) throw new Error(`动作意图不存在：${attemptId}`);
-  await append({ ...entry, outcome, at: new Date().toISOString() });
+
+/** Existing per-job contacts continue to participate in duplicate detection. */
+async function legacyHistory(task: TaskConfig | null): Promise<CommandReceipt[]> {
+  if (!task) return [];
+  const file = join(task.ledgerDir ?? join(APP_HOME, 'ledgers'), createHash('sha256').update(task.job).digest('hex') + '.actions.json');
+  let value: any;
+  try { value = JSON.parse(await readFile(file, 'utf8')); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new Error(`历史动作记录不可读：${file}；${String(error)}`);
+  }
+  if (value?.version !== 1 || !Array.isArray(value.entries)) throw new Error(`历史动作记录结构无效：${file}`);
+  return value.entries.map((entry: any) => {
+    if (!entry || typeof entry.attemptId !== 'string' || typeof entry.cmd !== 'string' ||
+        typeof entry.id !== 'string' || typeof entry.text !== 'string' ||
+        !['intent', 'success', 'unknown', 'not-attempted'].includes(entry.outcome)) {
+      throw new Error(`历史动作记录条目无效：${file}`);
+    }
+    return { ...entry, command: entry.cmd, job: task.job, argv: [], name: '' };
+  });
+}
+
+function latestAttempts(rows: CommandReceipt[]): CommandReceipt[] {
+  const latest = new Map<string, CommandReceipt>();
+  for (const row of rows) latest.set(row.attemptId, row);
+  return [...latest.values()];
+}
+
+function messageText(text: string): string {
+  return text.replace(/\r\n/g, '\n').trim();
+}
+
+export async function withCommandReceipt(argv: string[], execute: () => Promise<string>): Promise<string> {
+  // Credentials must never be copied into a result log.
+  if (argv[0] === '_baidu-keys') return execute();
+  const task = await readTaskConfig();
+  const file = taskResultsFile(task);
+  const { opts, flags, rest, json } = parseCommandArguments(argv);
+  const command = argv[0];
+  const id = opts['candidate-id'] ?? opts['data-id'] ?? '';
+  const text = messageText(opts.text ?? opts.t ?? '');
+  const continuation = command === 'greet' && !flags.has('check') && (flags.has('continue-chat') || flags.has('confirm-contact') ||
+    opts['select-job'] !== undefined || opts['contact-mode'] !== undefined);
+  const contact = command === 'greet' && !flags.has('check') && !continuation;
+  const sending = command === 'send' && !flags.has('check');
+  let history: CommandReceipt[] = [];
+  if (id && (contact || sending || continuation || ['chat', 'check', 'dismiss-contact-notice'].includes(command))) {
+    history = latestAttempts([...(await legacyHistory(task)), ...(await readCommandReceipts(file))]
+      .filter(row => !task || row.job === task.job));
+  }
+  if (id && (contact || sending)) {
+    for (const row of history) {
+      if (row.id !== id || !['greet', 'send'].includes(row.command) ||
+          row.argv?.includes('--check') || row.argv?.includes('--continue-chat')) continue;
+      if (row.outcome === 'intent' || row.outcome === 'unknown') {
+        throw new Error(`历史动作结果未决：${row.command}/${id}；先核验，禁止重放。记录：${file}`);
+      }
+      if (row.outcome === 'success' && row.command === command && (contact || messageText(row.text) === text)) {
+        throw new Error(`历史 ${command} 已成功，禁止重复：${id}；记录：${file}`);
+      }
+    }
+  }
+  const receipt: CommandReceipt = {
+    attemptId: randomUUID(), at: new Date().toISOString(), command, job: task?.job ?? opts.job ?? null,
+    id, name: opts.name ?? rest.join(' '), text, outcome: 'intent', argv,
+  };
+  if (contact || sending || (continuation && !flags.has('continue-chat'))) {
+    await appendReceipt(file, receipt);
+  }
+  let output: string;
+  let result: any;
+  try {
+    output = await execute();
+    result = json ? JSON.parse(output) : output;
+  }
+  catch (error) {
+    const failure = error instanceof Error ? error : new Error(String(error));
+    const outcome = ['SendPreconditionError', 'CliError'].includes(failure.name) ? 'not-attempted' : contact || sending || continuation ? 'unknown' : 'failed';
+    await appendReceipt(file, { ...receipt, at: new Date().toISOString(), outcome,
+      error: { name: failure.name, message: failure.message, ...('details' in failure ? { details: failure.details } : {}) } });
+    throw error;
+  }
+  const confirmedContact = command === 'greet' && ['contact-confirmed', 'already-contacted'].includes(result?.status);
+  const unconfirmedContact = contact && !confirmedContact;
+  const outcome = unconfirmedContact || (continuation && !flags.has('continue-chat') && !confirmedContact) ? 'unknown' : 'success';
+  await appendReceipt(file, { ...receipt, at: new Date().toISOString(), outcome, result });
+  const chatConfirmed = command === 'chat' && ['embedded-opened', 'embedded-already-open'].includes(result?.status) &&
+    result?.identityVerified === true && result?.target?.candidateId === id;
+  const noticeConfirmed = command === 'dismiss-contact-notice' && result?.status === 'contact-notice-dismissed';
+  for (const previous of history) {
+    if (previous.id !== id || !['intent', 'unknown'].includes(previous.outcome)) continue;
+    const contactVerified = previous.command === 'greet' && (confirmedContact || chatConfirmed || noticeConfirmed);
+    const previousJob = previous.argv?.length ? parseCommandArguments(previous.argv).opts.job : undefined;
+    const sendVerified = previous.command === 'send' && command === 'check' && result === true &&
+      opts.state === 'message-visible' && messageText(opts.text ?? '') === messageText(previous.text) &&
+      (previousJob === undefined || opts.job === previousJob);
+    if (contactVerified || sendVerified) {
+      await appendReceipt(file, { ...previous, at: new Date().toISOString(), outcome: 'success', result: { verifiedBy: command, receipt: result } });
+    }
+  }
+  return output;
 }

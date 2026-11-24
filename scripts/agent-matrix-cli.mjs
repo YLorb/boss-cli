@@ -15,7 +15,7 @@ process.env.BOSS_OFFLINE_TEST='1';
 process.env.NODE_OPTIONS=`--import ${pathToFileURL(resolve(root,'scripts/testing/offline-network.mjs')).href}`;
 const deny=()=>{throw Error('OFFLINE_NETWORK_FORBIDDEN');};net.connect=deny;net.createConnection=deny;tls.connect=deny;globalThis.fetch=deny;
 for(const key of ['BOSS_RUN_ID','BOSS_RUN_PERMIT','BOSS_FLOW_STATE','BOSS_PHASE_STATE','BOSS_LEDGER_DIR'])delete process.env[key];
-process.env.BOSS_APP_HOME=join(dir,'runtime');process.env.BOSS_RUNS_DIR=join(dir,'runtime','runs');process.env.BOSS_TASK_CONFIG=join(dir,'task.json');process.env.BOSS_SKILL_DIR=join(dir,'skills','boss-recruitment');
+process.env.BOSS_APP_HOME=join(dir,'runtime');process.env.BOSS_TASK_CONFIG=join(dir,'task.json');process.env.BOSS_SKILL_DIR=join(dir,'skills','boss-recruitment');
 await mkdir(join(dir,'material'),{recursive:true});
 const event=async(type,details={})=>appendFile(join(dir,'events.ndjson'),JSON.stringify({type,...details})+'\n');
 const candidate={name:'模拟甲',candidateId:'id-1',geekId:'id-1',dataId:'id-1',job:fixture.job};
